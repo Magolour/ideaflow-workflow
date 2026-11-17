@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IdeaFlow 编排器 · 多 Agent 接力</title>
+<style>
+  :root {
+    --deep: #153F3A; --teal: #28675B; --teal2: #4D8273; --mint: #DDEAE3;
+    --paper: #F4F6F2; --ink: #18332F; --muted: #5E716B; --line: #CBD9D2;
+    --gold: #D6A756; --danger: #A34D45; --ok: #2F8F6B; --skip: #6C7F86;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: 13px;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--deep); color: #fff;
+  }
+  header h1 { margin: 0; font-family: SimSun, serif; font-size: 17px; letter-spacing: 1px; }
+  header .tag {
+    padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.12);
+    font-size: 11px; letter-spacing: .5px;
+  }
+  header .spacer { flex: 1; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+  .app { display: grid; grid-template-columns: 300px minmax(0,1fr) 320px; gap: 12px; padding: 12px; height: calc(100vh - 52px); }
+  .app > section { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+    box-shadow: 0 1px 2px rgba(96,118,110,.08);
+  }
+  .card h2 {
+    margin: 0 0 8px; font-size: 12px; letter-spacing: 1px; color: var(--teal);
+    text-transform: uppercase;
+  }
+  textarea, input, select {
+    width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px;
+    font-family: inherit; font-size: 12.5px; color: var(--ink); background: #FBFCFA; resize: vertical;
+  }
+  textarea:focus, input:focus { outline: 2px solid var(--mint); border-color: var(--teal2); }
+  button {
+    border: 1px solid var(--teal); background: var(--teal); color: #fff; cursor: pointer;
+    padding: 7px 11px; border-radius: 7px; font-family: inherit; font-size: 12.5px;
+  }
+  button:hover { background: var(--teal2); }
+  button.ghost { background: #fff; color: var(--teal); }
+  button.ghost:hover { background: var(--mint); }
+  button.warn { background: var(--danger); border-color: var(--danger); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 0; }
+  .hint { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .stat { background: var(--mint); border-radius: 8px; padding: 7px 8px; }
+  .stat b { display: block; font-size: 17px; font-family: SimSun, serif; }
+  .stat span { font-size: 10.5px; color: var(--muted); }
+  .bar { height: 6px; background: var(--mint); border-radius: 999px; overflow: hidden; margin-top: 9px; }
+  .bar > i { display: block; height: 100%; background: var(--teal); width: 0; transition: width .3s; }
+  .graph-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  #graph { display: block; min-width: 100%; }
+  .events { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .event { border-left: 3px solid var(--line); padding: 4px 0 4px 8px; font-size: 11.5px; line-height: 1.5; }
+  .event b { color: var(--teal); font-weight: 600; }
+  .event time { color: #93a29c; font-size: 10.5px; margin-right: 5px; }
+  .event[data-tone="ok"] { border-color: var(--ok); }
+  .event[data-tone="warn"] { border-color: var(--gold); }
+  .event[data-tone="bad"] { border-color: var(--danger); }
+  .alert { display: none; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+  .alert.show { display: block; }
+  .alert.bad { background: #FBEAE7; color: #7E322B; border: 1px solid #E7C2BC; }
+  .alert.ok { background: #E7F3EC; color: #1F5F47; border: 1px solid #BFDCCB; }
+  .drawer {
+    position: fixed; inset: 0; background: rgba(21,63,58,.42); display: none;
+    align-items: center; justify-content: center; padding: 24px; z-index: 20;
+  }
+  .drawer.open { display: flex; }
+  .drawer .panel { background: #fff; border-radius: 12px; width: min(720px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
+  .drawer .panel header { background: #fff; color: var(--ink); padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .drawer .panel .body { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+  .drawer .panel footer { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { background: #fff; color: var(--teal); }
+  .tabs button.active { background: var(--teal); color: #fff; }
+  code.json { font-family: Consolas, monospace; }
+  .mono { font-family: Consolas, monospace; font-size: 11.5px; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .gate-node { animation: pulse 1.4s ease-in-out infinite; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IdeaFlow 编排器</h1>
+  <span class="tag">多 Agent 接力</span>
+  <span class="tag mono" id="ver">未启动</span>
+  <span class="spacer"></span>
+  <span class="dot" id="health"></span>
+  <span class="tag" id="healthText">连接中</span>
+</header>
+
+<div class="app">
+  <section>
+    <div class="card">
+      <h2>① 需求输入</h2>
+      <textarea id="req" rows="5" placeholder="用一句话描述项目，例如：做一个聊天小程序，包含登录、会话列表、消息收发和未读提醒"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="btnStart">生成任务并编排</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0">
+        提交后由大模型拆解为任务清单，再自动分析依赖并建图。也可直接粘贴任务 JSON。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>② 人工操作</h2>
+      <div class="row">
+        <button id="btnApprove">放行</button>
+        <button id="btnSkip" class="ghost">跳过</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnReject" class="warn">驳回</button>
+        <button id="btnChange" class="ghost">变更</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnReopen" class="ghost">恢复阻塞</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0" id="gateHint">当前没有等待人工的节点。</p>
+    </div>
+
+    <div class="card">
+      <h2>③ AI 回报</h2>
+      <div class="row">
+        <input id="aiTask" placeholder="task_id，如 T7" />
+        <select id="aiResult">
+          <option value="done">完成 done</option>
+          <option value="failed">失败 failed</option>
+        </select>
+      </div>
+      <input id="aiDetail" style="margin-top:8px" placeholder="执行说明，可留空" />
+      <div class="row" style="margin-top:8px">
+        <button id="btnAiReport">提交 AI 回报</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0" id="aiHint">当前没有 running 的 AI 任务。</p>
+    </div>
+
+    <div class="card" style="flex:1; display:flex; flex-direction:column">
+      <h2>状态</h2>
+      <div class="stats">
+        <div class="stat"><b id="sTotal">0</b><span>总任务</span></div>
+        <div class="stat"><b id="sDone">0</b><span>已完成</span></div>
+        <div class="stat"><b id="sRunning">0</b><span>执行中</span></div>
+        <div class="stat"><b id="sPending">0</b><span>待开始</span></div>
+        <div class="stat"><b id="sBlocked">0</b><span>阻塞</span></div>
+        <div class="stat"><b id="sSkipped">0</b><span>跳过</span></div>
+      </div>
+      <div class="bar"><i id="progressBar"></i></div>
+      <p class="hint" id="analysis" style="margin-top:8px"></p>
+      <div class="alert" id="alert"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="graph-wrap">
+      <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </section>
+
+  <section>
+    <div class="card" style="flex:1; display:flex; flex-direction:column; min-height:0">
+      <h2>实时事件流</h2>
+      <div class="events" id="events"></div>
+    </div>
+  </section>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="panel">
+    <header>
+      <strong>变更工作流</strong>
+      <div class="hint" style="margin-top:4px">变更基于当前工作流增量处理，不会重新读取上传原文。</div>
+    </header>
+    <div class="body">
+      <div class="tabs">
+        <button id="tabText" class="active">自然语言变更</button>
+        <button id="tabJson">手动修改任务 / 依赖</button>
+      </div>
+      <div id="paneText">
+        <textarea id="changeText" rows="4" placeholder="例如：新增消息撤回能力，并补充联调测试"></textarea>
+      </div>
+      <div id="paneJson" style="display:none">
+        <p class="hint" style="margin:0 0 6px">
+          直接改下面 JSON 的 tasks / edges，提交后服务会校验依赖端点、自依赖和环，再重算并行组与执行顺序。
+          已终态任务不会被删除。
+        </p>
+        <textarea id="changeJson" class="json" rows="18" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <footer>
+      <button class="ghost" id="btnCancel">取消</button>
+      <button id="btnSubmitChange">提交变更</button>
+    </footer>
+  </div>
+</div>
+
+<div class="drawer" id="reasonBox">
+  <div class="panel" style="width:min(460px,100%)">
+    <header>
+      <strong id="reasonTitle">填写理由</strong>
+      <div class="hint" style="margin-top:4px" id="reasonHint">理由为必填项。</div>
+    </header>
+    <div class="body">
+      <textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea>
+    </div>
+    <footer>
+      <button class="ghost" id="reasonCancel">取消</button>
+      <button id="reasonOk">确认</button>
+    </footer>
+  </div>
+</div>
+
+<script>
+const STATUS_COLOR = {
+  done: "#2F8F6B", running: "#D6A756", pending: "#8FA39C",
+  blocked: "#A34D45", failed: "#A34D45", skipped: "#6C7F86"
+};
+// 直接双击打开本文件时（file://），请求指向本机服务；由服务托管时用同源相对路径
+const API = location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
+let cursor = 0, state = null, busy = false;
+
+const $ = id => document.getElementById(id);
+
+function notify(message, ok) {
+  const box = $("alert");
+  box.textContent = message;
+  box.className = "alert show " + (ok ? "ok" : "bad");
+  clearTimeout(notify.timer);
+  notify.timer = setTimeout(() => box.classList.remove("show"), 6000);
+}
+
+async function api(path, options) {
+  const response = await fetch(API + path, options);
+  const text = await response.text();
+  let body;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text }; }
+  if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
+  return body;
+}
+
+function post(path, data) {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(data)
+  });
+}
+
+async function startRun() {
+  const text = $("req").value.trim();
+  if (!text) return notify("请先输入需求");
+  if (busy) return;
+  busy = true;
+  try {
+    let payload;
+    try {
+      payload = text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : { requirement: text };
+    } catch {
+      throw new Error("粘贴的内容不是合法 JSON");
+    }
+    const result = await post("/api/start", payload);
+    cursor = 0;
+    $("events").innerHTML = "";
+    notify("已接受，共 " + result.progress.total + " 个任务，开始编排", true);
+    await tick();
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    busy = false;
+  }
+}
+
+async function sendEvent(packet) {
+  if (busy) return;
+  busy = true;
+  try {
+    await post("/api/events", packet);
+    await tick();
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    busy = false;
+  }
+}
+
+function humanOp(action, reason) {
+  const packet = { type: "human_op", action, operator: "web", priority: "high" };
+  if (reason) packet.reason = reason;
+  return sendEvent(packet);
+}
+
+function eventTone(action) {
+  if (/fail|block|reject|retried/.test(action)) return "bad";
+  if (/gate|dispatched|change|replan|requirement/.test(action)) return "warn";
+  if (/done|built|confirmed|applied/.test(action)) return "ok";
+  return "";
+}
+
+function appendEvents(events) {
+  const list = $("events");
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  events.forEach(event => {
+    const node = document.createElement("div");
+    node.className = "event";
+    node.dataset.tone = eventTone(event.action);
+    node.innerHTML = '<time>' + event.ts.slice(11) + '</time><b>' + event.action +
+      "</b><br>" + event.detail;
+    list.appendChild(node);
+  });
+  if (atBottom) list.scrollTop = list.scrollHeight;
+}
+
+function renderStats() {
+  $("sTotal").textContent = state.total;
+  $("sDone").textContent = state.done;
+  $("sRunning").textContent = state.running;
+  $("sPending").textContent = state.pending;
+  $("sBlocked").textContent = state.blocked + state.failed;
+  $("sSkipped").textContent = state.skipped;
+  $("progressBar").style.width = state.percent + "%";
+  $("ver").textContent = state.graph_id + " · " + state.status;
+  $("analysis").textContent = state.analysis || "";
+  const gate = state.waiting_on;
+  $("gateHint").textContent = gate
+    ? "等待人工：" + gate.object_id + "（" + gate.since.slice(11) + " 进入）"
+    : "当前没有等待人工的节点。";
+  ["btnApprove", "btnSkip", "btnReject"].forEach(id => { $(id).disabled = !gate; });
+
+  const blockedIds = (state.tasks || [])
+    .filter(task => task.status === "blocked" || task.status === "failed")
+    .map(task => task.task_id);
+  $("btnReopen").disabled = blockedIds.length === 0;
+  $("btnReopen").textContent = blockedIds.length
+    ? "恢复阻塞 (" + blockedIds.length + ")" : "恢复阻塞";
+
+  const running = (state.tasks || []).filter(task => task.status === "running");
+  $("btnAiReport").disabled = running.length === 0;
+  $("aiHint").textContent = running.length
+    ? "可回报：" + running.map(task => task.task_id + " " + task.name).join("、")
+    : "当前没有 running 的 AI 任务。";
+  if (running.length && !running.some(task => task.task_id === $("aiTask").value.trim())) {
+    $("aiTask").value = running[0].task_id;
+  }
+}
+
+function layout() {
+  const layers = state.layers || [];
+  const widest = Math.max(1, ...layers.map(layer => layer.length));
+  const positions = {};
+  layers.forEach((layer, li) => layer.forEach((taskId, ri) => {
+    const offset = (widest - layer.length) / 2;
+    positions[taskId] = { x: 36 + li * 214, y: 36 + (ri + offset) * 92 };
+  }));
+  return { positions, widest };
+}
+
+function renderGraph() {
+  const svg = $("graph");
+  const tasks = new Map((state.tasks || []).map(task => [task.task_id, task]));
+  const { positions, widest } = layout();
+  const width = 72 + Math.max(1, (state.layers || []).length) * 214;
+  const height = 72 + widest * 92;
+  svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", height);
+  svg.innerHTML = "";
+
+  const ns = "http://www.w3.org/2000/svg";
+  const make = (tag, attrs) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => node.setAttribute(key, value));
+    return node;
+  };
+
+  const defs = make("defs");
+  const marker = make("marker", {
+    id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse"
+  });
+  marker.appendChild(make("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#A9B7B1" }));
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  (state.edges || []).forEach(edge => {
+    const from = positions[edge.from], to = positions[edge.to];
+    if (!from || !to) return;
+    const x1 = from.x + 132, y1 = from.y + 29, x2 = to.x, y2 = to.y + 29;
+    const mid = (x1 + x2) / 2;
+    svg.appendChild(make("path", {
+      d: "M " + x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + x2 + " " + y2,
+      fill: "none", stroke: edge.type === "data" ? "#9B8BD6" : "#A9B7B1",
+      "stroke-width": 1.6, "stroke-dasharray": edge.type === "data" ? "5 4" : "",
+      "marker-end": "url(#arrow)"
+    }));
+  });
+
+  (state.layers || []).forEach((layer, li) => {
+    const label = make("text", {
+      x: 36 + li * 214, y: 20, "font-size": 11, fill: "#8b9a94", "letter-spacing": 1
+    });
+    label.textContent = "第 " + (li + 1) + " 层";
+    svg.appendChild(label);
+  });
+
+  Object.entries(positions).forEach(([taskId, point]) => {
+    const task = tasks.get(taskId);
+    if (!task) return;
+    const color = STATUS_COLOR[task.status] || "#8FA39C";
+    const isGate = state.waiting_on && state.waiting_on.object_id === taskId;
+    const group = make("g", { transform: "translate(" + point.x + "," + point.y + ")" });
+    if (isGate) group.setAttribute("class", "gate-node");
+
+    group.appendChild(make("rect", {
+      width: 132, height: 58, rx: 9, fill: "#fff",
+      stroke: isGate ? "#D6A756" : color, "stroke-width": isGate ? 2.6 : 1.6
+    }));
+    group.appendChild(make("rect", { width: 5, height: 58, rx: 2.5, fill: color }));
+    const id = make("text", { x: 14, y: 20, "font-size": 12, "font-weight": 700, fill: "#18332F" });
+    id.textContent = taskId;
+    group.appendChild(id);
+    const name = make("text", { x: 14, y: 36, "font-size": 10.5, fill: "#5E716B" });
+    name.textContent = (task.name || "").slice(0, 12);
+    group.appendChild(name);
+    const tag = make("text", { x: 14, y: 50, "font-size": 9.5, fill: color });
+    tag.textContent = task.status + " · " + task.suggested_role;
+    group.appendChild(tag);
+    group.appendChild(make("title", {})).textContent =
+      taskId + " " + task.name + "\n交付物：" + (task.deliverable || "未填写");
+    svg.appendChild(group);
+  });
+}
+
+async function tick() {
+  try {
+    const data = await api("/api/progress?since=" + cursor + "&limit=200");
+    state = data;
+    if (data.event_log) {
+      appendEvents(data.event_log);
+      cursor = data.next_since;
+    }
+    renderStats();
+    renderGraph();
+    $("healthText").textContent = data.status;
+    if (data.last_error) notify("服务处理失败：" + data.last_error);
+  } catch (error) {
+    $("healthText").textContent = "未连接";
+  }
+}
+
+function graphJson() {
+  return JSON.stringify({
+    tasks: (state.tasks || []).map(task => ({
+      task_id: task.task_id, name: task.name, deliverable: task.deliverable,
+      acceptance_items: task.acceptance_items,
+      suggested_role: task.suggested_role, priority: task.priority
+    })),
+    edges: (state.edges || []).map(edge => ({
+      from: edge.from, to: edge.to, type: edge.type, reason: edge.reason || ""
+    }))
+  }, null, 2);
+}
+
+let mode = "text";
+function setMode(next) {
+  mode = next;
+  $("tabText").classList.toggle("active", next === "text");
+  $("tabJson").classList.toggle("active", next === "json");
+  $("paneText").style.display = next === "text" ? "" : "none";
+  $("paneJson").style.display = next === "json" ? "" : "none";
+  if (next === "json") $("changeJson").value = graphJson();
+}
+
+async function submitChange() {
+  if (!state || !state.total) return notify("请先完成一次编排");
+  const changeId = "CR-" + Date.now();
+  try {
+    if (mode === "text") {
+      const summary = $("changeText").value.trim();
+      if (!summary) return notify("请填写变更说明");
+      await post("/api/events", {
+        type: "change", change_id: changeId, change_type: "task",
+        summary, priority: "high"
+      });
+    } else {
+      const graph = JSON.parse($("changeJson").value);
+      if (!Array.isArray(graph.tasks) || !Array.isArray(graph.edges)) {
+        throw new Error("JSON 必须包含 tasks 和 edges 数组");
+      }
+      await post("/api/events", {
+        type: "change", change_id: changeId, change_type: "task",
+        summary: $("changeText").value.trim() || "人工调整任务与依赖",
+        tasks: graph.tasks, edges: graph.edges, priority: "high"
+      });
+    }
+    $("drawer").classList.remove("open");
+    notify("变更已提交，等待后台重算", true);
+    await tick();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+$("btnStart").addEventListener("click", startRun);
+$("btnAiReport").addEventListener("click", async () => {
+  const taskId = $("aiTask").value.trim();
+  if (!taskId) return notify("请填写 task_id");
+  await sendEvent({
+    type: "ai_report", task_id: taskId, result: $("aiResult").value,
+    detail: $("aiDetail").value.trim() || "执行完成", priority: "high"
+  });
+  notify("AI 回报已提交：" + taskId, true);
+});
+$("btnApprove").addEventListener("click", () => humanOp("approve"));
+$("btnSkip").addEventListener("click", () => askReason("skip"));
+$("btnReject").addEventListener("click", () => askReason("reject"));
+$("btnChange").addEventListener("click", () => {
+  if (!state || !state.total) return notify("请先完成一次编排");
+  setMode("text");
+  $("changeText").value = "";
+  $("drawer").classList.add("open");
+});
+$("btnCancel").addEventListener("click", () => $("drawer").classList.remove("open"));
+$("btnSubmitChange").addEventListener("click", submitChange);
+$("tabText").addEventListener("click", () => setMode("text"));
+$("tabJson").addEventListener("click", () => setMode("json"));
+
+let dialogCallback = null, dialogNeedsReason = false;
+function openDialog(title, hint, needReason, callback) {
+  dialogNeedsReason = needReason;
+  dialogCallback = callback;
+  $("reasonTitle").textContent = title;
+  $("reasonHint").textContent = hint;
+  $("reasonText").style.display = needReason ? "" : "none";
+  $("reasonText").value = "";
+  $("reasonBox").classList.add("open");
+  if (needReason) $("reasonText").focus();
+}
+
+function askReason(action) {
+  if (!state || !state.waiting_on) return notify("当前没有等待人工的节点");
+  openDialog(
+    action === "skip" ? "跳过当前节点" : "驳回当前节点",
+    action === "skip"
+      ? "跳过会结束该任务，后续依赖它的任务将不再推进。"
+      : "驳回会把该任务及其下游未开始任务一并置为 blocked。",
+    true,
+    value => humanOp(action, value)
+  );
+}
+
+$("btnReopen").addEventListener("click", () => {
+  const ids = (state.tasks || [])
+    .filter(task => task.status === "blocked" || task.status === "failed")
+    .map(task => task.task_id);
+  if (!ids.length) return notify("没有可恢复的任务");
+  openDialog(
+    "恢复被阻塞任务",
+    "将 " + ids.join("、") + " 重置为 pending 并重新调度；已完成任务不受影响。",
+    false,
+    async () => {
+      await sendEvent({
+        type: "change", change_id: "CR-REOPEN-" + Date.now(), change_type: "task",
+        reopen: ids, summary: "人工恢复被阻塞任务", priority: "high"
+      });
+      notify("恢复已提交，共 " + ids.length + " 个任务", true);
+    }
+  );
+});
+
+$("reasonCancel").addEventListener("click", () => $("reasonBox").classList.remove("open"));
+$("reasonOk").addEventListener("click", () => {
+  const value = $("reasonText").value.trim();
+  if (dialogNeedsReason && !value) return notify("理由不能为空");
+  const callback = dialogCallback;
+  $("reasonBox").classList.remove("open");
+  dialogCallback = null;
+  if (callback) callback(value);
+});
+
+tick();
+setInterval(tick, 1500);
+</script>
+</body>
+</html>

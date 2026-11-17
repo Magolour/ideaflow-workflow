@@ -1,0 +1,15 @@
+name: Basic checks
+on: [push, pull_request]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check Python syntax and JSON fixtures
+        run: |
+          python -m py_compile modules/orchestrator/python/agent.py
+          python -m json.tool modules/orchestrator/json/test_tasks.json > /dev/null
+          python -m json.tool modules/orchestrator/json/contract_package_v1.1.json > /dev/null

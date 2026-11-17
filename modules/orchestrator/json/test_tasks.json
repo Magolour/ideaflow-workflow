@@ -1,0 +1,240 @@
+{
+  "schema_version": "1.1",
+  "spec_id": "SPEC-2026-002",
+  "spec_version": "v1.0",
+  "list_version": "v1.0",
+  "review_status": "approved",
+  "generated_by": "decomposer",
+  "created_at": "2026-11-14T15:40:00",
+  "note": "聊天小程序（微信小程序 + 即时通讯）任务清单，结构仿照契约包 task_list_approved_v1.2；status/attempts 为只读初始值",
+  "tasks": [
+    {
+      "task_id": "T1",
+      "name": "需求梳理与接口契约设计",
+      "description": "梳理登录、会话、消息、通知四组功能，产出前后端共用的接口契约与页面流程",
+      "deliverable": "接口契约文档与页面流程",
+      "acceptance_items": [
+        "覆盖登录鉴权、会话列表、消息收发、通知四组接口",
+        "每个接口含请求与响应字段定义"
+      ],
+      "suggested_role": "ai+human",
+      "priority": "high",
+      "estimate_days": 2.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-01", "F-02", "F-03", "F-04"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T2",
+      "name": "小程序工程骨架与公共组件",
+      "description": "搭建小程序工程结构、路由、请求封装、状态管理与通用 UI 组件",
+      "deliverable": "小程序工程骨架",
+      "acceptance_items": [
+        "工程可在开发者工具中编译运行",
+        "请求封装与通用组件可被页面复用"
+      ],
+      "suggested_role": "ai",
+      "priority": "high",
+      "estimate_days": 2.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-01"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T3",
+      "name": "登录鉴权与会话建立",
+      "description": "接入微信登录，换取业务 Token，建立用户会话与在线状态",
+      "deliverable": "登录鉴权服务",
+      "acceptance_items": [
+        "微信登录可换取有效 Token",
+        "Token 过期可自动刷新"
+      ],
+      "suggested_role": "ai+human",
+      "priority": "high",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-01"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T4",
+      "name": "数据模型与消息存储表",
+      "description": "设计用户、会话、消息、已读回执四类表结构，编写可重复执行的建表脚本",
+      "deliverable": "建表脚本",
+      "acceptance_items": [
+        "用户、会话、消息、已读回执四张主表",
+        "脚本可重复执行不报错"
+      ],
+      "suggested_role": "human",
+      "priority": "high",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-02", "F-03"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T5",
+      "name": "会话列表与联系人页",
+      "description": "实现会话列表、最后一条消息摘要、未读数与联系人选择页",
+      "deliverable": "会话与联系人页面",
+      "acceptance_items": [
+        "会话列表按最后消息时间倒序",
+        "未读数展示正确且可清零"
+      ],
+      "suggested_role": "ai",
+      "priority": "high",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-02"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T6",
+      "name": "消息收发长连接服务",
+      "description": "实现 WebSocket 长连接、消息路由、在线状态与断线重连",
+      "deliverable": "消息网关服务",
+      "acceptance_items": [
+        "双端在线时消息秒级送达",
+        "断线后自动重连并补拉丢失消息"
+      ],
+      "suggested_role": "ai+human",
+      "priority": "high",
+      "estimate_days": 5.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-03"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T7",
+      "name": "聊天详情页与消息气泡",
+      "description": "实现聊天页消息气泡、时间分组、输入框、发送状态与滚动定位",
+      "deliverable": "聊天详情页",
+      "acceptance_items": [
+        "文本消息可发送并即时上屏",
+        "历史消息滚动加载不跳位"
+      ],
+      "suggested_role": "ai",
+      "priority": "high",
+      "estimate_days": 4.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-03"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T8",
+      "name": "图片与语音消息",
+      "description": "实现图片选择上传、语音录制播放与消息附件展示",
+      "deliverable": "富媒体消息能力",
+      "acceptance_items": [
+        "图片消息可上传并预览",
+        "语音消息可录制、播放且时长正确"
+      ],
+      "suggested_role": "ai",
+      "priority": "medium",
+      "estimate_days": 4.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-04"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T9",
+      "name": "消息本地存储与离线拉取",
+      "description": "消息落本地缓存，冷启动与弱网时先展示缓存再增量同步",
+      "deliverable": "本地消息缓存模块",
+      "acceptance_items": [
+        "冷启动可立即展示最近 100 条消息",
+        "离线期间消息在恢复网络后自动补齐"
+      ],
+      "suggested_role": "ai",
+      "priority": "medium",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-03"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T10",
+      "name": "未读提醒与订阅消息",
+      "description": "接入订阅消息，实现离线未读提醒与点击跳转到对应会话",
+      "deliverable": "消息提醒能力",
+      "acceptance_items": [
+        "离线收到消息可触发订阅消息提醒",
+        "点击提醒可直达对应会话"
+      ],
+      "suggested_role": "ai+human",
+      "priority": "medium",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-04"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T11",
+      "name": "联调与弱网异常测试",
+      "description": "双端联调消息收发、断网重连、重复消息去重与弱网场景验证",
+      "deliverable": "联调测试报告",
+      "acceptance_items": [
+        "弱网与断网场景按预期降级",
+        "重复消息与乱序消息可正确去重排序"
+      ],
+      "suggested_role": "human",
+      "priority": "high",
+      "estimate_days": 3.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-03", "F-04"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    },
+    {
+      "task_id": "T12",
+      "name": "体验优化与提审发布",
+      "description": "补齐加载态与空态、性能优化，整理提审材料并提交小程序审核",
+      "deliverable": "提审版本",
+      "acceptance_items": [
+        "主要页面无白屏与明显卡顿",
+        "提审材料齐全并提交成功"
+      ],
+      "suggested_role": "ai+human",
+      "priority": "medium",
+      "estimate_days": 2.0,
+      "status": "pending",
+      "source": "ai",
+      "spec_refs": ["F-01", "F-04"],
+      "attempts": 0,
+      "split_from": null,
+      "review_reason": null
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv/
+**/__pycache__/
+*.pyc
+**/output/
+**/.screenshots/
+**/uploaded_tasks.json
+*.log
+*.zip
+.DS_Store

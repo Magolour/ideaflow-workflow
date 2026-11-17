@@ -1,0 +1,1295 @@
+{
+  "schema_version": "1.1",
+  "note": "接口契约包：每个模块只消费自己负责的键，结构与单独文件完全一致，可随时拆出；字段名与枚举值不许私自改，要加字段先在群里同步",
+  "task_list_draft_v1.0": {
+    "schema_version": "1.1",
+    "spec_id": "SPEC-2026-001",
+    "spec_version": "v1.0",
+    "list_version": "v1.0",
+    "review_status": "draft",
+    "generated_by": "decomposer",
+    "created_at": "2026-11-20T10:01:30",
+    "tasks": [
+      {
+        "task_id": "T1",
+        "name": "需求梳理与接口契约设计",
+        "description": "梳理规格中的功能条目，产出前后端共用的接口契约文档",
+        "deliverable": "接口契约文档",
+        "acceptance_items": [
+          "覆盖注册登录、发布、搜索、下单四组接口",
+          "每个接口含请求与响应字段定义"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T2",
+        "name": "数据模型与建库脚本",
+        "description": "按接口契约设计数据库表结构，编写可重复执行的建表脚本",
+        "deliverable": "建表脚本",
+        "acceptance_items": [
+          "用户、图书、订单三张主表",
+          "脚本可重复执行不报错"
+        ],
+        "suggested_role": "human",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T3",
+        "name": "用户注册登录模块",
+        "description": "实现注册与登录 API，含密码加密存储",
+        "deliverable": "用户服务",
+        "acceptance_items": [
+          "注册登录 API 可调用",
+          "密码加密存储"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T4",
+        "name": "图书发布与浏览模块",
+        "description": "实现图书发布、编辑、上下架与列表接口，图片存本地",
+        "deliverable": "图书服务",
+        "acceptance_items": [
+          "发布、编辑、上下架、列表接口可用",
+          "图片存本地可访问"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T5",
+        "name": "搜索与下单模块",
+        "description": "实现关键词搜索与下单，下单生成意向单，不接入真实支付",
+        "deliverable": "搜索下单服务",
+        "acceptance_items": [
+          "关键词搜索有结果",
+          "下单生成意向单，不涉真实支付"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T6",
+        "name": "UI 设计稿与前端框架搭建",
+        "description": "完成主要页面设计稿，搭建前端路由与组件骨架",
+        "deliverable": "设计稿与前端骨架",
+        "acceptance_items": [
+          "页面走查通过",
+          "路由与组件结构就绪"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02",
+          "F-03"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T7",
+        "name": "前端页面开发",
+        "description": "开发四组页面组件并对接真实后端接口",
+        "deliverable": "页面组件集",
+        "acceptance_items": [
+          "四组页面对接真实后端接口",
+          "主要交互无报错"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 5.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T8",
+        "name": "前后端联调",
+        "description": "前后端全流程联调，清零阻塞级缺陷",
+        "deliverable": "联调问题清零记录",
+        "acceptance_items": [
+          "全流程走通",
+          "无阻塞级缺陷"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T9",
+        "name": "端到端验收与部署脚本",
+        "description": "编写一键启动脚本并按验收清单做端到端验收",
+        "deliverable": "一键启动脚本与验收清单",
+        "acceptance_items": [
+          "全新环境一键启动",
+          "验收清单全部通过"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T10",
+        "name": "使用说明与演示脚本文档",
+        "description": "编写 README 使用说明与演示脚本",
+        "deliverable": "README 使用说明",
+        "acceptance_items": [
+          "按文档可独立完成一次完整演示"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "medium",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T11",
+        "name": "种子数据准备",
+        "description": "编写种子数据脚本，插入示例图书与订单",
+        "deliverable": "种子数据脚本",
+        "acceptance_items": [
+          "50 条以上示例图书与订单",
+          "数据符合联调确认过的接口形态"
+        ],
+        "suggested_role": "ai",
+        "priority": "medium",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T12",
+        "name": "缺陷修复与收尾",
+        "description": "修复验收发现的缺陷并完成收尾",
+        "deliverable": "修复清单",
+        "acceptance_items": [
+          "验收发现的缺陷全部关闭"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "medium",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      }
+    ],
+    "dependency_candidates": [
+      {
+        "from": "T1",
+        "to": "T2",
+        "type": "force",
+        "reason": "建库脚本的输入引用接口契约文档"
+      },
+      {
+        "from": "T2",
+        "to": "T3",
+        "type": "force",
+        "reason": "用户模块依赖表结构"
+      },
+      {
+        "from": "T3",
+        "to": "T4",
+        "type": "force",
+        "reason": "图书发布需登录态"
+      },
+      {
+        "from": "T4",
+        "to": "T5",
+        "type": "force",
+        "reason": "搜索下单的对象是已发布图书"
+      },
+      {
+        "from": "T6",
+        "to": "T7",
+        "type": "force",
+        "reason": "前端页面必须在骨架上开发"
+      },
+      {
+        "from": "T5",
+        "to": "T7",
+        "type": "force",
+        "reason": "前端页面必须接通后端真实接口"
+      },
+      {
+        "from": "T7",
+        "to": "T8",
+        "type": "force",
+        "reason": "联调的输入是页面组件集"
+      },
+      {
+        "from": "T8",
+        "to": "T9",
+        "type": "force",
+        "reason": "验收在联调清零后进行"
+      },
+      {
+        "from": "T9",
+        "to": "T10",
+        "type": "force",
+        "reason": "使用说明基于验收通过的一键启动脚本"
+      },
+      {
+        "from": "T9",
+        "to": "T11",
+        "type": "force",
+        "reason": "种子数据脚本随一键启动打包"
+      },
+      {
+        "from": "T8",
+        "to": "T11",
+        "type": "data",
+        "reason": "种子数据要按联调确认过的接口形态造数"
+      },
+      {
+        "from": "T9",
+        "to": "T12",
+        "type": "force",
+        "reason": "修复对象是验收发现的缺陷"
+      },
+      {
+        "from": "T11",
+        "to": "T12",
+        "type": "force",
+        "reason": "收尾验证需要种子数据就位"
+      },
+      {
+        "from": "T2",
+        "to": "T7",
+        "type": "resource",
+        "reason": "两任务由同一后端角色承担且工期重叠，AI 提出的资源共享候选"
+      }
+    ]
+  },
+  "task_list_approved_v1.2": {
+    "schema_version": "1.1",
+    "spec_id": "SPEC-2026-001",
+    "spec_version": "v1.0",
+    "list_version": "v1.2",
+    "review_status": "approved",
+    "generated_by": "decomposer",
+    "created_at": "2026-11-20T10:03:55",
+    "tasks": [
+      {
+        "task_id": "T1",
+        "name": "需求梳理与接口契约设计",
+        "description": "梳理规格中的功能条目，产出前后端共用的接口契约文档",
+        "deliverable": "接口契约文档",
+        "acceptance_items": [
+          "覆盖注册登录、发布、搜索、下单四组接口",
+          "每个接口含请求与响应字段定义"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T2",
+        "name": "数据模型与建库脚本",
+        "description": "按接口契约设计数据库表结构，编写可重复执行的建表脚本",
+        "deliverable": "建表脚本",
+        "acceptance_items": [
+          "用户、图书、订单三张主表",
+          "脚本可重复执行不报错"
+        ],
+        "suggested_role": "human",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T3",
+        "name": "用户注册登录模块",
+        "description": "实现注册与登录 API，含密码加密存储",
+        "deliverable": "用户服务",
+        "acceptance_items": [
+          "注册登录 API 可调用",
+          "密码加密存储"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": "粒度过细：审核合并去重——曾考虑把『与图书服务连通』并入 T3 验收，但连通性属 T4 交付物范围，合并会使 T3 永远无法验收通过；经审核维持原验收条件，合并去重决策留痕于此"
+      },
+      {
+        "task_id": "T4",
+        "name": "图书发布与浏览模块",
+        "description": "实现图书发布、编辑、上下架与列表接口，图片存本地",
+        "deliverable": "图书服务",
+        "acceptance_items": [
+          "发布、编辑、上下架、列表接口可用",
+          "图片存本地可访问"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T5",
+        "name": "搜索与下单模块",
+        "description": "实现关键词搜索与下单，下单生成意向单，不接入真实支付",
+        "deliverable": "搜索下单服务",
+        "acceptance_items": [
+          "关键词搜索有结果",
+          "下单生成意向单，不涉真实支付"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T6",
+        "name": "UI 设计稿与前端框架搭建",
+        "description": "完成主要页面设计稿，搭建前端路由与组件骨架",
+        "deliverable": "设计稿与前端骨架",
+        "acceptance_items": [
+          "页面走查通过",
+          "路由与组件结构就绪"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02",
+          "F-03"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T7",
+        "name": "前端页面开发",
+        "description": "开发四组页面组件并对接真实后端接口",
+        "deliverable": "页面组件集",
+        "acceptance_items": [
+          "四组页面对接真实后端接口",
+          "主要交互无报错"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 5.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T8",
+        "name": "前后端联调",
+        "description": "前后端全流程联调，清零阻塞级缺陷",
+        "deliverable": "联调问题清零记录",
+        "acceptance_items": [
+          "全流程走通",
+          "无阻塞级缺陷"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "high",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T9",
+        "name": "端到端验收与部署脚本",
+        "description": "编写一键启动脚本并按验收清单做端到端验收",
+        "deliverable": "一键启动脚本与验收清单",
+        "acceptance_items": [
+          "全新环境一键启动",
+          "验收清单全部通过"
+        ],
+        "suggested_role": "ai",
+        "priority": "high",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-01",
+          "F-02",
+          "F-03",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T10",
+        "name": "使用说明与演示脚本文档",
+        "description": "编写 README 使用说明与演示脚本",
+        "deliverable": "README 使用说明",
+        "acceptance_items": [
+          "使用说明覆盖安装、启动、演示三步",
+          "新手按文档 15 分钟内完成首次演示",
+          "常见问题 FAQ 不少于 5 条"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "medium",
+        "estimate_days": 4.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": "粒度过粗：验收条件 1 条拆 3 条，工期 2.0→4.0"
+      },
+      {
+        "task_id": "T11",
+        "name": "种子数据准备",
+        "description": "编写种子数据脚本，插入示例图书与订单",
+        "deliverable": "种子数据脚本",
+        "acceptance_items": [
+          "50 条以上示例图书与订单",
+          "数据符合联调确认过的接口形态"
+        ],
+        "suggested_role": "ai",
+        "priority": "medium",
+        "estimate_days": 2.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [
+          "F-02",
+          "F-04"
+        ],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      },
+      {
+        "task_id": "T12",
+        "name": "缺陷修复与收尾",
+        "description": "修复验收发现的缺陷并完成收尾",
+        "deliverable": "修复清单",
+        "acceptance_items": [
+          "验收发现的缺陷全部关闭"
+        ],
+        "suggested_role": "ai+human",
+        "priority": "medium",
+        "estimate_days": 3.0,
+        "status": "pending",
+        "source": "ai",
+        "spec_refs": [],
+        "attempts": 0,
+        "split_from": null,
+        "review_reason": null
+      }
+    ],
+    "dependency_candidates": [
+      {
+        "from": "T1",
+        "to": "T2",
+        "type": "force",
+        "reason": "建库脚本的输入引用接口契约文档"
+      },
+      {
+        "from": "T2",
+        "to": "T3",
+        "type": "force",
+        "reason": "用户模块依赖表结构"
+      },
+      {
+        "from": "T3",
+        "to": "T4",
+        "type": "force",
+        "reason": "图书发布需登录态"
+      },
+      {
+        "from": "T4",
+        "to": "T5",
+        "type": "force",
+        "reason": "搜索下单的对象是已发布图书"
+      },
+      {
+        "from": "T6",
+        "to": "T7",
+        "type": "force",
+        "reason": "前端页面必须在骨架上开发"
+      },
+      {
+        "from": "T5",
+        "to": "T7",
+        "type": "force",
+        "reason": "前端页面必须接通后端真实接口"
+      },
+      {
+        "from": "T7",
+        "to": "T8",
+        "type": "force",
+        "reason": "联调的输入是页面组件集"
+      },
+      {
+        "from": "T8",
+        "to": "T9",
+        "type": "force",
+        "reason": "验收在联调清零后进行"
+      },
+      {
+        "from": "T9",
+        "to": "T10",
+        "type": "force",
+        "reason": "使用说明基于验收通过的一键启动脚本"
+      },
+      {
+        "from": "T9",
+        "to": "T11",
+        "type": "force",
+        "reason": "种子数据脚本随一键启动打包"
+      },
+      {
+        "from": "T8",
+        "to": "T11",
+        "type": "data",
+        "reason": "种子数据要按联调确认过的接口形态造数"
+      },
+      {
+        "from": "T9",
+        "to": "T12",
+        "type": "force",
+        "reason": "修复对象是验收发现的缺陷"
+      },
+      {
+        "from": "T11",
+        "to": "T12",
+        "type": "force",
+        "reason": "收尾验证需要种子数据就位"
+      },
+      {
+        "from": "T2",
+        "to": "T7",
+        "type": "resource",
+        "reason": "两任务由同一后端角色承担且工期重叠，AI 提出的资源共享候选"
+      }
+    ],
+    "note": "审核后生效快照。与 v1.0 的差异仅两处：T10 改拆（验收条件 1 条拆 3 条、工期 2.0→4.0）、T3 审核合并决策留痕（review_reason 说明去重理由，验收条件维持原样不变，避免引入 T4 交付物导致 T3 无法验收）；其余任务不变。审核过程留痕见事件流 seq 8～10"
+  },
+  "task_graph_v1.0": {
+    "schema_version": "1.1",
+    "note": "graph_builder 以本依赖图的 edges 为最终边，不直接消费清单里的 dependency_candidates（v1.2 快照候选中仍含已删除的 T2→T7 资源共享边，属待确认噪声）；最终边的确认依据见事件流 seq 12 dependency_confirmed。nodes_ref 引用的清单版本 v1.2 是 apply_review 审核后产出的生效快照，随包提供；原始分解输出为 v1.0（task_list_draft_v1.0），两者结构相同",
+    "graph_id": "G-v1.0",
+    "nodes_ref": {
+      "spec_version": "v1.0",
+      "list_version": "v1.2"
+    },
+    "edges": [
+      {
+        "from": "T1",
+        "to": "T2",
+        "type": "force"
+      },
+      {
+        "from": "T2",
+        "to": "T3",
+        "type": "force"
+      },
+      {
+        "from": "T3",
+        "to": "T4",
+        "type": "force"
+      },
+      {
+        "from": "T4",
+        "to": "T5",
+        "type": "force"
+      },
+      {
+        "from": "T6",
+        "to": "T7",
+        "type": "force"
+      },
+      {
+        "from": "T5",
+        "to": "T7",
+        "type": "force"
+      },
+      {
+        "from": "T7",
+        "to": "T8",
+        "type": "force"
+      },
+      {
+        "from": "T8",
+        "to": "T9",
+        "type": "force"
+      },
+      {
+        "from": "T9",
+        "to": "T10",
+        "type": "force"
+      },
+      {
+        "from": "T9",
+        "to": "T11",
+        "type": "force"
+      },
+      {
+        "from": "T8",
+        "to": "T11",
+        "type": "data"
+      },
+      {
+        "from": "T9",
+        "to": "T12",
+        "type": "force"
+      },
+      {
+        "from": "T11",
+        "to": "T12",
+        "type": "force"
+      }
+    ],
+    "layers": [
+      [
+        "T1",
+        "T6"
+      ],
+      [
+        "T2"
+      ],
+      [
+        "T3"
+      ],
+      [
+        "T4"
+      ],
+      [
+        "T5"
+      ],
+      [
+        "T7"
+      ],
+      [
+        "T8"
+      ],
+      [
+        "T9"
+      ],
+      [
+        "T10",
+        "T11"
+      ],
+      [
+        "T12"
+      ]
+    ],
+    "execution_order": [
+      "T1",
+      "T6",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T7",
+      "T8",
+      "T9",
+      "T10",
+      "T11",
+      "T12"
+    ]
+  },
+  "event_stream_example": {
+    "schema_version": "1.1",
+    "note": "示例节选：只展示关键事件，正式事件流必须完整记录每一次派发与回收；顶层字段为快照末尾状态",
+    "instance_id": "INST-2026-0001",
+    "spec_version": "v1.1",
+    "graph_id": "G-v1.1",
+    "status": "running",
+    "waiting_on": null,
+    "event_log": [
+      {
+        "seq": 1,
+        "ts": "2026-11-20T10:00:00",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "created",
+        "detail": "实例创建，绑定规格 SPEC-2026-001 v1.0"
+      },
+      {
+        "seq": 2,
+        "ts": "2026-11-20T10:00:02",
+        "actor": "system",
+        "object_type": "spec",
+        "object_id": "SPEC-2026-001",
+        "action": "validate_passed",
+        "detail": "结构校验通过，必填字段齐全"
+      },
+      {
+        "seq": 3,
+        "ts": "2026-11-20T10:00:03",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_entered",
+        "detail": "到达人工节点 baseline_confirm，实例进入 waiting_human"
+      },
+      {
+        "seq": 4,
+        "ts": "2026-11-20T10:01:20",
+        "actor": "human:（操作人代号）",
+        "object_type": "spec",
+        "object_id": "SPEC-2026-001",
+        "action": "baseline_frozen",
+        "detail": "基线确认并冻结，版本 v1.0"
+      },
+      {
+        "seq": 5,
+        "ts": "2026-11-20T10:01:21",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_exited",
+        "detail": "人工节点完成，实例恢复 running"
+      },
+      {
+        "seq": 6,
+        "ts": "2026-11-20T10:01:30",
+        "actor": "system",
+        "object_type": "task_list",
+        "object_id": "SPEC-2026-001",
+        "action": "decompose_done",
+        "detail": "分解完成，产出 12 个任务，清单版本 v1.0（草稿）"
+      },
+      {
+        "seq": 7,
+        "ts": "2026-11-20T10:01:31",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_entered",
+        "detail": "到达人工节点 task_review，实例进入 waiting_human"
+      },
+      {
+        "seq": 8,
+        "ts": "2026-11-20T10:03:05",
+        "actor": "human:（操作人代号）",
+        "object_type": "task",
+        "object_id": "T10",
+        "action": "review_modified",
+        "detail": "改拆操作：T10 验收条件由 1 条拆为 3 条、预估工期 2.0 调为 4.0；理由：粒度过粗；清单 v1.0 升 v1.1"
+      },
+      {
+        "seq": 9,
+        "ts": "2026-11-20T10:03:40",
+        "actor": "human:（操作人代号）",
+        "object_type": "task",
+        "object_id": "T3",
+        "action": "review_modified",
+        "detail": "合并操作：T3 与 T4 重叠的验收表述去重合并；理由：粒度过细；清单 v1.1 升 v1.2"
+      },
+      {
+        "seq": 10,
+        "ts": "2026-11-20T10:03:55",
+        "actor": "human:（操作人代号）",
+        "object_type": "task_list",
+        "object_id": "SPEC-2026-001",
+        "action": "review_approved",
+        "detail": "审核通过，清单 v1.2 生效"
+      },
+      {
+        "seq": 11,
+        "ts": "2026-11-20T10:03:56",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_exited",
+        "detail": "人工节点完成，实例恢复 running"
+      },
+      {
+        "seq": 12,
+        "ts": "2026-11-20T10:03:58",
+        "actor": "human:（操作人代号）",
+        "object_type": "task_list",
+        "object_id": "SPEC-2026-001",
+        "action": "dependency_confirmed",
+        "detail": "人工确认依赖候选：删除 T2→T7 资源共享边（噪声），其余候选转为最终边"
+      },
+      {
+        "seq": 13,
+        "ts": "2026-11-20T10:04:00",
+        "actor": "system",
+        "object_type": "graph",
+        "object_id": "G-v1.0",
+        "action": "graph_built",
+        "detail": "建图校验无环无悬空，绑定清单 v1.2，输出并行组 10 层"
+      },
+      {
+        "seq": 14,
+        "ts": "2026-11-20T10:04:01",
+        "actor": "system",
+        "object_type": "task",
+        "object_id": "T1",
+        "action": "task_dispatched",
+        "detail": "与 T6 同层并行派发"
+      },
+      {
+        "seq": 15,
+        "ts": "2026-11-20T10:04:30",
+        "actor": "system",
+        "object_type": "task",
+        "object_id": "T9",
+        "action": "task_dispatched",
+        "detail": "Mock 执行层接管"
+      },
+      {
+        "seq": 16,
+        "ts": "2026-11-20T10:05:10",
+        "actor": "system",
+        "object_type": "task",
+        "object_id": "T9",
+        "action": "task_failed",
+        "detail": "执行回报失败，按矩阵判定可重试"
+      },
+      {
+        "seq": 17,
+        "ts": "2026-11-20T10:05:12",
+        "actor": "system",
+        "object_type": "task",
+        "object_id": "T9",
+        "action": "task_retried",
+        "detail": "第 1 次自动重试，attempts=1"
+      },
+      {
+        "seq": 18,
+        "ts": "2026-11-20T10:05:25",
+        "actor": "system",
+        "object_type": "task",
+        "object_id": "T9",
+        "action": "task_done",
+        "detail": "重试成功，状态 done"
+      },
+      {
+        "seq": 19,
+        "ts": "2026-11-20T10:08:00",
+        "actor": "human:（操作人代号）",
+        "object_type": "change_request",
+        "object_id": "CR-2026-001",
+        "action": "change_submitted",
+        "detail": "需求变更：增加求购功能（规格级变更）"
+      },
+      {
+        "seq": 20,
+        "ts": "2026-11-20T10:08:30",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_entered",
+        "detail": "到达人工节点 change_confirm，展示影响集合：T5、T8、T9 及下游"
+      },
+      {
+        "seq": 21,
+        "ts": "2026-11-20T10:08:50",
+        "actor": "human:（操作人代号）",
+        "object_type": "change_request",
+        "object_id": "CR-2026-001",
+        "action": "change_confirmed",
+        "detail": "人工确认变更，批准增量重排"
+      },
+      {
+        "seq": 22,
+        "ts": "2026-11-20T10:08:51",
+        "actor": "system",
+        "object_type": "spec",
+        "object_id": "SPEC-2026-001",
+        "action": "baseline_refrozen",
+        "detail": "规格升版 v1.1，旧基线 v1.0 标记 superseded"
+      },
+      {
+        "seq": 23,
+        "ts": "2026-11-20T10:08:52",
+        "actor": "system",
+        "object_type": "instance",
+        "object_id": "INST-2026-0001",
+        "action": "human_gate_exited",
+        "detail": "人工节点完成，实例恢复 running"
+      },
+      {
+        "seq": 24,
+        "ts": "2026-11-20T10:08:55",
+        "actor": "system",
+        "object_type": "graph",
+        "object_id": "G-v1.1",
+        "action": "replan_done",
+        "detail": "新增 T13、T14，清单升 v1.3，图 G-v1.1 绑定清单 v1.3；受影响子图重排校验无环，恢复调度；旧版本全部保留可查"
+      }
+    ]
+  },
+  "test_report_example": {
+    "schema_version": "1.1",
+    "report_meta": {
+      "report_id": "TEST-2026-001",
+      "tester": "（填测试人代号）",
+      "date": "2026-11-20",
+      "build_version": "v0.3.0",
+      "environment": "docker compose 单机",
+      "ai_mode": "mock",
+      "spec_version": "v1.0",
+      "list_version": "v1.2",
+      "graph_id": "G-v1.0",
+      "instance_id": "INST-2026-0001",
+      "demo_data": "规格 A（校园二手书交易平台）"
+    },
+    "summary": {
+      "acceptance_total": 8,
+      "acceptance_passed": 7,
+      "acceptance_failed": 1,
+      "test_case_total": 3,
+      "test_case_passed": 2,
+      "test_case_failed": 1,
+      "test_case_blocked": 0,
+      "bugs_open": 2,
+      "release_recommendation": "fail",
+      "conclusion": "示例节选：test_cases 仅示例 3 条，正式填写须覆盖全部用例；summary 各数字必须与下方明细一致"
+    },
+    "acceptance_results": [
+      {
+        "item_id": "A1",
+        "acceptance": "单机启动，内置演示数据",
+        "demo_steps": "步骤 1",
+        "linked_impl_tasks": [
+          "T5.2",
+          "T7.1"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A2",
+        "acceptance": "输入新规格自动跑完分解、建图、排序",
+        "demo_steps": "步骤 2～7",
+        "linked_impl_tasks": [
+          "T1.1",
+          "T2.1",
+          "T3.3",
+          "T3.4"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A3",
+        "acceptance": "工作台展示依赖图与执行进度",
+        "demo_steps": "步骤 8",
+        "linked_impl_tasks": [
+          "T4.1",
+          "T4.2"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A4",
+        "acceptance": "人工可在人工节点暂停、操作、接管",
+        "demo_steps": "步骤 3、6、9",
+        "linked_impl_tasks": [
+          "T1.2",
+          "T2.2",
+          "T4.4"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A5",
+        "acceptance": "异常按矩阵降级，操作留痕可追溯",
+        "demo_steps": "步骤 9",
+        "linked_impl_tasks": [
+          "T3.5",
+          "T4.4"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A6",
+        "acceptance": "变更触发增量重编排",
+        "demo_steps": "步骤 10",
+        "linked_impl_tasks": [
+          "T6.1"
+        ],
+        "result": "fail",
+        "note": "见 B-002"
+      },
+      {
+        "item_id": "A7",
+        "acceptance": "澄清回路可用，假设进列表",
+        "demo_steps": "步骤 11",
+        "linked_impl_tasks": [
+          "T1.1",
+          "T5.2"
+        ],
+        "result": "pass",
+        "note": ""
+      },
+      {
+        "item_id": "A8",
+        "acceptance": "断点恢复，状态持久化",
+        "demo_steps": "步骤 12",
+        "linked_impl_tasks": [
+          "T3.6"
+        ],
+        "result": "pass",
+        "note": ""
+      }
+    ],
+    "test_cases": [
+      {
+        "case_id": "C-001",
+        "title": "任务审核后改拆，清单升版并留来源",
+        "module": "decomposer",
+        "preconditions": "分解完成，实例处于 task_review 人工节点",
+        "steps": [
+          "选择 T10 执行改拆",
+          "填写结构化理由：粒度过粗",
+          "确认清单"
+        ],
+        "expected": "清单 v1.0 升 v1.1，事件流记录操作人与来源",
+        "actual": "与预期一致",
+        "result": "pass",
+        "blocked_reason": null,
+        "linked_acceptance_ids": [
+          "A4"
+        ],
+        "linked_impl_tasks": [
+          "T2.2"
+        ],
+        "bug_id": null
+      },
+      {
+        "case_id": "C-002",
+        "title": "变更触发增量重排",
+        "module": "orchestrator",
+        "preconditions": "实例执行中，T9 已完成",
+        "steps": [
+          "修改需求描述提交变更",
+          "查看影响分析",
+          "确认变更"
+        ],
+        "expected": "影响集合含新增任务并高亮，重排后无环恢复调度",
+        "actual": "新增任务未高亮，确认后才出现",
+        "result": "fail",
+        "blocked_reason": null,
+        "linked_acceptance_ids": [
+          "A6"
+        ],
+        "linked_impl_tasks": [
+          "T6.1"
+        ],
+        "bug_id": "B-002"
+      },
+      {
+        "case_id": "C-003",
+        "title": "断点恢复",
+        "module": "orchestrator",
+        "preconditions": "实例处于 waiting_human",
+        "steps": [
+          "终止服务",
+          "重启服务",
+          "打开实例"
+        ],
+        "expected": "实例恢复到暂停点，状态不丢",
+        "actual": "与预期一致",
+        "result": "pass",
+        "blocked_reason": null,
+        "linked_acceptance_ids": [
+          "A8"
+        ],
+        "linked_impl_tasks": [
+          "T3.6"
+        ],
+        "bug_id": null
+      }
+    ],
+    "bugs": [
+      {
+        "bug_id": "B-001",
+        "severity": "minor",
+        "title": "并行组分层在窗口缩小时文字重叠",
+        "module": "workbench",
+        "repro_steps": "打开依赖图面板，将浏览器窗口缩至 1280px 宽",
+        "expected": "节点标签不重叠",
+        "actual": "P9 层两个节点标签相交",
+        "status": "open",
+        "assignee": "",
+        "found_in": "v0.3.0",
+        "fixed_in": null,
+        "retest_result": null,
+        "retest_date": null
+      },
+      {
+        "bug_id": "B-002",
+        "severity": "blocker",
+        "title": "变更影响分析未包含新增任务",
+        "module": "orchestrator",
+        "repro_steps": "执行中修改需求描述提交变更，新增任务挂入图中",
+        "expected": "影响集合高亮受影响任务及新增任务",
+        "actual": "新增任务未高亮，确认后才出现在图中",
+        "status": "open",
+        "assignee": "",
+        "found_in": "v0.3.0",
+        "fixed_in": null,
+        "retest_result": null,
+        "retest_date": null
+      }
+    ]
+  }
+}
