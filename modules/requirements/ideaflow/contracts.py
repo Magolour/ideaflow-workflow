@@ -52,6 +52,23 @@ CONSENSUS_LABEL = {
 SEVERITY = ("blocking", "major", "minor")
 SEVERITY_LABEL = {"blocking": "阻断", "major": "重要", "minor": "一般"}
 
+# 对异议的回应（文档第二部分 3.2 的“表态”，收敛阶段使用）
+RESPONSE_POSITIONS = ("accept", "refute", "conditional")
+RESPONSE_LABEL = {
+    "accept": "接受并修订",
+    "refute": "反驳",
+    "conditional": "有条件接受",
+}
+
+# 整合复核结论（文档第二部分 3.4）
+REVIEW_VERDICTS = ("preserved", "deferred", "omitted", "distorted")
+REVIEW_LABEL = {
+    "preserved": "已保留",
+    "deferred": "已登记延期",
+    "omitted": "被遗漏",
+    "distorted": "被歪曲",
+}
+
 STAGES = ("intake", "clarify", "diverge", "critique", "synthesize", "proposal")
 
 
@@ -103,7 +120,8 @@ def _rows(value: Any, path: str, *, nonempty: bool = False) -> list:
 
 
 def validate_role_output(payload: Any, *, role_id: str, stage: str,
-                         known_claims: set[str] | None = None) -> dict[str, Any]:
+                         known_claims: set[str] | None = None,
+                         known_objections: set[str] | None = None) -> dict[str, Any]:
     """校验并归一化单角色输出（文档第四部分 2 的统一输出结构）。
 
     校验失败抛 ContractError，由调用方决定回注重试还是转人工。
@@ -165,6 +183,44 @@ def validate_role_output(payload: Any, *, role_id: str, stage: str,
     questions = [_text(item, f"questions[{index}]")
                  for index, item in enumerate(_rows(payload.get("questions", []), "questions"))]
 
+    responses_out: list[dict[str, str]] = []
+    if stage == "respond":
+        known = known_objections or set()
+        for index, row in enumerate(_rows(payload.get("responses"), "responses", nonempty=True)):
+            path = f"responses[{index}]"
+            if not isinstance(row, dict):
+                raise ContractError("INVALID_FIELD", "回应必须是对象", path)
+            objection_id = _text(row.get("objection"), f"{path}.objection")
+            if objection_id not in known:
+                raise ContractError("UNKNOWN_OBJECTION",
+                                    f"回应了不存在的异议 {objection_id}",
+                                    f"{path}.objection")
+            position = _enum(row.get("position"), RESPONSE_POSITIONS, f"{path}.position")
+            evidence = row.get("evidence", "rule")
+            responses_out.append({
+                "objection": objection_id,
+                "position": position,
+                "argument": _text(row.get("argument"), f"{path}.argument"),
+                "evidence": _enum(evidence, EVIDENCE_TYPES, f"{path}.evidence"),
+            })
+
+    reviews_out: list[dict[str, str]] = []
+    if stage == "review":
+        known = known_claims or set()
+        for index, row in enumerate(_rows(payload.get("reviews"), "reviews", nonempty=True)):
+            path = f"reviews[{index}]"
+            if not isinstance(row, dict):
+                raise ContractError("INVALID_FIELD", "复核记录必须是对象", path)
+            claim_id = _text(row.get("claim"), f"{path}.claim")
+            if claim_id not in known:
+                raise ContractError("UNKNOWN_CLAIM", f"复核了不存在的论点 {claim_id}",
+                                    f"{path}.claim")
+            reviews_out.append({
+                "claim": claim_id,
+                "verdict": _enum(row.get("verdict"), REVIEW_VERDICTS, f"{path}.verdict"),
+                "note": _text(row.get("note"), f"{path}.note"),
+            })
+
     position_changed = payload.get("position_changed")
     if position_changed is not None:
         if not isinstance(position_changed, dict):
@@ -177,14 +233,16 @@ def validate_role_output(payload: Any, *, role_id: str, stage: str,
         if position_changed["from"] == position_changed["to"]:
             raise ContractError("INVALID_FIELD", "立场变化前后不能相同", "position_changed.to")
 
-    if not claims_out and not objections_out and not questions:
-        raise ContractError("EMPTY_OUTPUT", "本轮没有任何主张、异议或问题", "")
+    if not claims_out and not objections_out and not questions and not responses_out and not reviews_out:
+        raise ContractError("EMPTY_OUTPUT", "本轮没有任何主张、异议、回应或复核", "")
 
     return {
         "role": role_id,
         "claims": claims_out,
         "assumptions": assumptions_out,
         "objections": objections_out,
+        "responses": responses_out,
+        "reviews": reviews_out,
         "questions": questions,
         "position_changed": position_changed,
     }
@@ -252,14 +310,34 @@ def validate_synthesis(payload: Any, *, known_claims: set[str]) -> dict[str, Any
     if len(options) < 2:
         raise ContractError("INVALID_OUTPUT", "候选方案至少两份", "options")
 
-    decisions: list[dict[str, str]] = []
+    decisions: list[dict[str, Any]] = []
     for index, row in enumerate(_rows(payload.get("decisions", []), "decisions")):
         path = f"decisions[{index}]"
         if not isinstance(row, dict):
             raise ContractError("INVALID_FIELD", "决策必须是对象", path)
+        based_on = [str(item) for item in row.get("based_on", [])]
+        unknown = [item for item in based_on if item not in known_claims]
+        if unknown:
+            raise ContractError("UNKNOWN_CLAIM", f"决策引用了不存在的论点 {unknown[0]}",
+                                f"{path}.based_on")
         decisions.append({
             "scope": _text(row.get("scope"), f"{path}.scope"),
             "choice": _text(row.get("choice"), f"{path}.choice"),
+            "reason": _text(row.get("reason"), f"{path}.reason"),
+            "based_on": based_on,
+        })
+
+    not_adopted: list[dict[str, str]] = []
+    for index, row in enumerate(_rows(payload.get("not_adopted", []), "not_adopted")):
+        path = f"not_adopted[{index}]"
+        if not isinstance(row, dict):
+            raise ContractError("INVALID_FIELD", "未采纳记录必须是对象", path)
+        claim_id = _text(row.get("claim"), f"{path}.claim")
+        if claim_id not in known_claims:
+            raise ContractError("UNKNOWN_CLAIM", f"未采纳记录引用了不存在的论点 {claim_id}",
+                                f"{path}.claim")
+        not_adopted.append({
+            "claim": claim_id,
             "reason": _text(row.get("reason"), f"{path}.reason"),
         })
 
@@ -303,5 +381,6 @@ def validate_synthesis(payload: Any, *, known_claims: set[str]) -> dict[str, Any
     questions = [_text(item, f"open_questions[{index}]")
                  for index, item in enumerate(_rows(payload.get("open_questions", []), "open_questions"))]
 
-    return {"options": options, "decisions": decisions, "non_goals": non_goals,
-            "narrative": narrative, "work_packages": packages, "open_questions": questions}
+    return {"options": options, "decisions": decisions, "not_adopted": not_adopted,
+            "non_goals": non_goals, "narrative": narrative,
+            "work_packages": packages, "open_questions": questions}

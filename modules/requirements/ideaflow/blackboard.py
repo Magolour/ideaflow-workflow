@@ -58,10 +58,17 @@ class Blackboard:
         self.stances: dict[str, dict[str, str]] = {}
         self.decisions: list[dict[str, Any]] = []
         self.non_goals: list[dict[str, str]] = []
+        self.not_adopted: list[dict[str, str]] = []
         self.open_questions: list[dict[str, Any]] = []
         self.work_packages: list[dict[str, Any]] = []
         self.narrative: dict[str, str] = {}
         self.stance_changes: list[dict[str, Any]] = []
+        self.divergence: dict[str, str] = {}
+        self.responses: list[dict[str, Any]] = []
+        self.reviews: list[dict[str, Any]] = []
+        self.termination: dict[str, Any] | None = None
+        self.pseudo_check: dict[str, Any] | None = None
+        self.consensus_override: dict[str, str] | None = None
         self.stage = "intake"
         self.round = 0
         self.version = 1
@@ -72,7 +79,9 @@ class Blackboard:
     def add_role_output(self, raw: Any, *, role_id: str, stage: str) -> dict[str, Any]:
         """校验并写入一个角色的输出，返回归一化结果与新增编号。"""
         known = {claim["id"] for claim in self.claims}
-        output = validate_role_output(raw, role_id=role_id, stage=stage, known_claims=known)
+        output = validate_role_output(
+            raw, role_id=role_id, stage=stage, known_claims=known,
+            known_objections={row["id"] for row in self.objections})
 
         assumption_ids: list[str] = []
         for row in output["assumptions"]:
@@ -166,8 +175,61 @@ class Blackboard:
                 row["status"] = "resolved"
                 row["resolution"] = resolution
                 row["decided_by"] = decider
+                row["outcome"] = "human"
                 return
         raise ContractError("UNKNOWN_OBJECTION", f"不存在的异议 {objection_id}", "objection_id")
+
+    def apply_responses(self, role_id: str, responses: list[dict[str, Any]]) -> None:
+        """写入角色对异议的回应。
+
+        接受或反驳都会关闭异议：反驳必须给出理由，不允许静默忽略；
+        有条件接受保持 open，等证据或条件落地。
+        """
+        for row in responses:
+            target = self.objection_by_id(row["objection"])
+            if target["status"] != "open":
+                raise ContractError("OBJECTION_CLOSED",
+                                    f"异议 {target['id']} 已关闭，不能重复回应",
+                                    "objection")
+            target["response"] = {"role": role_id, "position": row["position"],
+                                  "argument": row["argument"],
+                                  "evidence": row["evidence"]}
+            if row["position"] in ("accept", "refute"):
+                target["status"] = "resolved"
+                target["outcome"] = row["position"]
+                target["resolution"] = row["argument"]
+            self.responses.append({
+                "role": role_id,
+                "objection": target["id"],
+                "position": row["position"],
+                "argument": row["argument"],
+                "evidence": row["evidence"],
+                "round": self.round,
+            })
+
+    def apply_reviews(self, role_id: str, reviews: list[dict[str, str]]) -> None:
+        """写入整合复核结论。原角色没有否决权，但失真会作为阻断项上报。"""
+        own = {claim["id"] for claim in self.claims if claim["role"] == role_id}
+        for row in reviews:
+            if row["claim"] not in own:
+                raise ContractError("NOT_OWN_CLAIM",
+                                    f"角色只能复核自己的论点：{row['claim']}", "claim")
+            self.reviews.append({"role": role_id, **row, "round": self.round})
+
+    def objection_by_id(self, objection_id: str) -> dict[str, Any]:
+        for row in self.objections:
+            if row["id"] == objection_id:
+                return row
+        raise ContractError("UNKNOWN_OBJECTION", f"不存在异议 {objection_id}", "objection_id")
+
+    def set_termination(self, termination: dict[str, Any]) -> None:
+        self.termination = termination
+
+    def set_pseudo_check(self, check: dict[str, Any]) -> None:
+        self.pseudo_check = check
+
+    def set_consensus(self, state: str, reason: str) -> None:
+        self.consensus_override = {"state": state, "reason": reason}
 
     def add_option(self, *, key: str, name: str, scope: list[str], cost_days: str,
                    risk: str, tradeoffs: str, based_on: list[str]) -> dict[str, Any]:
@@ -201,12 +263,14 @@ class Blackboard:
         raise ContractError("UNKNOWN_OPTION", f"不存在方案 {option_id}", "option_id")
 
     def add_decision(self, *, scope: str, choice: str, reason: str,
+                     based_on: list[str] | None = None,
                      decider: str = "human") -> dict[str, Any]:
         decision = {
             "id": new_id("DEC", self.decisions),
             "scope": scope,
             "choice": choice,
             "reason": reason,
+            "based_on": list(based_on or []),
             "decider": decider,
         }
         self.decisions.append(decision)
@@ -227,8 +291,11 @@ class Blackboard:
     def consensus_state(self) -> str:
         """基础判定：阻断项未解决即不能称共识。
 
-        完整收敛引擎（分歧分类、终止条件、整合复核）在第二部分实现。
+        流水线在收敛阶段会写入更完整的判定（含分歧分类与终止条件），
+        此时以写入结果为准。
         """
+        if self.consensus_override:
+            return self.consensus_override["state"]
         if self.unresolved_blocking():
             return "no_consensus"
         if any(row["status"] == "unverified" and row["role"] != "tech"
@@ -240,6 +307,8 @@ class Blackboard:
         return "consensus"
 
     def consensus_reason(self) -> str:
+        if self.consensus_override:
+            return self.consensus_override["reason"]
         blocking = self.unresolved_blocking()
         if blocking:
             return f"存在 {len(blocking)} 条未解决的阻断异议（{blocking[0]['id']}）"
@@ -269,6 +338,12 @@ class Blackboard:
             "non_goals": deepcopy(self.non_goals),
             "open_questions": deepcopy(self.open_questions),
             "stance_changes": deepcopy(self.stance_changes),
+            "divergence": deepcopy(self.divergence),
+            "responses": deepcopy(self.responses),
+            "reviews": deepcopy(self.reviews),
+            "termination": deepcopy(self.termination),
+            "pseudo_check": deepcopy(self.pseudo_check),
+            "not_adopted": deepcopy(self.not_adopted),
             "work_packages": deepcopy(self.work_packages),
             "narrative": deepcopy(self.narrative),
             "stage": self.stage,

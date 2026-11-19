@@ -1,7 +1,7 @@
-"""第一部分（讨论闭环）的回归测试。
+"""讨论闭环与收敛引擎的回归测试。
 
-测试关注流程约束而不是文案质量：编号、隔离、契约校验、章节完整性与
-共识判定，这些是不能靠提示词保证的部分。
+测试关注流程约束而不是文案质量：编号、隔离、契约校验、章节完整性、
+终止条件与共识判定，这些都不能靠提示词保证。
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from pathlib import Path
 from ideaflow.agents import MockAgent
 from ideaflow.blackboard import Blackboard
 from ideaflow.contracts import ContractError, validate_role_output, validate_stances
+from ideaflow.convergence import (consensus_from, evaluate_termination,
+                                  integrity_issues, key_opinions,
+                                  needs_counterexample)
 from ideaflow.pipeline import run
 from ideaflow.roles import DISCUSSION_ROLES
 
@@ -41,7 +44,7 @@ class PipelineTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_emits_all_artifacts(self) -> None:
-        result = run(IDEA, out_dir=self.out, progress=None)
+        result = run(IDEA, out_dir=self.out)
         self.assertTrue(result.proposal_path.exists())
         self.assertTrue((result.out_dir / "blackboard.json").exists())
         self.assertTrue((result.out_dir / "events.jsonl").exists())
@@ -71,20 +74,23 @@ class PipelineTest(unittest.TestCase):
         text = result.proposal_path.read_text(encoding="utf-8")
         for index in range(1, 12):
             self.assertIn(f"## {index} ", text, f"缺少第 {index} 章")
-        self.assertIn("## 11 未决问题与分歧记录", text)
-        self.assertIn("附录 A 论点索引", text)
+        self.assertIn("### 11.7 收敛判定", text)
+        self.assertIn("### 11.9 伪共识检查", text)
+        self.assertIn("附录 C 关键意见处理表", text)
 
-    def test_blocking_objection_prevents_consensus(self) -> None:
+    def test_responses_close_blocking_objections(self) -> None:
         result = run(IDEA, out_dir=self.out)
-        self.assertEqual(result.board.consensus_state(), "no_consensus")
-        blocking = result.board.unresolved_blocking()
-        self.assertTrue(blocking)
-
-        resolved = run(IDEA, out_dir=self.out,
-                       resolutions={blocking[0]["id"]: "已确认首版非目标清单"})
-        self.assertEqual(resolved.board.unresolved_blocking(), [])
-        self.assertIn(resolved.board.consensus_state(),
+        self.assertEqual(result.board.unresolved_blocking(), [])
+        self.assertTrue(all(row.get("response") for row in result.board.objections))
+        self.assertIn(result.board.consensus_state(),
                       ("conditional", "pending_verification", "consensus"))
+
+    def test_key_opinions_have_dispositions(self) -> None:
+        result = run(IDEA, out_dir=self.out)
+        rows = key_opinions(result.board)
+        self.assertEqual(len(rows), len(result.board.claims))
+        self.assertTrue(all(row["status"] for row in rows))
+        self.assertTrue(any(row["status"] == "adopted" for row in rows))
 
     def test_events_are_sequential(self) -> None:
         result = run(IDEA, out_dir=self.out)
@@ -97,6 +103,59 @@ class PipelineTest(unittest.TestCase):
         first = run(IDEA, out_dir=self.out)
         second = run(IDEA, out_dir=self.out)
         self.assertNotEqual(first.out_dir, second.out_dir)
+
+
+class ConvergenceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.board = run(IDEA, out_dir=Path(self.tmp.name)).board
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_value_objection_requires_human_decision(self) -> None:
+        row = self.board.objections[0]
+        row["status"] = "open"
+        self.board.divergence = {row["id"]: "value"}
+        result = evaluate_termination(self.board, max_rounds=5)
+        self.assertEqual(result["reason"], "human_decision")
+        self.assertFalse(result["stop"] is False)
+        state = consensus_from(self.board, result)
+        self.assertEqual(state["state"], "no_consensus")
+
+    def test_blocking_objection_hits_round_limit(self) -> None:
+        row = self.board.objections[0]
+        row["status"] = "open"
+        row["severity"] = "blocking"
+        self.board.divergence = {row["id"]: "tradeoff"}
+        self.board.round = 3
+        result = evaluate_termination(self.board, max_rounds=2)
+        self.assertEqual(result["reason"], "max_rounds")
+
+    def test_two_rounds_without_new_issues_stops_discussion(self) -> None:
+        row = self.board.objections[0]
+        row["status"] = "open"
+        row["severity"] = "blocking"
+        self.board.divergence = {row["id"]: "tradeoff"}
+        self.board.round = 1
+        result = evaluate_termination(self.board, max_rounds=5, rounds_without_new=2)
+        self.assertEqual(result["reason"], "no_new_issues")
+        self.assertEqual(consensus_from(self.board, result)["state"], "no_consensus")
+
+    def test_all_agree_triggers_counterexample(self) -> None:
+        for role in self.board.stances:
+            for option_id in self.board.stances[role]:
+                self.board.stances[role][option_id] = "agree"
+        self.assertTrue(needs_counterexample(self.board))
+
+    def test_integrity_issue_blocks_cited_claim(self) -> None:
+        cited = next(row["based_on"][0] for row in self.board.decisions
+                     if row.get("based_on"))
+        self.board.reviews = [{"role": "ba", "claim": cited, "verdict": "omitted",
+                               "note": "决策改写了原意", "round": 2}]
+        issues = integrity_issues(self.board)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["claim"], cited)
 
 
 class ContractTest(unittest.TestCase):
@@ -122,6 +181,15 @@ class ContractTest(unittest.TestCase):
             validate_role_output(payload, role_id="skeptic", stage="critique",
                                  known_claims={"CLM-001"})
         self.assertEqual(caught.exception.code, "UNKNOWN_CLAIM")
+
+    def test_response_must_reference_open_objection(self) -> None:
+        payload = {"role": "ba", "responses": [
+            {"objection": "OBJ-404", "position": "accept",
+             "argument": "接受", "evidence": "rule"}]}
+        with self.assertRaises(ContractError) as caught:
+            validate_role_output(payload, role_id="ba", stage="respond",
+                                 known_objections={"OBJ-001"})
+        self.assertEqual(caught.exception.code, "UNKNOWN_OBJECTION")
 
     def test_conditional_stance_requires_condition(self) -> None:
         payload = {"role": "ba", "stances": [

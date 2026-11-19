@@ -9,8 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 from .blackboard import Blackboard
-from .contracts import (CONSENSUS_LABEL, EVIDENCE_LABEL, SEVERITY_LABEL,
-                        STANCE_LABEL)
+from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, EVIDENCE_LABEL,
+                        RESPONSE_LABEL, REVIEW_LABEL, SEVERITY_LABEL, STANCE_LABEL)
+from .convergence import (DISPOSITION_LABEL, TERMINATION_LABEL, evidence_gaps,
+                          integrity_issues, key_opinions, option_support)
 from .estimate import pert
 
 
@@ -168,14 +170,17 @@ def render_proposal(board: Blackboard, *, run_id: str, created_at: str,
                          [[row["id"], row["text"], row["resolution"]]
                           for row in resolved_questions])]
     parts += ["### 11.3 未采纳意见与未解决异议", ""]
-    parts += [_table(["编号", "提出者", "针对", "异议", "后果", "级别"],
-                     [[row["id"], row["role"], row["target"], row["text"],
-                       row["consequence"], SEVERITY_LABEL[row["severity"]]]
+    parts += [_table(["编号", "提出者", "针对", "分歧类型", "异议", "后果", "级别"],
+                     [[row["id"], row["role"], row["target"],
+                       DIVERGENCE_LABEL.get(snapshot["divergence"].get(row["id"], ""), "未分类"),
+                       row["text"], row["consequence"], SEVERITY_LABEL[row["severity"]]]
                       for row in open_objections])]
     if resolved_objections:
         parts += ["### 11.4 已处理的异议", ""]
-        parts += [_table(["编号", "异议", "处理结果"],
-                         [[row["id"], row["text"], row.get("resolution", "已关闭")]
+        parts += [_table(["编号", "异议", "处理方式", "理由"],
+                         [[row["id"], row["text"],
+                           RESPONSE_LABEL.get(row.get("outcome", ""), "人工裁决"),
+                           row.get("resolution", "已关闭")]
                           for row in resolved_objections])]
     parts += ["### 11.5 立场汇总", ""]
     parts += [_table(["方案", *[role for role in snapshot["stances"]], "统计"],
@@ -188,6 +193,60 @@ def render_proposal(board: Blackboard, *, run_id: str, created_at: str,
     parts += ["> 本章保留少数意见与未解决异议，不因未达成共识而删除。"
               "阻断异议解除前，方案不应标记为通过。", ""]
 
+    termination = snapshot.get("termination") or {}
+    if termination:
+        parts += ["### 11.7 收敛判定", ""]
+        parts += [_table(["判据", "结果"], [
+            ["讨论轮数", termination.get("round", "—")],
+            ["终止原因", f"{TERMINATION_LABEL.get(termination.get('reason', ''), '—')}："
+                         f"{termination.get('label', '')}"],
+            ["最高支持度", f"{float(termination.get('support', 0)):.0%}"],
+            ["未解决阻断项", termination.get("blocking", 0)],
+            ["共识状态", CONSENSUS_LABEL[snapshot["consensus"]["state"]]],
+        ])]
+        support = option_support(board)
+        if support:
+            parts += ["**方案支持度**", "",
+                      _table(["方案", "支持度", "赞同", "有条件", "反对", "未评审"],
+                             [[f"{row['option']} {row['name']}", f"{row['ratio']:.0%}",
+                               row["agree"], row["conditional"], row["oppose"],
+                               row["unreviewed"]] for row in support])]
+        if termination.get("reason") == "human_decision":
+            parts += ["> 存在价值取向分歧，Agent 不代为选择。请在下列方案中裁决，"
+                      "或直接给出一条新规则：", ""]
+            parts += [_table(["方案", "范围", "周期", "风险"],
+                             [[f"{row['id']} {row['name']}", "；".join(row["scope"]),
+                               row["cost_days"], row["risk"]] for row in snapshot["options"]])]
+        gaps = evidence_gaps(board)
+        if gaps:
+            parts += ["**待调研事项（事实缺口）**", "",
+                      _table(["异议", "类型", "状态", "建议动作"],
+                             [[row["objection"], row["type"], row["status"], row["action"]]
+                              for row in gaps])]
+
+    reviews = snapshot.get("reviews", [])
+    if reviews:
+        parts += ["### 11.8 整合复核", "",
+                  "各角色复核自己的主张是否被遗漏或歪曲；实质性失真按阻断项处理。", ""]
+        parts += [_table(["角色", "论点", "结论", "说明"],
+                         [[row["role"], row["claim"], REVIEW_LABEL[row["verdict"]],
+                           row["note"]] for row in reviews])]
+        issues = integrity_issues(board)
+        if issues:
+            parts += [f"> 复核发现 {len(issues)} 处实质性失真，已记为阻断项，"
+                      "须修订后重新评审。", ""]
+
+    pseudo = snapshot.get("pseudo_check") or {}
+    if pseudo:
+        parts += ["### 11.9 伪共识检查", ""]
+        if pseudo.get("triggered"):
+            parts += [f"- 触发：{pseudo.get('note', '')}",
+                      f"- 反例论点：{'、'.join(pseudo.get('raised', [])) or '无'}",
+                      "- 反例未处理前不判定为共识通过。"]
+        else:
+            parts += [f"- 未触发：{pseudo.get('note', '存在反对立场，无需全票复核')}。"]
+        parts += [""]
+
     parts += ["---", "", "## 附录 A 论点索引", ""]
     parts += [_table(["编号", "角色", "主张", "依据", "依赖假设"],
                      [[row["id"], row["role"], row["text"],
@@ -195,6 +254,14 @@ def render_proposal(board: Blackboard, *, run_id: str, created_at: str,
                       for row in snapshot["claims"]])]
     parts += ["## 附录 B 事件流", "",
               "完整事件见同目录 `events.jsonl`，一行一个事件，`seq` 连续递增。", ""]
+    parts += ["## 附录 C 关键意见处理表", "",
+              "每条主张的处理状态与理由，对应文档 2.4 的关键意见记录要求。", ""]
+    parts += [_table(["论点", "角色", "依据", "他人回应", "状态", "理由", "影响方案"],
+                     [[row["claim"], row["role"], EVIDENCE_LABEL[row["evidence"]],
+                       "、".join(row["responses"]) or "—",
+                       row["label"], row["reason"],
+                       "、".join(row["impacts"]) or "—"]
+                      for row in key_opinions(board)])]
 
     return "\n".join(parts).rstrip() + "\n"
 

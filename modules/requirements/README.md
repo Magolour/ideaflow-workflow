@@ -15,8 +15,8 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
   -c "两周内做出可演示版本" -c "只有两名开发"
 ```
 
-一次真实运行的统计：12 条主张、6 条假设、7 条异议（1 条阻断）、9 个未决问题，
-共识判定为「未达成共识」，并在第 11 章保留全部少数意见。
+一次真实运行的统计：12 条主张、6 条假设、7 条异议（阻断已回应）、9 个未决问题；
+讨论 1 轮后终止于「事实缺口」，共识判定为「待验证」，并在第 11 章列出待调研事项。
 
 产物在 `runs/<时间>-<想法摘要>/`：
 
@@ -41,21 +41,16 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
 | 三点估算与缓冲 | `estimate.pert`，E=(O+4M+P)/6，承诺取 E+1σ |
 | 状态由系统管理，不靠聊天记录推断 | 阶段机 + 黑板 + 事件流三段分离 |
 | 人工裁决可追溯 | `--resolve OBJ-006=说明`，记录裁决人与理由 |
-
-## 与仓库内其他模块的关系
-
-本模块负责整条流程的第一段：想法 → 讨论 → Proposal。产物交给后续阶段消费：
-
-- `proposal.md` 第 4—5 章给出范围与功能清单，可作为任务拆解的输入；
-- `blackboard.json` 的 `decisions`、`open_questions` 与 `objections` 保留待确认项，
-  下游不得把未决问题当作已确认结论；
-- 与 `modules/orchestrator` 的 `POST /api/start` 对接在后续部分完成，
-  当前仍以规格文本作为交接边界。
+| 分歧三分（事实／价值／权衡） | `convergence.classify_objection`，事实缺口转待调研事项 |
+| 关键意见处理表 | `convergence.key_opinions`，采纳／拒绝／延期验证／待人工裁决 |
+| 终止条件显式记录 | `convergence.evaluate_termination`，轮次上限、连续无新增、事实缺口、价值取舍 |
+| 整合复核 | 原角色复核自己的主张，遗漏或歪曲按阻断项处理 |
+| 伪共识检测 | 全票通过时强制质疑者给出反例，反例未处理不得判通过 |
 
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 12 项测试
+python -m unittest discover -s tests -v     # 19 项测试
 python -m ideaflow.cli --help
 ```
 
@@ -65,8 +60,11 @@ python -m ideaflow.cli --help
 # 回答首轮澄清问题（未回答按“未知，按假设继续”处理）
 python -m ideaflow.cli "想法" --answer "Q-001=由产品负责人验收"
 
-# 由人裁决阻断异议，观察共识状态变化
+# 由人裁决异议，观察共识状态变化
 python -m ideaflow.cli "想法" --resolve "OBJ-006=已确认首版非目标清单"
+
+# 调整讨论轮次上限与共识阈值
+python -m ideaflow.cli "想法" --max-rounds 3 --threshold 0.6
 
 # 机器可读摘要
 python -m ideaflow.cli "想法" --json
@@ -80,7 +78,8 @@ ideaflow/
 ├── blackboard.py   # 黑板、事件流、共识基础判定
 ├── roles.py        # 8 张角色卡：关注点 / 必答问题 / 禁区
 ├── agents.py       # Agent 接口 + 离线 MockAgent
-├── pipeline.py     # 六阶段编排与落盘
+├── convergence.py  # 分歧分类、终止条件、关键意见、复核与伪共识
+├── pipeline.py     # 七阶段编排与落盘
 ├── proposal.py     # 11 章 Proposal 渲染
 ├── estimate.py     # PERT 三点估算
 └── cli.py          # 命令行入口
@@ -89,13 +88,13 @@ tests/test_pipeline.py
 
 ## 边界与后续
 
-当前是**离线模拟**：内容由模板生成，流程、校验、编号、状态机与共识判定都是真实逻辑。
+当前是**离线模拟**：内容由模板生成，流程、校验、编号、状态机、收敛判定都是真实逻辑。
 这不是“假装有模型”，而是让流程在没有 Key 的环境里也能演示，并作为真实模型的回归基线。
 
 | 部分 | 内容 | 状态 |
 | --- | --- | --- |
 | 一 | 讨论闭环：澄清、发散、批判、整合、签署、Proposal | ✅ 已完成 |
-| 二 | 收敛引擎：分歧分类、终止条件、整合复核、伪共识检测 | 待做 |
+| 二 | 收敛引擎：分歧分类、终止条件、整合复核、伪共识检测 | ✅ 已完成 |
 | 三 | 盲评与加权评分、阻断项返修、关键路径与里程碑 | 待做 |
 | 四 | 真实模型接入（OpenAI 兼容）、结构校验回注、ai_call 审计 | 待做 |
 | 五 | Web 工作台与人工节点（澄清、确认、变更） | 待做 |

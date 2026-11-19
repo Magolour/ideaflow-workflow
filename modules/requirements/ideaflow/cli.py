@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="由人裁决某条异议，可重复")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出结果摘要")
     parser.add_argument("--quiet", action="store_true", help="不打印阶段进度")
+    parser.add_argument("--max-rounds", type=int, default=2,
+                        help="讨论轮次上限，默认 2")
+    parser.add_argument("--threshold", type=float, default=0.7,
+                        help="判定共识所需的最低支持度，默认 0.7")
     return parser
 
 
@@ -53,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     progress = None if args.quiet else (lambda message: print(message, flush=True))
     try:
         result = run(args.idea, constraints=args.constraint, out_dir=args.out,
-                     answers=answers, resolutions=resolutions, progress=progress)
+                     answers=answers, resolutions=resolutions,
+                     max_rounds=args.max_rounds, threshold=args.threshold,
+                     progress=progress)
     except ContractError as error:
         print(f"生成失败：{error.code} {error.message}", file=sys.stderr)
         if error.path:
@@ -72,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
           f"异议 {counts['objections']} 条（阻断 {counts['blocking']}）｜"
           f"未决问题 {counts['open_questions']} 个")
     print(f"共识状态：{report['consensus']['label']}（{report['consensus']['reason']}）")
+    termination = report.get("termination", {})
+    if termination:
+        print(f"终止条件：{termination['label']}｜支持度 {termination['support']:.0%}")
     print(f"提案文件：{report['proposal']}")
     return 0
 

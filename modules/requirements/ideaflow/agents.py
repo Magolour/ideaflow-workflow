@@ -46,6 +46,12 @@ class MockAgent:
     def respond(self, stage: str, role: Role, context: dict[str, Any]) -> dict[str, Any]:
         if stage == "clarify":
             return self._clarify(role)
+        if stage == "respond":
+            return self._respond(role, context)
+        if stage == "review":
+            return self._review(role, context)
+        if stage == "counterexample":
+            return self._counterexample(context)
         if stage == "diverge":
             return self._diverge(role, context)
         if stage == "critique":
@@ -247,6 +253,73 @@ class MockAgent:
             }
         return output
 
+    # ---------- 收敛：回应异议、整合复核、伪共识反例 ----------
+
+    def _respond(self, role: Role, context: dict[str, Any]) -> dict[str, Any]:
+        mine = [row for row in context["objections"] if row["target_role"] == role.id]
+        responses = []
+        for row in mine[:2]:
+            text = row["text"]
+            if row["severity"] == "blocking":
+                position, argument, evidence = "accept", "接受该异议，在方案中补齐对应内容", "rule"
+            elif "同质化" in text:
+                position, argument, evidence = ("refute",
+                                                "收窄范围不等于放弃差异化，差异化能力保留在候选方案 B/C",
+                                                "rule")
+            elif "供给" in text:
+                position, argument, evidence = ("conditional",
+                                                "认可供给是前提，但需用数据验证后才能判定",
+                                                "assumption")
+            elif "单体架构" in text:
+                position, argument, evidence = ("refute",
+                                                "首版没有高并发证据，单体架构不阻碍体验目标",
+                                                "rule")
+            elif "单点传播" in text:
+                position, argument, evidence = ("refute",
+                                                "传播能力已登记为后续版本，不影响首版闭环",
+                                                "rule")
+            elif "可验收" in text:
+                position, argument, evidence = "accept", "接受，改写为可量化的验收项", "rule"
+            elif "可替换" in text:
+                position, argument, evidence = "accept", "接受，首版增加一层适配并计入工作量", "rule"
+            elif row.get("divergence") == "fact":
+                position, argument, evidence = ("conditional", "认可问题，但需要先补充证据才能定论",
+                                                "assumption")
+            else:
+                position, argument, evidence = ("refute",
+                                                "该异议针对的前提在首版范围外，不构成本期约束",
+                                                "rule")
+            responses.append({"objection": row["id"], "position": position,
+                              "argument": argument, "evidence": evidence})
+        return {"role": role.id, "claims": [], "assumptions": [], "objections": [],
+                "responses": responses, "questions": []}
+
+    def _review(self, role: Role, context: dict[str, Any]) -> dict[str, Any]:
+        adopted = set(context.get("adopted", []))
+        not_adopted = set(context.get("not_adopted", []))
+        reviews = []
+        for claim in context.get("claims", []):
+            if claim["id"] in adopted:
+                verdict, note = "preserved", "意见已写入决策，未被歪曲"
+            elif claim["id"] in not_adopted:
+                verdict, note = "deferred", "已登记为未采纳，理由可查"
+            else:
+                verdict, note = "preserved", "整合稿保留该主张，未发现失真"
+            reviews.append({"claim": claim["id"], "verdict": verdict, "note": note})
+        return {"role": role.id, "claims": [], "assumptions": [], "objections": [],
+                "reviews": reviews, "questions": []}
+
+    def _counterexample(self, context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "role": "skeptic",
+            "claims": [{
+                "text": "全体一致本身值得怀疑：首版若拿不到首批供给，讨论中的共识无法转化为真实使用",
+                "reason": "反例：同类产品在冷启动阶段失败的原因通常是供给不足，而不是方案设计缺陷",
+                "evidence": "rule", "assumes": [],
+            }],
+            "assumptions": [], "objections": [], "questions": [],
+        }
+
     # ---------- 方案签署 ----------
 
     def _sign(self, role: Role, context: dict[str, Any]) -> dict[str, Any]:
@@ -306,10 +379,17 @@ class MockAgent:
         ]
         decisions = [
             {"scope": "首版范围", "choice": "以 A 为基线，B 中已量化的体验项择优并入",
-             "reason": "阻断异议集中在供给与范围，A 能最快验证需求是否真实存在"},
+             "reason": "阻断异议集中在供给与范围，A 能最快验证需求是否真实存在",
+             "based_on": [item for item in (pick("ba"), pick("tech")) if item]},
             {"scope": "成功指标", "choice": "首周完成核心流程的用户数 ≥ 20，次日回访率 ≥ 30%",
-             "reason": "两项都能从现有数据直接统计，不依赖额外埋点体系"},
+             "reason": "两项都能从现有数据直接统计，不依赖额外埋点体系",
+             "based_on": [item for item in (pick("ba", 1), pick("user")) if item]},
         ]
+        not_adopted = [
+            {"claim": pick("innovation", 1) or "", "reason": "首版聚焦核心流程，传播能力留到后续版本"},
+            {"claim": pick("risk", 1) or "", "reason": "已由非目标与免责声明覆盖，不单独立项"},
+        ]
+        not_adopted = [row for row in not_adopted if row["claim"]]
         non_goals = [
             {"item": "在线支付与履约", "reason": "涉及第三方资质与资金安全，首版不承担"},
             {"item": "跨组织推广与商业化", "reason": "供给密度未验证前，推广只会放大获客成本"},
@@ -332,8 +412,9 @@ class MockAgent:
             {"name": "联调与验收", "deliverable": "验收报告与遗留问题清单", "optimistic": 2, "likely": 4, "pessimistic": 7},
         ]
         questions = ["首批种子用户由谁负责，目标是多少？", "是否需要接入既有账号体系？"]
-        return {"options": options, "decisions": decisions, "non_goals": non_goals,
-                "narrative": narrative, "work_packages": packages, "open_questions": questions}
+        return {"options": options, "decisions": decisions, "not_adopted": not_adopted,
+                "non_goals": non_goals, "narrative": narrative,
+                "work_packages": packages, "open_questions": questions}
 
 
 def isolated_context(idea: str, constraints: list[str]) -> dict[str, Any]:
