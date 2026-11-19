@@ -20,6 +20,7 @@ from .constraints import deadline_days
 from .contracts import ContractError
 from .demo import run_case
 from .drafts import SATISFIES_LABEL, Draft
+from .escalate import escalate, save_question
 from .pipeline import slugify
 from .race import load_drafts, load_race, retry_failed, run_race, save_race, unchanged_groups
 from .reviews import SEVERITY_LABEL, review_all
@@ -497,6 +498,75 @@ def cmd_revise(args: argparse.Namespace) -> int:
     return 0 if new_audit["passed"] else 1
 
 
+def _print_question(question: dict[str, Any]) -> None:
+    print(f"需要人工决策 {question['id']} · {question['question']}")
+    print("背景：")
+    for line in question["background"]:
+        print(f"  - {line}")
+    print("选项：")
+    for option in question["options"]:
+        print(f"  {option['key']} {option['text']}（{option['cost_days']} 天）")
+        print(f"     代价：{option['consequence']}")
+    affected = question["affected"]
+    print(f"影响：需求 {'、'.join(affected['requirements']) or '—'} ｜ "
+          f"约束 {'、'.join(affected['constraints']) or '—'} ｜ "
+          f"问题 {'、'.join(affected['issues'])}")
+    print(f"不决策的后果：{question['if_undecided']}")
+    print(f"建议：{question['recommended']}（仅建议，不代替决定）")
+
+
+def cmd_escalate(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    snapshot = load(root)
+    spec = load_spec(root)
+    audit = audit_spec(spec, snapshot)
+
+    if audit["passed"]:
+        print("自审查已通过，没有需要人工决策的阻断问题。")
+        return 0
+    if spec.escalation:
+        print(f"{spec.spec_id} v{spec.version} 已有人工问题，未重复生成。\n")
+        _print_question(spec.escalation)
+        return 0
+
+    try:
+        escalated, question = escalate(spec, snapshot, audit)
+    except ContractError as error:
+        print(f"未能生成人工问题：{error.message}")
+        return 2
+
+    save_spec(escalated, root)
+    save_question(question, root)
+    result = export_spec(escalated, snapshot, root)
+
+    print()
+    _print_question(question)
+    print()
+    print(f"规格状态：{escalated.status} ｜ 版本 {escalated.version} ｜ "
+          f"内容哈希 {escalated.hash[:12]}…（与修订后一致）")
+    print(f"已写入：human_question.json ｜ {result['json']} ｜ {result['markdown']}")
+
+    if (root / "race.json").exists():
+        race = load_race(root)
+        load_drafts(race, root)
+        extras: dict[str, Any] = {
+            "race.json": race.to_json(),
+            "human_question.json": question,
+            result["json"]: read_json(root / result["json"]),
+            "spec.json": read_json(root / "spec.json"),
+        }
+        for name in ("review.json", f"audit.v{escalated.version}.json",
+                     "revisions.json", f"revision.v{escalated.version}.json"):
+            path = root / name
+            if path.exists():
+                extras[name] = read_json(path)
+        deliver(root, snapshot, race.drafts, extras=extras,
+                texts={result["markdown"]: result["markdown_text"],
+                       "spec.md": result["markdown_text"]})
+        print("清单已更新：manifest.json")
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -579,6 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
     revise = sub.add_parser("revise", help="按自审查问题做范围裁剪并复核")
     revise.add_argument("--dir", required=True, help="规格目录")
     revise.set_defaults(func=cmd_revise)
+
+    escalate = sub.add_parser("escalate", help="为无法自动解决的冲突生成人工问题")
+    escalate.add_argument("--dir", required=True, help="规格目录")
+    escalate.set_defaults(func=cmd_escalate)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")

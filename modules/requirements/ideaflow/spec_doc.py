@@ -49,7 +49,11 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
               f"内容哈希 `{spec.hash[:16]}…` ｜ 基线草案 {spec.base_draft}",
               f"> 需求快照 `{spec.snapshot_id}` v{spec.snapshot_version}"
               f"（`{spec.snapshot_hash[:16]}…`）",
-              f"> 同版机读文件：`spec.v{spec.version}.json`", ""]
+              f"> 同版机读文件：`spec.v{spec.version}.json`"]
+    if spec.escalation:
+        parts += [f"> ⚠ 存在未决人工问题 `{spec.escalation['id']}`，"
+                  f"确认前不能作为开发依据。"]
+    parts += [""]
 
     parts += ["## 1 概述", "", spec.architecture, ""]
     parts += [f"本规格以 {spec.base_draft} 为基线，整合两份草案后共 "
@@ -119,6 +123,21 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
     parts += [_table(["工作包", "期望", "标准差"],
                      [[row["name"], row["expected"], row["deviation"]]
                       for row in spec.effort["rows"]])]
+
+    if spec.escalation:
+        question = spec.escalation
+        parts += ["## 9 需人工决策", ""]
+        parts += [f"### {question['id']} {question['question']}", ""]
+        parts += ["**背景**", ""]
+        parts += [f"- {line}" for line in question["background"]]
+        parts += [""]
+        parts += [_table(["选项", "方案", "代价（天）", "说明"],
+                         [[row["key"], row["text"], row["cost_days"], row["consequence"]]
+                          for row in question["options"]])]
+        parts += [f"- **影响范围**：需求 {'、'.join(question['affected']['requirements']) or '—'}"
+                  f" ｜ 约束 {'、'.join(question['affected']['constraints']) or '—'}",
+                  f"- **不决策的后果**：{question['if_undecided']}",
+                  f"- **建议**：{question['recommended']}（仅建议，不代替决定）", ""]
 
     parts += ["## 附录 版本信息", ""]
     parts += [_table(["项目", "值"], [

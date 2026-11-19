@@ -277,6 +277,30 @@ python -m ideaflow.spec_cli revise --dir runs/tight-demo
 - **修订记录**：`REV-001` 写明目标问题、改前改后的版本／哈希／承诺、每条改动、复核的已解决与剩余项；
 - **复核诚实**：期限冲突消失，但 R-03 的需求冲突仍在，状态仍是未通过，交给人工问题处理。
 
+### 无法自动解决时的人工问题
+
+```bash
+python -m ideaflow.spec_cli escalate --dir runs/tight-demo
+```
+
+```text
+需要人工决策 HUMAN-Q-01 · 首版是否必须支持「买家可以在线付款并线下自提」（R-03）？
+背景：
+  - R-03 明确要求在线付款，当前决策是「首版不做站内支付…」，实际上没有满足。
+  - 约束 C-03「首版不做在线支付」与它互斥；已尝试自动裁剪范围，仍无法同时满足。
+选项：
+  A 保留需求，放宽约束 C-03（7.0 天）  代价：工期增加约 6.0 天，需为 C-03 申请例外
+  B 列为下一版，首版按现有方案交付（1.0 天）  代价：首版无法演示，需要书面确认范围
+  C 折中：保留入口但只记录意向（4.0 天）  代价：流程完整但不满足真实场景
+影响：R-03 ｜ C-03 ｜ AUD-01
+建议：B（仅建议，不代替决定）
+```
+
+- **只产出一个问题**：优先处理「需求被降级」这类价值冲突，其余阻断问题列在影响范围；
+- **选项可执行**：每个选项带工期代价、后果和它能解决的问题编号；
+- **状态可识别**：规格转为 `awaiting_human`；状态与升级信息不参与内容哈希，正文仍是同一版；
+- **导出带警示**：Markdown 第 9 章「需人工决策」+ 文件头提示，JSON 带 `escalation` 字段。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -290,6 +314,7 @@ python -m ideaflow.spec_cli revise --dir runs/tight-demo
 | 7 | 规格自审查：覆盖、冲突、验收 | ✅ 已完成 |
 | 8 | 导出同版规格 JSON 与 Markdown | ✅ 已完成 |
 | 9 | 发现问题 → 修订 → 复核记录 | ✅ 已完成 |
+| 10 | 无法自动解决时产出具体人工问题 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -330,7 +355,7 @@ python -m ideaflow.spec_cli revise --dir runs/tight-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 124 项测试
+python -m unittest discover -s tests -v     # 134 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -377,6 +402,7 @@ ideaflow/
 ├── audit.py        # 自审查：覆盖、约束冲突、验收口径
 ├── spec_doc.py     # 规格导出：Markdown 渲染与同版校验
 ├── revisions.py    # 修订：范围裁剪、改前改后与复核记录
+├── escalate.py     # 升级：把冲突变成带选项的人工问题
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -385,6 +411,7 @@ tests/
 ├── test_artifacts.py
 ├── test_audit.py
 ├── test_drafts.py
+├── test_escalate.py
 ├── test_export.py
 ├── test_pipeline.py
 ├── test_race.py

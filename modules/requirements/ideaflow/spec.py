@@ -116,6 +116,7 @@ class Spec:
     review_ref: dict[str, str]
     created_at: str = field(default_factory=now_iso)
     revisions: list[dict[str, Any]] = field(default_factory=list)
+    escalation: dict[str, Any] | None = None
 
     @property
     def hash(self) -> str:
@@ -132,7 +133,6 @@ class Spec:
         return {
             "spec_id": self.spec_id,
             "version": self.version,
-            "status": self.status,
             "snapshot_ref": {"snapshot_id": self.snapshot_id,
                              "version": self.snapshot_version,
                              "hash": self.snapshot_hash},
@@ -154,8 +154,9 @@ class Spec:
         return [row for row in self.open_items if row["blocking"] and not row["resolution"]]
 
     def to_json(self) -> dict[str, Any]:
-        return {**self._content(), "hash": self.hash, "created_at": self.created_at,
-                "revisions": self.revisions}
+        return {**self._content(), "hash": self.hash, "status": self.status,
+                "created_at": self.created_at, "revisions": self.revisions,
+                "escalation": self.escalation}
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> "Spec":
@@ -176,6 +177,7 @@ class Spec:
                 effort=payload["effort"], review_ref=payload["review_ref"],
                 created_at=payload.get("created_at", now_iso()),
                 revisions=list(payload.get("revisions", [])),
+                escalation=payload.get("escalation"),
             )
         except KeyError as error:
             raise ContractError("INVALID_SPEC", f"规格缺少字段 {error}", "spec") from None
