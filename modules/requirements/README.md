@@ -201,6 +201,33 @@ python -m ideaflow.spec_cli review --dir runs/spec-demo
 - **采纳理由**：每条决策带 `draft_ids / claim_ids / requirement_ids`，采纳项写明差异天数与预算余量；
 - **规格结构**：4 个模块（每个都有调用方、入参、出参）、R→M 映射、验收项、非目标、待决项。
 
+### 规格自审查
+
+```bash
+python -m ideaflow.spec_cli audit --dir runs/spec-demo
+```
+
+```text
+自审查 SPEC-001 v1
+覆盖：4/4 有决策 ｜ 4/4 有模块 ｜ 4/4 有验收
+约束：3/3 已核对（期限 14 天 vs 承诺 13.1 天）
+验收：4/4 可度量
+
+结论：未通过 · 阻断 1 条
+  AUD-01 [阻断] 需求被降级或未满足：R-03「买家可以在线付款并线下自提」…
+       建议：确认是否放宽约束，或把该需求正式列为非目标
+```
+
+| 检查 | 判定规则 | 本例 |
+| --- | --- | --- |
+| 覆盖 | 每条 R 有决策、模块、验收；R→M 双向一致 | 4/4 通过 |
+| 冲突 | 期限 < PERT 承诺、人力撑不住并行度、包含禁止项 | 0 冲突 |
+| 验收 | 必须含阈值／数量／比例／明确判定方式 | 4/4 可度量 |
+
+- 审查只看结构化字段，不解析措辞，结论可复现；
+- 问题带类型、严重级、影响条目和修复建议，写入 `audit.v1.json`；
+- 有阻断问题时命令返回 1，可直接用于流水线拦截。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -211,6 +238,7 @@ python -m ideaflow.spec_cli review --dir runs/spec-demo
 | 4 | 案例展示两方案的实际取舍 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | ✅ 已完成 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | ✅ 已完成 |
+| 7 | 规格自审查：覆盖、冲突、验收 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -251,7 +279,7 @@ python -m ideaflow.spec_cli review --dir runs/spec-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 97 项测试
+python -m unittest discover -s tests -v     # 106 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -295,12 +323,14 @@ ideaflow/
 ├── race.py         # 组级失败隔离、尝试记录与单独重试
 ├── reviews.py      # 逐份评审：三维评分、分歧与待决项
 ├── spec.py         # 设计规格：决策、模块、映射、验收、整合规则
+├── audit.py        # 自审查：覆盖、约束冲突、验收口径
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
 └── cli.py          # 命令行入口
 tests/
 ├── test_artifacts.py
+├── test_audit.py
 ├── test_drafts.py
 ├── test_pipeline.py
 ├── test_race.py

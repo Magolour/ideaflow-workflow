@@ -12,8 +12,11 @@ import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .artifacts import deliver
+from .audit import audit_hash, audit_spec, save_audit
+from .constraints import deadline_days
 from .contracts import ContractError
 from .demo import run_case
 from .drafts import SATISFIES_LABEL, Draft
@@ -21,7 +24,7 @@ from .pipeline import slugify
 from .race import load_drafts, load_race, retry_failed, run_race, save_race, unchanged_groups
 from .reviews import SEVERITY_LABEL, review_all
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
-from .spec import build_spec, save_spec
+from .spec import build_spec, load_spec, save_spec
 from .storage import read_json, write_json
 
 
@@ -329,6 +332,60 @@ def cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    snapshot = load(root)
+    spec = load_spec(root)
+    audit = audit_spec(spec, snapshot)
+    save_audit(audit, root, spec.version)
+
+    if args.json:
+        print(json.dumps({**audit, "hash": audit_hash(audit)}, ensure_ascii=False, indent=2))
+        return 0 if audit["passed"] else 1
+
+    checks = audit["checks"]
+    deadline = next((value for value in
+                     (deadline_days(item["text"]) for item in snapshot.constraints)
+                     if value), None)
+    print(f"自审查 {spec.spec_id} v{spec.version} · spec hash {spec.hash[:12]}…")
+    print(f"覆盖：{checks['coverage']['with_decision']}/{checks['coverage']['requirements']} "
+          f"有决策 ｜ {checks['coverage']['with_module']}/{checks['coverage']['requirements']} "
+          f"有模块 ｜ {checks['coverage']['with_acceptance']}/"
+          f"{checks['coverage']['requirements']} 有验收")
+    line = f"约束：{checks['constraints']['verified']}/{checks['constraints']['total']} 已核对"
+    if deadline:
+        line += f"（期限 {deadline} 天 vs 承诺 {spec.effort['commit_days']} 天）"
+    print(line)
+    print(f"验收：{checks['acceptance']['measurable']}/{checks['acceptance']['total']} 可度量")
+    print()
+
+    if audit["passed"]:
+        print("结论：通过，没有阻断问题。")
+    else:
+        print(f"结论：未通过 · 阻断 {audit['counts']['blocking']} 条，"
+              f"重要 {audit['counts']['major']} 条")
+        for issue in audit["issues"]:
+            print(f"  {issue['id']} [{SEVERITY_LABEL[issue['severity']]}] "
+                  f"{issue['label']}：{issue['message']}")
+            if issue["fix_hint"]:
+                print(f"       建议：{issue['fix_hint']}")
+
+    race = load_race(root)
+    load_drafts(race, root)
+    extras: dict[str, Any] = {"race.json": race.to_json(),
+                              f"audit.v{spec.version}.json": {**audit,
+                                                              "hash": audit_hash(audit)}}
+    for name in ("review.json", f"spec.v{spec.version}.json"):
+        path = root / name
+        if path.exists():
+            extras[name] = read_json(path)
+    deliver(root, snapshot, race.drafts, extras=extras)
+
+    print()
+    print(f"已写入：audit.v{spec.version}.json ｜ 清单已更新")
+    return 0 if audit["passed"] else 1
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -397,6 +454,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--dir", required=True, help="赛马目录")
     review.add_argument("--json", action="store_true", help="输出 JSON")
     review.set_defaults(func=cmd_review)
+
+    audit = sub.add_parser("audit", help="对规格做覆盖、冲突、验收自审查")
+    audit.add_argument("--dir", required=True, help="规格目录")
+    audit.add_argument("--json", action="store_true", help="输出 JSON")
+    audit.set_defaults(func=cmd_audit)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")
