@@ -178,6 +178,29 @@ python -m ideaflow.spec_cli retry --dir runs/retry-demo
 - **单独重试**：`retry` 只挑 `failed` 的组，已成功组的产物哈希前后一致（测试断言）；
 - **失败注入**：`--fail-group` 只用于演示与回归，真实运行不会注入。
 
+### 逐份评审与规格整合
+
+```bash
+python -m ideaflow.spec_cli review --dir runs/spec-demo
+```
+
+```text
+逐份评审（一次只给一份草案，互不参照）
+  DRAFT-A 价值 4.0 ｜ 可行 5.0 ｜ 成本 4.0 → 加权 4.35
+  DRAFT-B 价值 5.0 ｜ 可行 1.0 ｜ 成本 1.0 → 加权 2.6
+结论：以 DRAFT-A 为基线
+整合决策：
+  DEC-02 [采纳] R-02 关键词 + 标签 + 价格排序 + 搜索建议 + 空结果推荐
+       理由：采纳 DRAFT-B 的 B-DEC-02…；差异 +2.5 天，在剩余预算内
+  DEC-03 [基线] R-03 首版不做站内支付… ⚠ 待人工
+```
+
+- **评审隔离**：`review_context` 只放快照、一份草案与评分口径，测试断言其中没有另一组的内容；
+- **三维评分**：价值／可行／成本，权重 40/35/25，只用来暴露取舍，不直接选方案；
+- **整合规则**：以加权高者为基线，只采纳「不违反约束且在剩余预算内」的差异项，本例采纳 B 的搜索、拒绝 B 的支付与收藏；
+- **采纳理由**：每条决策带 `draft_ids / claim_ids / requirement_ids`，采纳项写明差异天数与预算余量；
+- **规格结构**：4 个模块（每个都有调用方、入参、出参）、R→M 映射、验收项、非目标、待决项。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -187,6 +210,7 @@ python -m ideaflow.spec_cli retry --dir runs/retry-demo
 | 3 | 交付快照、A/B 草案及来源引用 | ✅ 已完成 |
 | 4 | 案例展示两方案的实际取舍 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | ✅ 已完成 |
+| 6 | 分别评审、记录分歧与采纳理由、整合成规格 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -227,7 +251,7 @@ python -m ideaflow.spec_cli retry --dir runs/retry-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 84 项测试
+python -m unittest discover -s tests -v     # 97 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -269,6 +293,8 @@ ideaflow/
 ├── artifacts.py    # 交付：草案落盘、引用边、清单与哈希
 ├── tradeoffs.py    # A/B 取舍记录：同一需求上的选择与代价
 ├── race.py         # 组级失败隔离、尝试记录与单独重试
+├── reviews.py      # 逐份评审：三维评分、分歧与待决项
+├── spec.py         # 设计规格：决策、模块、映射、验收、整合规则
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -278,6 +304,7 @@ tests/
 ├── test_drafts.py
 ├── test_pipeline.py
 ├── test_race.py
+├── test_reviews.py
 ├── test_snapshot.py
 ├── test_tradeoffs.py
 └── test_web.py

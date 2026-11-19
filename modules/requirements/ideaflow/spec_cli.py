@@ -18,9 +18,11 @@ from .contracts import ContractError
 from .demo import run_case
 from .drafts import SATISFIES_LABEL, Draft
 from .pipeline import slugify
-from .race import load_race, retry_failed, run_race, save_race, unchanged_groups
+from .race import load_drafts, load_race, retry_failed, run_race, save_race, unchanged_groups
+from .reviews import SEVERITY_LABEL, review_all
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
-from .storage import read_json
+from .spec import build_spec, save_spec
+from .storage import read_json, write_json
 
 
 def _display_width(text: str) -> int:
@@ -271,6 +273,62 @@ def cmd_case(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    snapshot = load(root)
+    race = load_race(root)
+    load_drafts(race, root)
+    if len(race.drafts) < 2:
+        print("需要两份成功的草案才能评审整合；先补齐失败组。", file=sys.stderr)
+        return 2
+
+    reviews = review_all(snapshot, race.drafts)
+    spec = build_spec(snapshot, race.drafts, reviews)
+    write_json(root / "review.json", reviews)
+    save_spec(spec, root)
+
+    if args.json:
+        print(json.dumps({"reviews": reviews, "spec": spec.to_json()},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    print("逐份评审（一次只给一份草案，互不参照）")
+    for draft_id, review in reviews["drafts"].items():
+        scores = review["scores"]
+        print(f"  {draft_id} 价值 {scores['value']} ｜ 可行 {scores['feasibility']} ｜ "
+              f"成本 {scores['cost']} → 加权 {review['weighted']}")
+        for row in review["disagreements"]:
+            impact = "、".join(row["requirement_ids"] or row.get("constraint_ids", []))
+            print(f"    {row['id']} [{SEVERITY_LABEL[row['severity']]}] "
+                  f"{impact or '全局'}：{row['issue']}")
+
+    print()
+    print(f"结论：以 {spec.base_draft} 为基线（{reviews['verdict']['reason']}）")
+    print()
+    print("整合决策：")
+    for decision in spec.decisions:
+        flag = "采纳" if decision["origin"] == "adopted" else "基线"
+        mark = " ⚠ 待人工" if decision["needs_human"] else ""
+        print(f"  {decision['id']} [{flag}] {decision['requirement_ids'][0]} "
+              f"{decision['choice']}{mark}")
+        if decision["origin"] == "adopted":
+            print(f"       理由：{decision['reason']}")
+    print()
+    blocking = len(spec.blocking_open_items)
+    print(f"模块 {len(spec.modules)} 个 ｜ 映射 {len(spec.mapping)} 条 ｜ "
+          f"验收 {len(spec.acceptance)} 条 ｜ 待决 {len(spec.open_items)} 项（阻断 {blocking}）")
+    print(f"估算：期望 {spec.effort['expected_total']} 天，承诺 {spec.effort['commit_days']} 天")
+    for item in spec.open_items:
+        print(f"  {item['id']} {'[阻断]' if item['blocking'] else '[可延后]'} {item['question']}")
+
+    manifest = deliver(root, snapshot, race.drafts,
+                       extras={"race.json": race.to_json(), "review.json": reviews,
+                               f"spec.v{spec.version}.json": spec.to_json()})
+    print()
+    print(f"已交付：{', '.join(manifest['files'])}, manifest.json")
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -334,6 +392,11 @@ def build_parser() -> argparse.ArgumentParser:
     retry.add_argument("--dir", required=True, help="赛马目录")
     retry.add_argument("--max-attempts", type=int, default=1, help="本次重试次数，默认 1")
     retry.set_defaults(func=cmd_retry)
+
+    review = sub.add_parser("review", help="逐份评审 A/B 草案并整合成设计规格")
+    review.add_argument("--dir", required=True, help="赛马目录")
+    review.add_argument("--json", action="store_true", help="输出 JSON")
+    review.set_defaults(func=cmd_review)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")

@@ -1,0 +1,351 @@
+"""设计规格：把两份评审后的草案整合成可追溯、可审查的规格对象。
+
+整合不是平均：以加权得分高的草案为基线，只采纳“不违反约束且在剩余预算内”
+的差异项；每一条采纳或不采纳都写明理由，未满足的需求转为待决项。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .constraints import deadline_days, forbidden_subjects, shares_topic
+from .contracts import ContractError
+from .drafts import NEGATIONS, Draft
+from .estimate import pert
+from .snapshot import Snapshot
+from .storage import content_hash, now_iso, read_json, write_json
+
+SPEC_STATUS = ("draft", "awaiting_human", "confirmed")
+
+MODULE_NAMES = (
+    ("发布", "教材发布"),
+    ("搜索", "教材检索"),
+    ("支付", "成交与结算"),
+    ("收藏", "收藏夹"),
+    ("评价", "信用评价"),
+    ("自提", "自提与面交"),
+)
+VALUE_ORDER = ("搜索", "支付", "发布", "收藏", "评价", "自提")
+
+INTERFACES: dict[str, list[dict[str, str]]] = {
+    "发布": [{"name": "publishBook", "caller": "发布页",
+              "input": "{title, price, contact}", "output": "bookId"}],
+    "搜索": [{"name": "searchBooks", "caller": "列表页",
+              "input": "{keyword, sort}", "output": "Book[]"}],
+    "支付": [{"name": "createTrade", "caller": "成交页",
+              "input": "{bookId, method}", "output": "tradeId"}],
+    "收藏": [{"name": "toggleFavorite", "caller": "列表页 / 详情页",
+              "input": "{bookId}", "output": "{favorited}"}],
+    "评价": [{"name": "submitReview", "caller": "成交完成页",
+              "input": "{tradeId, score}", "output": "reviewId"}],
+    "自提": [{"name": "reservePickup", "caller": "成交页",
+              "input": "{tradeId, slot}", "output": "reservationId"}],
+}
+
+
+def _feature(text: str) -> str | None:
+    for key in VALUE_ORDER:
+        if key in text:
+            return key
+    return None
+
+
+def _module_name(text: str, index: int) -> str:
+    key = _feature(text)
+    for name, label in MODULE_NAMES:
+        if key and name == key:
+            return label
+    return f"需求模块 {index}"
+
+
+def _interfaces(text: str, index: int) -> list[dict[str, str]]:
+    key = _feature(text)
+    if key and key in INTERFACES:
+        return [dict(row) for row in INTERFACES[key]]
+    return [{"name": f"handle{index:02d}", "caller": "应用层",
+             "input": "{payload}", "output": "result | error"}]
+
+
+def _conflict_constraint(choice: str, snapshot: Snapshot) -> dict[str, Any] | None:
+    for item in snapshot.constraints:
+        for subject in forbidden_subjects(item["text"]):
+            if (shares_topic(subject, choice)
+                    and not any(word in choice for word in NEGATIONS)):
+                return item
+    return None
+
+
+def _acceptance(decision: dict[str, Any], index: int) -> dict[str, Any]:
+    if decision["satisfies"] == "full":
+        criterion = (f"在 5 台测试设备上完成「{decision['scope']}」主流程，"
+                     f"成功率 100%，单次操作不超过 3 步")
+        verify = "手动走查 + 录屏"
+    elif decision["satisfies"] == "declined":
+        criterion = "线下成交后 24 小时内可在系统内补录成交记录，补录成功率 100%"
+        verify = "手动走查 + 数据抽样"
+    else:
+        criterion = f"「{decision['scope']}」的 3 个核心路径可用，缺失能力登记为待决项"
+        verify = "自动化用例 + 录屏"
+    return {"id": f"AC-{index:02d}", "requirement_id": decision["requirement_ids"][0],
+            "criterion": criterion, "verify": verify}
+
+
+@dataclass
+class Spec:
+    spec_id: str
+    version: int
+    status: str
+    snapshot_id: str
+    snapshot_version: int
+    snapshot_hash: str
+    architecture: str
+    base_draft: str
+    decisions: list[dict[str, Any]]
+    modules: list[dict[str, Any]]
+    mapping: list[dict[str, Any]]
+    acceptance: list[dict[str, Any]]
+    non_goals: list[dict[str, Any]]
+    open_items: list[dict[str, Any]]
+    not_adopted: list[dict[str, Any]]
+    effort: dict[str, Any]
+    review_ref: dict[str, str]
+    created_at: str = field(default_factory=now_iso)
+    revisions: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def hash(self) -> str:
+        return content_hash(self._content())
+
+    def _content(self) -> dict[str, Any]:
+        return {
+            "spec_id": self.spec_id,
+            "version": self.version,
+            "status": self.status,
+            "snapshot_ref": {"snapshot_id": self.snapshot_id,
+                             "version": self.snapshot_version,
+                             "hash": self.snapshot_hash},
+            "review_ref": self.review_ref,
+            "architecture": self.architecture,
+            "base_draft": self.base_draft,
+            "decisions": self.decisions,
+            "modules": self.modules,
+            "mapping": self.mapping,
+            "acceptance": self.acceptance,
+            "non_goals": self.non_goals,
+            "open_items": self.open_items,
+            "not_adopted": self.not_adopted,
+            "effort": self.effort,
+        }
+
+    @property
+    def blocking_open_items(self) -> list[dict[str, Any]]:
+        return [row for row in self.open_items if row["blocking"] and not row["resolution"]]
+
+    def to_json(self) -> dict[str, Any]:
+        return {**self._content(), "hash": self.hash, "created_at": self.created_at,
+                "revisions": self.revisions}
+
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> "Spec":
+        try:
+            spec = cls(
+                spec_id=payload["spec_id"], version=int(payload["version"]),
+                status=payload["status"],
+                snapshot_id=payload["snapshot_ref"]["snapshot_id"],
+                snapshot_version=int(payload["snapshot_ref"]["version"]),
+                snapshot_hash=payload["snapshot_ref"]["hash"],
+                architecture=payload["architecture"],
+                base_draft=payload["base_draft"],
+                decisions=payload["decisions"], modules=payload["modules"],
+                mapping=payload["mapping"], acceptance=payload["acceptance"],
+                non_goals=payload.get("non_goals", []),
+                open_items=payload.get("open_items", []),
+                not_adopted=payload.get("not_adopted", []),
+                effort=payload["effort"], review_ref=payload["review_ref"],
+                created_at=payload.get("created_at", now_iso()),
+                revisions=list(payload.get("revisions", [])),
+            )
+        except KeyError as error:
+            raise ContractError("INVALID_SPEC", f"规格缺少字段 {error}", "spec") from None
+        if payload.get("hash") and payload["hash"] != spec.hash:
+            raise ContractError("HASH_MISMATCH", "规格内容与记录的哈希不一致", "hash")
+        return spec
+
+
+def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
+               reviews: dict[str, Any]) -> Spec:
+    if len(drafts) < 2:
+        raise ContractError("NEED_TWO_DRAFTS", "整合规格需要两份草案", "drafts")
+    by_id = {draft.draft_id: draft for draft in drafts.values()}
+    base_id = reviews["verdict"]["base_draft"]
+    base = by_id[base_id]
+    other = next(draft for draft in drafts.values() if draft.draft_id != base_id)
+
+    deadline = next((value for value in
+                     (deadline_days(item["text"]) for item in snapshot.constraints)
+                     if value), None)
+    remaining = (deadline - base.commit_days) if deadline else base.commit_days * 0.2
+
+    not_adopted: list[dict[str, Any]] = []
+    eligible: list[tuple[int, float, Any, Any, Any]] = []
+    for item in snapshot.requirements:
+        left = base.decision_for(item["id"])
+        right = other.decision_for(item["id"])
+        if left is None or right is None or left["choice"] == right["choice"]:
+            continue
+        if right["satisfies"] != "full":
+            continue
+        conflict = _conflict_constraint(right["choice"], snapshot)
+        if conflict:
+            not_adopted.append({
+                "draft": other.draft_id, "decision": right["id"],
+                "requirement_ids": [item["id"]], "scope": item["text"],
+                "choice": right["choice"],
+                "reason": f"与约束 {conflict['id']}「{conflict['text']}」冲突",
+            })
+            continue
+        order = VALUE_ORDER.index(_feature(item["text"])) if _feature(item["text"]) else 9
+        eligible.append((order, float(right["cost_days"]) - float(left["cost_days"]),
+                         item, left, right))
+
+    adopted: dict[str, dict[str, Any]] = {}
+    for _, delta, item, left, right in sorted(eligible, key=lambda row: (row[0], row[1])):
+        if delta <= remaining:
+            adopted[item["id"]] = right
+            remaining -= max(0.0, delta)
+        else:
+            not_adopted.append({
+                "draft": other.draft_id, "decision": right["id"],
+                "requirement_ids": [item["id"]], "scope": item["text"],
+                "choice": right["choice"],
+                "reason": (f"超出剩余预算：需要 +{delta:.1f} 天，"
+                           f"剩余 {remaining:.1f} 天"),
+            })
+
+    decisions = []
+    modules = []
+    mapping = []
+    acceptance = []
+    for index, item in enumerate(snapshot.requirements, 1):
+        left = base.decision_for(item["id"])
+        right = adopted.get(item["id"])
+        if right is not None:
+            decision = {
+                "id": f"DEC-{index:02d}", "scope": item["text"],
+                "choice": right["choice"],
+                "reason": (f"采纳 {other.draft_id} 的 {right['id']}：{right['reason']}；"
+                           f"差异 +{float(right['cost_days']) - float(left['cost_days']):.1f} 天，"
+                           f"在剩余预算内"),
+                "requirement_ids": [item["id"]],
+                "draft_ids": [other.draft_id], "claim_ids": [
+                    claim["id"] for claim in other.claims
+                    if item["id"] in claim.get("requirement_ids", [])],
+                "origin": "adopted", "satisfies": "full",
+                "cost_days": float(right["cost_days"]), "needs_human": False,
+            }
+        else:
+            decision = {
+                "id": f"DEC-{index:02d}", "scope": item["text"],
+                "choice": left["choice"], "reason": left["reason"],
+                "requirement_ids": [item["id"]],
+                "draft_ids": [base.draft_id], "claim_ids": [
+                    claim["id"] for claim in base.claims
+                    if item["id"] in claim.get("requirement_ids", [])],
+                "origin": "base", "satisfies": left["satisfies"],
+                "cost_days": float(left["cost_days"]),
+                "needs_human": left["satisfies"] != "full",
+            }
+        decisions.append(decision)
+
+        module = {
+            "id": f"M-{index:02d}",
+            "name": _module_name(item["text"], index),
+            "responsibility": decision["choice"],
+            "requirement_ids": [item["id"]],
+            "decision_ids": [decision["id"]],
+            "interfaces": _interfaces(item["text"], index),
+            "estimate_days": decision["cost_days"],
+        }
+        modules.append(module)
+        mapping.append({"requirement_id": item["id"], "module_ids": [module["id"]],
+                        "decision_ids": [decision["id"]]})
+        acceptance.append(_acceptance(decision, index))
+
+    open_items: list[dict[str, Any]] = []
+    for decision in decisions:
+        if decision["satisfies"] == "full":
+            continue
+        requirement = snapshot.by_id(decision["requirement_ids"][0])
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": (f"首版是否必须支持「{requirement['text']}」？"
+                         f"如果不支持，由谁确认该需求延期？"),
+            "impact": [requirement["id"]],
+            "blocking": True,
+            "candidates": [
+                {"draft": base.draft_id, "choice": base.decision_for(requirement["id"])["choice"],
+                 "cost_days": float(base.decision_for(requirement["id"])["cost_days"])},
+                {"draft": other.draft_id, "choice": other.decision_for(requirement["id"])["choice"],
+                 "cost_days": float(other.decision_for(requirement["id"])["cost_days"])},
+            ],
+            "origin": "merge",
+            "resolution": None,
+        })
+    unmet = {decision["requirement_ids"][0] for decision in decisions
+             if decision["satisfies"] != "full"}
+    for row in not_adopted:
+        if row["requirement_ids"][0] in unmet:
+            continue
+        requirement = snapshot.by_id(row["requirement_ids"][0])
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": f"「{requirement['text']}」的体验增强是否排到下一版？",
+            "impact": [requirement["id"]],
+            "blocking": False,
+            "candidates": [{"draft": row["draft"], "choice": row["reason"],
+                            "cost_days": 0.0}],
+            "origin": "merge",
+            "resolution": None,
+        })
+
+    packages = [{"name": module["name"], "optimistic": round(module["estimate_days"] * 0.8, 1),
+                 "likely": module["estimate_days"],
+                 "pessimistic": round(module["estimate_days"] * 1.6, 1)}
+                for module in modules]
+    packages.append({"name": "联调、验收与演示准备", "optimistic": 2.0,
+                     "likely": 3.0, "pessimistic": 5.0})
+    effort = pert(packages)
+
+    non_goals = [{
+        "item": row["scope"], "choice": row["choice"], "reason": row["reason"],
+        "requirement_ids": list(row["requirement_ids"]),
+    } for row in not_adopted]
+
+    return Spec(
+        spec_id="SPEC-001", version=1, status="draft",
+        snapshot_id=snapshot.snapshot_id, snapshot_version=snapshot.version,
+        snapshot_hash=snapshot.hash,
+        architecture="分层：交互层 / 应用层 / 领域层 / 基础层；每个需求对应一个领域模块，"
+                     "跨模块只经应用层接口调用。",
+        base_draft=base_id,
+        decisions=decisions, modules=modules, mapping=mapping, acceptance=acceptance,
+        non_goals=non_goals, open_items=open_items, not_adopted=not_adopted,
+        effort=effort,
+        review_ref={"file": "review.json", "hash": content_hash(reviews)},
+    )
+
+
+def save_spec(spec: Spec, directory: str | Path) -> Path:
+    root = Path(directory)
+    versioned = write_json(root / f"spec.v{spec.version}.json", spec.to_json())
+    write_json(root / "spec.json", spec.to_json())
+    return versioned
+
+
+def load_spec(directory: str | Path) -> Spec:
+    path = Path(directory)
+    if path.is_dir():
+        path = path / "spec.json"
+    return Spec.from_json(read_json(path))
