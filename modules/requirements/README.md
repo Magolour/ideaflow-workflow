@@ -106,13 +106,38 @@ python -m ideaflow.spec_cli race --dir runs/spec-demo
 - **覆盖**：每条明确要求都必须给出本组选择，漏一条即 `DRAFT_COVERAGE`。
 - **自报冲突**：草案自己记录 `constraints_checked`，与期限、禁止项冲突时 `complies=false`，不静默忽略。
 
+### 交付物与来源引用
+
+`race` 会把快照、两份草案、引用边和清单一起写进目录：
+
+| 文件 | 内容 |
+| --- | --- |
+| `snapshot.v1.json` | 需求快照，含每条目的章节与行号 |
+| `drafts/DRAFT-A.json` | A 组草案：决策、主张、假设、风险、估算、约束核对 |
+| `drafts/DRAFT-B.json` | B 组草案，同上 |
+| `citations.json` | 草案 → 快照条目的引用边，以及全部来源位置 |
+| `manifest.json` | 文件清单与内容哈希，重复交付结果稳定 |
+
+任取一条结论都能回查原文：
+
+```bash
+$ python -m ideaflow.spec_cli trace --dir runs/spec-demo --item R-03
+R-03 · 明确要求 · 买家可以在线付款并线下自提
+来源：校园二手书小程序 · 第 5 行 · 买家可以在线付款并线下自提。
+  DRAFT-A A-DEC-03（决定）：首版不做站内支付，改为线下当面交易并记录成交状态
+  DRAFT-B B-DEC-03（决定）：站内支付 + 担保交易，覆盖下单、付款、放款全流程
+```
+
+引用边会在交付前校验：指向快照外的条目报 `DANGLING_CITATION`，
+某条需求没有被任一草案决策覆盖报 `CITATION_GAP`。
+
 实现进度：
 
 | # | 能力 | 状态 |
 | --- | --- | --- |
 | 1 | 需求快照：编号、版本、三类条目、来源行号 | ✅ 已完成 |
 | 2 | 两组 Agent 基于同一快照独立出方案 | ✅ 已完成 |
-| 3 | 交付快照、A/B 草案及来源引用 | 待做 |
+| 3 | 交付快照、A/B 草案及来源引用 | ✅ 已完成 |
 | 4 | 案例展示两方案的实际取舍 | 待做 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
@@ -154,7 +179,7 @@ python -m ideaflow.spec_cli race --dir runs/spec-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 60 项测试
+python -m unittest discover -s tests -v     # 67 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -193,10 +218,12 @@ ideaflow/
 ├── snapshot.py     # 需求快照：三类条目、编号、版本、来源
 ├── constraints.py  # 期限、人力、禁止事项的确定性抽取
 ├── drafts.py       # A/B 两组草案：独立上下文、覆盖校验
+├── artifacts.py    # 交付：草案落盘、引用边、清单与哈希
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
 └── cli.py          # 命令行入口
 tests/
+├── test_artifacts.py
 ├── test_drafts.py
 ├── test_pipeline.py
 ├── test_snapshot.py

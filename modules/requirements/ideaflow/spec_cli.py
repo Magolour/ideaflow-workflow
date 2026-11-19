@@ -13,10 +13,12 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from .artifacts import deliver
 from .contracts import ContractError
 from .drafts import GROUPS, SATISFIES_LABEL, Draft, run_groups
 from .pipeline import slugify
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
+from .storage import read_json
 
 
 def _display_width(text: str) -> int:
@@ -128,6 +130,43 @@ def cmd_race(args: argparse.Namespace) -> int:
     print("两组读同一份快照，各自独立出方案，互相不可见。\n")
     for group in ("A", "B"):
         _print_draft(drafts[group])
+
+    manifest = deliver(args.dir, snapshot, drafts)
+    print("已交付：")
+    for name in manifest["files"]:
+        print(f"  {name}")
+    print(f"引用边 {manifest['citations']['edges']} 条 · "
+          f"清单 {Path(args.dir) / 'manifest.json'}")
+    return 0
+
+
+def cmd_trace(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    citations = read_json(root / "citations.json")
+    sources = citations["sources"]
+    item = sources.get(args.item)
+    if item is None:
+        print(f"快照里没有条目 {args.item}", file=sys.stderr)
+        return 2
+
+    print(f"{args.item} · {ITEM_TYPE_LABEL[item['type']]} · {item['text']}")
+    print(f"来源：{item['section']} · 第 {item['start_line']} 行 · {item['excerpt']}")
+    print()
+
+    found = False
+    for path in sorted((root / "drafts").glob("*.json")):
+        draft = read_json(path)
+        for decision in draft["decisions"]:
+            if args.item in decision["requirement_ids"]:
+                found = True
+                print(f"  {draft['draft_id']} {decision['id']}（决定）：{decision['choice']}")
+        for claim in draft["claims"]:
+            refs = claim.get("requirement_ids", []) + claim.get("constraint_ids", [])
+            if args.item in refs:
+                found = True
+                print(f"  {draft['draft_id']} {claim['id']}（主张）：{claim['text']}")
+    if not found:
+        print("  没有草案引用该条目。")
     return 0
 
 
@@ -152,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
     race.add_argument("--confirm", metavar="NAME", help="快照尚未确认时，先以该名字确认")
     race.add_argument("--json", action="store_true", help="输出 JSON")
     race.set_defaults(func=cmd_race)
+
+    trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
+    trace.add_argument("--dir", required=True, help="交付目录")
+    trace.add_argument("--item", required=True, help="快照条目编号，例如 R-03")
+    trace.set_defaults(func=cmd_trace)
     return parser
 
 
