@@ -47,6 +47,16 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
 | 整合复核 | 原角色复核自己的主张，遗漏或歪曲按阻断项处理 |
 | 伪共识检测 | 全票通过时强制质疑者给出反例，反例未处理不得判通过 |
 
+## 与仓库内其他模块的关系
+
+本模块负责整条流程的第一段：想法 → 讨论 → Proposal。产物交给后续阶段消费：
+
+- `proposal.md` 第 4—5 章给出范围与功能清单，可作为任务拆解的输入；
+- `blackboard.json` 的 `decisions`、`open_questions` 与 `objections` 保留待确认项，
+  下游不得把未决问题当作已确认结论；
+- 与 `modules/orchestrator` 的 `POST /api/start` 对接在后续部分完成，
+  当前仍以规格文本作为交接边界。
+
 ## 快速开始
 
 ```bash
