@@ -321,6 +321,34 @@ class Draft:
             "declined_requirements": self.declined,
         }
 
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> "Draft":
+        try:
+            draft = cls(
+                draft_id=payload["draft_id"],
+                group=payload["group"],
+                group_name=payload.get("group_name", payload["group"]),
+                objective=payload.get("objective", ""),
+                snapshot_id=payload["snapshot_ref"]["snapshot_id"],
+                snapshot_version=int(payload["snapshot_ref"]["version"]),
+                snapshot_hash=payload["snapshot_ref"]["hash"],
+                summary=payload.get("summary", ""),
+                decisions=payload["decisions"],
+                claims=payload["claims"],
+                assumptions=payload.get("assumptions", []),
+                risks=payload.get("risks", []),
+                constraints_checked=payload.get("constraints_checked", []),
+                packages=payload.get("packages", []),
+                estimate=payload["estimate"],
+                created_at=payload.get("created_at", now_iso()),
+                attempt=int(payload.get("attempt", 1)),
+            )
+        except KeyError as error:
+            raise ContractError("INVALID_DRAFT", f"草案缺少字段 {error}", "draft") from None
+        if payload.get("hash") and payload["hash"] != draft.hash:
+            raise ContractError("HASH_MISMATCH", "草案内容与记录的哈希不一致", "hash")
+        return draft
+
 
 def build_draft(snapshot: Snapshot, group: str, *, attempt: int = 1,
                 context: dict[str, Any] | None = None) -> Draft:

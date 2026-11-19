@@ -152,6 +152,32 @@ R-03 买家可以在线付…  首版不做站内支付，改为…（1.0 天）
 - **其余三条**是同一需求下的体验投入差异（搜索 +2.5 天、收藏 +4 天、发布 +2 天）；
 - 取舍记录只写事实与代价，不替人做决定，判断留给评审与人工确认。
 
+### 单组失败与单独重试
+
+赛马不是事务：一组失败不会回滚另一组的结果。
+
+```bash
+# 第一轮：B 组失败，A 组结果保留
+python -m ideaflow.spec_cli race --dir runs/retry-demo --fail-group B --no-retry
+
+# 只重跑 B，A 不重跑
+python -m ideaflow.spec_cli retry --dir runs/retry-demo
+```
+
+```text
+  A 第 1 次：成功（hash 7051e9a6…）
+  B 第 1 次：失败 SIMULATED_FAILURE B 组第 1 次尝试被模拟为失败
+  ...
+重试失败组：B（已成功的组不重跑）
+  B 第 2 次：成功（hash addbdf24…）
+  A 组未重跑：hash 7051e9a6…（与失败前一致）
+```
+
+- **失败隔离**：`run_race` 把异常收敛到组级，`A` 成功、`B` 失败时 `drafts/DRAFT-A.json` 照常交付；
+- **尝试记录**：每次尝试的组、序号、耗时、错误码都写进 `race.json` 的 `attempts`；
+- **单独重试**：`retry` 只挑 `failed` 的组，已成功组的产物哈希前后一致（测试断言）；
+- **失败注入**：`--fail-group` 只用于演示与回归，真实运行不会注入。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -160,6 +186,7 @@ R-03 买家可以在线付…  首版不做站内支付，改为…（1.0 天）
 | 2 | 两组 Agent 基于同一快照独立出方案 | ✅ 已完成 |
 | 3 | 交付快照、A/B 草案及来源引用 | ✅ 已完成 |
 | 4 | 案例展示两方案的实际取舍 | ✅ 已完成 |
+| 5 | 一组失败后可单独重试 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -200,7 +227,7 @@ R-03 买家可以在线付…  首版不做站内支付，改为…（1.0 天）
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 75 项测试
+python -m unittest discover -s tests -v     # 84 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -241,6 +268,7 @@ ideaflow/
 ├── drafts.py       # A/B 两组草案：独立上下文、覆盖校验
 ├── artifacts.py    # 交付：草案落盘、引用边、清单与哈希
 ├── tradeoffs.py    # A/B 取舍记录：同一需求上的选择与代价
+├── race.py         # 组级失败隔离、尝试记录与单独重试
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -249,6 +277,7 @@ tests/
 ├── test_artifacts.py
 ├── test_drafts.py
 ├── test_pipeline.py
+├── test_race.py
 ├── test_snapshot.py
 ├── test_tradeoffs.py
 └── test_web.py

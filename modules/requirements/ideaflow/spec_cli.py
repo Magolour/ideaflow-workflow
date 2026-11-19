@@ -16,8 +16,9 @@ from pathlib import Path
 from .artifacts import deliver
 from .contracts import ContractError
 from .demo import run_case
-from .drafts import GROUPS, SATISFIES_LABEL, Draft, run_groups
+from .drafts import SATISFIES_LABEL, Draft
 from .pipeline import slugify
+from .race import load_race, retry_failed, run_race, save_race, unchanged_groups
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
 from .storage import read_json
 
@@ -117,6 +118,16 @@ def _print_draft(draft: Draft) -> None:
     print()
 
 
+def _print_attempt(record: dict) -> None:
+    if record["state"] == "done":
+        print(f"  {record['group']} 第 {record['attempt']} 次：成功"
+              f"（{record['duration_ms']} ms，hash {record['hash'][:8]}…）")
+    else:
+        error = record.get("error") or {}
+        print(f"  {record['group']} 第 {record['attempt']} 次：失败 "
+              f"{error.get('code')} {error.get('message')}")
+
+
 def cmd_race(args: argparse.Namespace) -> int:
     snapshot = load(args.dir)
     if snapshot.status != "confirmed":
@@ -126,24 +137,81 @@ def cmd_race(args: argparse.Namespace) -> int:
             return 2
         snapshot = snapshot.confirm(args.confirm)
         save(snapshot, args.dir)
-    drafts = run_groups(snapshot)
+
+    fail_groups = {group: args.fail_times for group in args.fail_group}
+    max_attempts = 1 if args.no_retry else args.max_attempts
+
     if args.json:
-        print(json.dumps({group: draft.to_json() for group, draft in drafts.items()},
-                         ensure_ascii=False, indent=2))
+        race = run_race(snapshot, fail_groups=fail_groups, max_attempts=max_attempts)
+        save_race(race, args.dir)
+        payload = {**race.to_json(),
+                   "drafts": {group: draft.to_json() for group, draft in race.drafts.items()}}
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     print(f"两组草案 · 快照 {snapshot.snapshot_id} v{snapshot.version} · "
           f"hash {snapshot.hash[:12]}…")
     print("两组读同一份快照，各自独立出方案，互相不可见。\n")
-    for group in ("A", "B"):
-        _print_draft(drafts[group])
 
-    manifest = deliver(args.dir, snapshot, drafts)
+    race = run_race(
+        snapshot, fail_groups=fail_groups, max_attempts=max_attempts,
+        on_attempt=lambda current, group, attempt: _print_attempt(current.attempts[-1]))
+    print()
+
+    for group in ("A", "B"):
+        if group in race.drafts:
+            _print_draft(race.drafts[group])
+        else:
+            state = race.groups[group]
+            error = state.error or {}
+            print(f"{group} 组 · 失败：{error.get('code')} {error.get('message')}")
+            print()
+
+    save_race(race, args.dir)
+    manifest = deliver(args.dir, snapshot, race.drafts,
+                       extras={"race.json": race.to_json()})
     print("已交付：")
     for name in manifest["files"]:
         print(f"  {name}")
     print(f"引用边 {manifest['citations']['edges']} 条 · "
           f"清单 {Path(args.dir) / 'manifest.json'}")
+
+    if race.failed_groups:
+        print()
+        print(f"{'、'.join(race.failed_groups)} 组未完成；已成功的组已保留。")
+        print(f"单独重试：python -m ideaflow.spec_cli retry --dir {args.dir}")
+        return 1
+    return 0
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    before = load_race(root)
+    if not before.failed_groups:
+        print("没有失败的组，无需重试。")
+        return 0
+
+    failed = list(before.failed_groups)
+    print(f"重试失败组：{'、'.join(failed)}（已成功的组不重跑）")
+    after = retry_failed(root, max_attempts=args.max_attempts)
+
+    new_records = after.attempts[len(before.attempts):]
+    for record in new_records:
+        _print_attempt(record)
+
+    for group, same in unchanged_groups(before, after).items():
+        state = after.groups[group]
+        print(f"  {group} 组未重跑：hash {state.draft_hash[:8]}…"
+              f"（{'与失败前一致' if same else '发生变化'}）")
+
+    snapshot = load(root)
+    manifest = deliver(root, snapshot, after.drafts,
+                       extras={"race.json": after.to_json()})
+    print(f"交付已更新：{', '.join(manifest['files'])}")
+
+    if after.failed_groups:
+        print(f"仍失败：{'、'.join(after.failed_groups)}")
+        return 1
     return 0
 
 
@@ -252,8 +320,20 @@ def build_parser() -> argparse.ArgumentParser:
     race = sub.add_parser("race", help="两组基于同一快照独立出方案")
     race.add_argument("--dir", required=True, help="快照所在目录")
     race.add_argument("--confirm", metavar="NAME", help="快照尚未确认时，先以该名字确认")
+    race.add_argument("--fail-group", action="append", default=[],
+                      help="为指定组注入失败，可重复，例如 --fail-group B")
+    race.add_argument("--fail-times", type=int, default=1,
+                      help="注入失败的次数，默认 1 次")
+    race.add_argument("--max-attempts", type=int, default=2,
+                      help="每组最多尝试次数，默认 2（失败后自动重试一次）")
+    race.add_argument("--no-retry", action="store_true", help="失败后不自动重试")
     race.add_argument("--json", action="store_true", help="输出 JSON")
     race.set_defaults(func=cmd_race)
+
+    retry = sub.add_parser("retry", help="只重跑失败的组，已成功的组不重跑")
+    retry.add_argument("--dir", required=True, help="赛马目录")
+    retry.add_argument("--max-attempts", type=int, default=1, help="本次重试次数，默认 1")
+    retry.set_defaults(func=cmd_retry)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")
