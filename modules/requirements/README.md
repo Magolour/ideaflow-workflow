@@ -228,6 +228,30 @@ python -m ideaflow.spec_cli audit --dir runs/spec-demo
 - 问题带类型、严重级、影响条目和修复建议，写入 `audit.v1.json`；
 - 有阻断问题时命令返回 1，可直接用于流水线拦截。
 
+### 同版导出：JSON + Markdown
+
+```bash
+python -m ideaflow.spec_cli export --dir runs/spec-demo
+```
+
+```text
+导出 SPEC-001 v1
+  spec.v1.json  （内容哈希 388ab8e7339f…）
+  spec.v1.md  （文件哈希 27b16b25e609…）
+
+同版校验：通过 · 版本 1 · 双向引用一致 · 内容哈希 388ab8e7339f…
+```
+
+| 文件 | 用途 |
+| --- | --- |
+| `spec.v{n}.json` | 机读：决策、模块、接口、映射、验收、待决项、`artifacts` 指向 Markdown |
+| `spec.v{n}.md` | 人读：需求追溯表、设计决策、模块接口、验收、非目标、待决问题、估算 |
+| `spec.json` / `spec.md` | 最新版别名，便于下游直接读取 |
+
+- 同版判定：`spec_id + version + content_hash`，Markdown 头部与附录都写完整哈希；
+- `verify_export` 检查 JSON 完整性、版本、双向引用与哈希是否一致；
+- 任一文件被改都会校验失败（测试覆盖 JSON 篡改与 Markdown 篡改两种）。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -239,6 +263,7 @@ python -m ideaflow.spec_cli audit --dir runs/spec-demo
 | 5 | 一组失败后可单独重试 | ✅ 已完成 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | ✅ 已完成 |
 | 7 | 规格自审查：覆盖、冲突、验收 | ✅ 已完成 |
+| 8 | 导出同版规格 JSON 与 Markdown | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -279,7 +304,7 @@ python -m ideaflow.spec_cli audit --dir runs/spec-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 106 项测试
+python -m unittest discover -s tests -v     # 114 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -324,6 +349,7 @@ ideaflow/
 ├── reviews.py      # 逐份评审：三维评分、分歧与待决项
 ├── spec.py         # 设计规格：决策、模块、映射、验收、整合规则
 ├── audit.py        # 自审查：覆盖、约束冲突、验收口径
+├── spec_doc.py     # 规格导出：Markdown 渲染与同版校验
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -332,6 +358,7 @@ tests/
 ├── test_artifacts.py
 ├── test_audit.py
 ├── test_drafts.py
+├── test_export.py
 ├── test_pipeline.py
 ├── test_race.py
 ├── test_reviews.py

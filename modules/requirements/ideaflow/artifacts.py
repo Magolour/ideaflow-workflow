@@ -21,7 +21,7 @@ from typing import Any
 from .contracts import ContractError
 from .drafts import Draft
 from .snapshot import Snapshot, save
-from .storage import content_hash, now_iso, write_json
+from .storage import content_hash, now_iso, write_json, write_text
 
 
 def build_citations(snapshot: Snapshot, drafts: dict[str, Draft]) -> dict[str, Any]:
@@ -86,7 +86,8 @@ def build_citations(snapshot: Snapshot, drafts: dict[str, Draft]) -> dict[str, A
 
 
 def deliver(directory: str | Path, snapshot: Snapshot, drafts: dict[str, Draft],
-            *, extras: dict[str, Any] | None = None) -> dict[str, Any]:
+            *, extras: dict[str, Any] | None = None,
+            texts: dict[str, str] | None = None) -> dict[str, Any]:
     """写出四件套并返回清单；重复调用结果稳定（哈希不变）。"""
     root = Path(directory)
     save(snapshot, root)
@@ -118,6 +119,11 @@ def deliver(directory: str | Path, snapshot: Snapshot, drafts: dict[str, Draft],
         write_json(root / name, extras[name])
         files.append(name)
         extra_rows.append({"file": name, "hash": content_hash(extras[name])})
+
+    for name in sorted(texts or {}):
+        write_text(root / name, texts[name])
+        files.append(name)
+        extra_rows.append({"file": name, "hash": content_hash(texts[name])})
 
     manifest = {
         "run_id": root.name,

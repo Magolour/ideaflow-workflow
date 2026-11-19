@@ -25,6 +25,7 @@ from .race import load_drafts, load_race, retry_failed, run_race, save_race, unc
 from .reviews import SEVERITY_LABEL, review_all
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
 from .spec import build_spec, load_spec, save_spec
+from .spec_doc import export_spec, verify_export
 from .storage import read_json, write_json
 
 
@@ -386,6 +387,47 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0 if audit["passed"] else 1
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    snapshot = load(root)
+    spec = load_spec(root)
+    result = export_spec(spec, snapshot, root)
+    check = verify_export(root, spec.version)
+
+    if args.json:
+        print(json.dumps({key: value for key, value in result.items()
+                          if key != "markdown_text"} | {"verify": check["checks"]},
+                         ensure_ascii=False, indent=2))
+        return 0 if check["ok"] else 1
+
+    print(f"导出 {spec.spec_id} v{spec.version}")
+    print(f"  {result['json']}  （内容哈希 {result['content_hash'][:12]}…）")
+    print(f"  {result['markdown']}  （文件哈希 {result['markdown_sha256'][:12]}…）")
+    print()
+    if check["ok"]:
+        print(f"同版校验：通过 · 版本 {spec.version} · 双向引用一致 · "
+              f"内容哈希 {result['content_hash'][:12]}…")
+    else:
+        failed = [key for key, value in check["checks"].items() if not value]
+        print(f"同版校验：未通过 · {', '.join(failed)}")
+
+    if (root / "race.json").exists():
+        race = load_race(root)
+        load_drafts(race, root)
+        extras: dict[str, Any] = {"race.json": race.to_json(),
+                                  result["json"]: read_json(root / result["json"]),
+                                  "spec.json": read_json(root / "spec.json")}
+        for name in ("review.json", f"audit.v{spec.version}.json"):
+            path = root / name
+            if path.exists():
+                extras[name] = read_json(path)
+        deliver(root, snapshot, race.drafts, extras=extras,
+                texts={result["markdown"]: result["markdown_text"],
+                       "spec.md": result["markdown_text"]})
+        print("清单已更新：manifest.json")
+    return 0 if check["ok"] else 1
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -459,6 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--dir", required=True, help="规格目录")
     audit.add_argument("--json", action="store_true", help="输出 JSON")
     audit.set_defaults(func=cmd_audit)
+
+    export = sub.add_parser("export", help="导出同版规格 JSON 与 Markdown")
+    export.add_argument("--dir", required=True, help="规格目录")
+    export.add_argument("--json", action="store_true", help="输出 JSON")
+    export.set_defaults(func=cmd_export)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")

@@ -28,6 +28,8 @@ MODULE_NAMES = (
     ("自提", "自提与面交"),
 )
 VALUE_ORDER = ("搜索", "支付", "发布", "收藏", "评价", "自提")
+FEATURE_ALIASES = {"支付": ("支付", "付款", "结算"), "搜索": ("搜索", "检索"),
+                   "发布": ("发布", "上传"), "收藏": ("收藏", "关注")}
 
 INTERFACES: dict[str, list[dict[str, str]]] = {
     "发布": [{"name": "publishBook", "caller": "发布页",
@@ -47,7 +49,8 @@ INTERFACES: dict[str, list[dict[str, str]]] = {
 
 def _feature(text: str) -> str | None:
     for key in VALUE_ORDER:
-        if key in text:
+        words = FEATURE_ALIASES.get(key, (key,))
+        if any(word in text for word in words):
             return key
     return None
 
