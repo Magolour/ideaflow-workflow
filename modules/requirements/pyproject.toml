@@ -11,6 +11,10 @@ dependencies = []
 
 [project.scripts]
 ideaflow = "ideaflow.cli:main"
+ideaflow-web = "ideaflow.server:main"
 
 [tool.setuptools]
 packages = ["ideaflow"]
+
+[tool.setuptools.package-data]
+ideaflow = ["web/*.html", "web/*.css", "web/*.js"]

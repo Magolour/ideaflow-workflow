@@ -27,6 +27,49 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
 | `events.jsonl` | 追加式事件流，`seq` 连续递增，可增量回放 |
 | `run.json` | 本次运行摘要：计数、共识状态、路径 |
 
+## Web 工作台：输入 → 生成 → 下载
+
+```bash
+python -m ideaflow.server --port 8000
+# 浏览器打开 http://127.0.0.1:8000/
+```
+
+左栏填写想法与已知约束（轮次与阈值放在“高级设置”），右栏展示结果。生成任务跑在
+后台线程，页面轮询阶段日志，所以不会出现“点了没反应”；同一进程可连续生成多次，
+产物分别落在 `runs/` 下，互不覆盖。
+
+结果页有四个视图：
+
+| 视图 | 内容 |
+| --- | --- |
+| 设计文档 | 11 章正文的排版预览，表格、引用、行内代码按文档样式渲染 |
+| 候选方案 | 每个方案的适用范围、周期、风险、取舍，以及六个角色的立场 |
+| 异议记录 | 级别、状态、分歧类型、后果与回应，未解决的排在前面 |
+| 待澄清 | 阻断与非阻断问题，以及当前的处理方式 |
+
+下载与导出：
+
+| 方式 | 说明 |
+| --- | --- |
+| 下载 .md | 原始 Markdown，便于继续编辑、入库或提交评审 |
+| 下载 .html | 单文件、样式内联，双击即可打开，含自动生成的目录 |
+| 打印 / PDF | 只打印正文，自动隐藏输入栏、指标卡与标签页 |
+
+接口只有三个，便于替换前端或接编排器：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/generate` | 提交 `{idea, constraints, max_rounds, threshold, answers}`，返回 `202 {job_id}` |
+| GET | `/api/job?id=` | 轮询任务状态、阶段日志与最终结果 |
+| GET | `/api/download?run_id=&format=md\|html` | 下载文档；`run_id` 必须来自本进程 |
+
+另有 `/api/health` 健康检查与 `/static/*` 静态资源。服务默认只监听 `127.0.0.1`，
+需要局域网访问时显式加 `--host 0.0.0.0`。页面支持
+`/?idea=…&constraint=…&auto=1` 预填并直接生成，方便演示和分享。
+
+前端没有构建步骤：`http.server` + 手写 Markdown 渲染（`render_html.py`），
+不需要 npm，也不需要打包。
+
 ## 已实现的设计要点
 
 | 文档要求 | 实现位置 |
@@ -60,8 +103,9 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 19 项测试
+python -m unittest discover -s tests -v     # 30 项测试
 python -m ideaflow.cli --help
+python -m ideaflow.server --help
 ```
 
 可选参数：
@@ -92,8 +136,13 @@ ideaflow/
 ├── pipeline.py     # 七阶段编排与落盘
 ├── proposal.py     # 11 章 Proposal 渲染
 ├── estimate.py     # PERT 三点估算
+├── render_html.py  # Markdown → HTML，预览与离线文档共用
+├── server.py       # Web 工作台：生成任务、轮询接口、下载
+├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
 └── cli.py          # 命令行入口
-tests/test_pipeline.py
+tests/
+├── test_pipeline.py
+└── test_web.py
 ```
 
 ## 边界与后续
@@ -107,6 +156,6 @@ tests/test_pipeline.py
 | 二 | 收敛引擎：分歧分类、终止条件、整合复核、伪共识检测 | ✅ 已完成 |
 | 三 | 盲评与加权评分、阻断项返修、关键路径与里程碑 | 待做 |
 | 四 | 真实模型接入（OpenAI 兼容）、结构校验回注、ai_call 审计 | 待做 |
-| 五 | Web 工作台与人工节点（澄清、确认、变更） | 待做 |
+| 五 | Web 工作台：输入、生成进度、文档预览、下载与打印 | ✅ 基础版完成（人工确认节点待做） |
 
 暂不做：数据库、多租户、真实代码生成与部署。契约变更须升版本并同步文档与样例。
