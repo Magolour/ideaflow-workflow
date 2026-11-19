@@ -6,13 +6,16 @@
 
 | 路径 | 职责 | 状态 |
 | --- | --- | --- |
-| modules/requirements | 需求澄清、规格整理与输出 | 待接入 |
+| modules/requirements | 需求澄清、规格整理与输出 | 已接入第一部分（离线讨论闭环） |
 | modules/orchestrator | PM 拆解、依赖分析、调度与事件 API | 已导入现有原型 |
 | modules/visualization | 独立可视化界面 | 待接入；原型 UI 暂在 orchestrator/web |
 | contracts | 模块接口约定与示例位置 | 初版约定待团队确认 |
 | docs | 架构、协作和问题清单 | 已初始化 |
 
 模块目录表示职责边界，目前仍是独立编排服务，没有完成全部模块集成。
+
+需求模块已可按「一句想法 → 多角色讨论 → 11 章 Proposal」离线运行，
+入口与边界见 modules/requirements/README.md。
 
 ## 启动现有原型（PowerShell）
 
