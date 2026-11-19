@@ -14,8 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .contracts import ContractError
+from .drafts import GROUPS, SATISFIES_LABEL, Draft, run_groups
 from .pipeline import slugify
-from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, save
+from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
 
 
 def _display_width(text: str) -> int:
@@ -93,6 +94,43 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_draft(draft: Draft) -> None:
+    print(f"{draft.group} 组 · {draft.group_name} ｜ {len(draft.decisions)} 条决策 ｜ "
+          f"承诺 {draft.commit_days} 天")
+    print(f"  目标：{draft.objective}")
+    for decision in draft.decisions:
+        flag = "" if decision["satisfies"] == "full" else f"（{SATISFIES_LABEL[decision['satisfies']]}）"
+        print(f"  {decision['requirement_ids'][0]}  {_ellipsis(decision['scope'], 30)}")
+        print(f"        → {decision['choice']}{flag}")
+    conflicts = [check for check in draft.constraints_checked if not check["complies"]]
+    for check in conflicts:
+        print(f"  ! {check['constraint_id']} {check['note']}")
+    print()
+
+
+def cmd_race(args: argparse.Namespace) -> int:
+    snapshot = load(args.dir)
+    if snapshot.status != "confirmed":
+        if not args.confirm:
+            print(f"快照 {snapshot.snapshot_id} v{snapshot.version} 尚未确认；"
+                  f"加 --confirm 姓名 确认后再出方案。", file=sys.stderr)
+            return 2
+        snapshot = snapshot.confirm(args.confirm)
+        save(snapshot, args.dir)
+    drafts = run_groups(snapshot)
+    if args.json:
+        print(json.dumps({group: draft.to_json() for group, draft in drafts.items()},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"两组草案 · 快照 {snapshot.snapshot_id} v{snapshot.version} · "
+          f"hash {snapshot.hash[:12]}…")
+    print("两组读同一份快照，各自独立出方案，互相不可见。\n")
+    for group in ("A", "B"):
+        _print_draft(drafts[group])
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ideaflow-spec",
@@ -108,6 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
     snap.add_argument("--confirm", metavar="NAME", help="生成后立即确认并记录确认人")
     snap.add_argument("--json", action="store_true", help="输出 JSON")
     snap.set_defaults(func=cmd_snapshot)
+
+    race = sub.add_parser("race", help="两组基于同一快照独立出方案")
+    race.add_argument("--dir", required=True, help="快照所在目录")
+    race.add_argument("--confirm", metavar="NAME", help="快照尚未确认时，先以该名字确认")
+    race.add_argument("--json", action="store_true", help="输出 JSON")
+    race.set_defaults(func=cmd_race)
     return parser
 
 

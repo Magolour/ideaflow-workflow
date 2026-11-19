@@ -89,12 +89,29 @@ python -m ideaflow.spec_cli snapshot --file cases/campus-books.md --confirm 产�
 | 完整性 | 落盘内容带 `hash`，读回时校验；改任何字段即报 `HASH_MISMATCH` |
 | 编号稳定 | 已删除的编号进入 `retired_ids`，不会被后来的条目复用 |
 
+### 两组独立出方案
+
+```bash
+python -m ideaflow.spec_cli race --dir runs/spec-demo
+```
+
+同一份快照、两套目标函数，互不可见：
+
+| 组 | 目标 | 典型案例结果 |
+| --- | --- | --- |
+| A 交付优先 | 最短路径跑通主流程，先验证需求是否真实 | 承诺 10.2 天，全部需求有决策，支付降级为线下 |
+| B 体验优先 | 关键路径压到 3 步内，体验一次做到位 | 承诺 29.7 天，超出两周期限，且与「不做在线支付」冲突 |
+
+- **隔离**：每组只拿到 `group_context()` 生成的独立副本，里面只有快照条目与本组目标；测试会断言上下文里没有另一组草案。
+- **覆盖**：每条明确要求都必须给出本组选择，漏一条即 `DRAFT_COVERAGE`。
+- **自报冲突**：草案自己记录 `constraints_checked`，与期限、禁止项冲突时 `complies=false`，不静默忽略。
+
 实现进度：
 
 | # | 能力 | 状态 |
 | --- | --- | --- |
 | 1 | 需求快照：编号、版本、三类条目、来源行号 | ✅ 已完成 |
-| 2 | 两组 Agent 基于同一快照独立出方案 | 待做 |
+| 2 | 两组 Agent 基于同一快照独立出方案 | ✅ 已完成 |
 | 3 | 交付快照、A/B 草案及来源引用 | 待做 |
 | 4 | 案例展示两方案的实际取舍 | 待做 |
 | 5 | 一组失败后可单独重试 | 待做 |
@@ -137,7 +154,7 @@ python -m ideaflow.spec_cli snapshot --file cases/campus-books.md --confirm 产�
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 46 项测试
+python -m unittest discover -s tests -v     # 60 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -174,10 +191,13 @@ ideaflow/
 ├── server.py       # Web 工作台：生成任务、轮询接口、下载
 ├── storage.py      # 原子写、稳定序列化与内容哈希
 ├── snapshot.py     # 需求快照：三类条目、编号、版本、来源
+├── constraints.py  # 期限、人力、禁止事项的确定性抽取
+├── drafts.py       # A/B 两组草案：独立上下文、覆盖校验
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
 └── cli.py          # 命令行入口
 tests/
+├── test_drafts.py
 ├── test_pipeline.py
 ├── test_snapshot.py
 └── test_web.py
