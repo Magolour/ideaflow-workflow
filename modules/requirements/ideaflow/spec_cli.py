@@ -23,6 +23,7 @@ from .drafts import SATISFIES_LABEL, Draft
 from .pipeline import slugify
 from .race import load_drafts, load_race, retry_failed, run_race, save_race, unchanged_groups
 from .reviews import SEVERITY_LABEL, review_all
+from .revisions import save_revisions, scope_revision
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
 from .spec import build_spec, load_spec, save_spec
 from .spec_doc import export_spec, verify_export
@@ -428,6 +429,74 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0 if check["ok"] else 1
 
 
+def cmd_revise(args: argparse.Namespace) -> int:
+    root = Path(args.dir)
+    snapshot = load(root)
+    spec = load_spec(root)
+    audit = audit_spec(spec, snapshot)
+
+    if audit["passed"]:
+        print(f"{spec.spec_id} v{spec.version} 没有阻断问题，无需修订。")
+        return 0
+
+    try:
+        revised, record, _ = scope_revision(spec, snapshot, audit)
+    except ContractError as error:
+        if error.code == "NO_AUTO_FIX":
+            print(f"无法自动修订：{error.message}")
+            print("需要人工决策，可用 escalate 生成具体问题。")
+            return 2
+        raise
+
+    save_spec(revised, root)
+    new_audit = audit_spec(revised, snapshot)
+    save_audit(new_audit, root, revised.version)
+    save_revisions(revised, root)
+    result = export_spec(revised, snapshot, root)
+
+    print(f"发现问题（v{spec.version}）：")
+    for issue in audit["issues"]:
+        if issue["id"] in record["issue_ids"]:
+            print(f"  {issue['id']} [{SEVERITY_LABEL[issue['severity']]}] "
+                  f"{issue['label']}：{issue['message']}")
+    print()
+    print(f"修订 {record['id']}：{record['reason']}")
+    for change in record["changes"]:
+        print(f"  {change['requirement_id']} "
+              f"{change['before']['cost_days']} → {change['after']['cost_days']} 天 ｜ "
+              f"{change['after']['choice']}")
+    print()
+    recheck = record["recheck"]
+    print(f"复核（v{revised.version}）："
+          f"{'通过' if recheck['passed'] else '仍有阻断'} ｜ "
+          f"已解决 {len(recheck['resolved'])} 条 ｜ 剩余 {len(recheck['remaining'])} 条")
+    for issue in recheck["remaining"]:
+        print(f"  {issue['id']} [{SEVERITY_LABEL[issue['severity']]}] {issue['label']}")
+    print(f"新承诺 {revised.effort['commit_days']} 天 ｜ 新哈希 {revised.hash[:12]}…")
+
+    if (root / "race.json").exists():
+        race = load_race(root)
+        load_drafts(race, root)
+        extras: dict[str, Any] = {
+            "race.json": race.to_json(),
+            f"spec.v{revised.version}.json": read_json(root / result["json"]),
+            f"audit.v{revised.version}.json": read_json(root / f"audit.v{revised.version}.json"),
+            "revisions.json": read_json(root / "revisions.json"),
+            f"revision.v{revised.version}.json": read_json(
+                root / f"revision.v{revised.version}.json"),
+        }
+        for name in ("review.json", f"audit.v{spec.version}.json"):
+            path = root / name
+            if path.exists():
+                extras[name] = read_json(path)
+        deliver(root, snapshot, race.drafts, extras=extras,
+                texts={result["markdown"]: result["markdown_text"],
+                       "spec.md": result["markdown_text"]})
+        print(f"已更新：spec.v{revised.version} / audit.v{revised.version} / "
+              f"revisions.json / 清单")
+    return 0 if new_audit["passed"] else 1
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -506,6 +575,10 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--dir", required=True, help="规格目录")
     export.add_argument("--json", action="store_true", help="输出 JSON")
     export.set_defaults(func=cmd_export)
+
+    revise = sub.add_parser("revise", help="按自审查问题做范围裁剪并复核")
+    revise.add_argument("--dir", required=True, help="规格目录")
+    revise.set_defaults(func=cmd_revise)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")

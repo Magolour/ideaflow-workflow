@@ -252,6 +252,31 @@ python -m ideaflow.spec_cli export --dir runs/spec-demo
 - `verify_export` 检查 JSON 完整性、版本、双向引用与哈希是否一致；
 - 任一文件被改都会校验失败（测试覆盖 JSON 篡改与 Markdown 篡改两种）。
 
+### 修订与复核
+
+紧凑版案例（`cases/campus-books-tight.md`，9 天期限）会让 v1 出现期限冲突，
+用它演示一条完整的「发现问题 → 修订 → 复核」：
+
+```bash
+python -m ideaflow.spec_cli revise --dir runs/tight-demo
+```
+
+```text
+发现问题（v1）：
+  AUD-02 [阻断] 估算与期限冲突：承诺 10.2 天，超出期限 9 天
+修订 REV-001：期限 9 天：裁剪 收藏夹 1.0→0.5 天、教材发布 2.0→1.0 天
+  R-04 1.0 → 0.5 天 ｜ 只在列表页记录收藏，不做收藏夹页面
+  R-01 2.0 → 1.0 天 ｜ 只保留书名、价格与联系方式三个字段，去掉图片与草稿
+复核（v2）：仍有阻断 ｜ 已解决 1 条 ｜ 剩余 1 条
+  AUD-01 [阻断] 需求被降级或未满足
+新承诺 8.6 天
+```
+
+- **裁剪策略**：从价值最低的模块开始简化（收藏 → 发布），并改掉方案描述，不是把工期数字改小；
+- **重算估算**：改完统一走 `effort_for` 重算 PERT，不允许手改总工期；
+- **修订记录**：`REV-001` 写明目标问题、改前改后的版本／哈希／承诺、每条改动、复核的已解决与剩余项；
+- **复核诚实**：期限冲突消失，但 R-03 的需求冲突仍在，状态仍是未通过，交给人工问题处理。
+
 实现进度：
 
 | # | 能力 | 状态 |
@@ -264,6 +289,7 @@ python -m ideaflow.spec_cli export --dir runs/spec-demo
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | ✅ 已完成 |
 | 7 | 规格自审查：覆盖、冲突、验收 | ✅ 已完成 |
 | 8 | 导出同版规格 JSON 与 Markdown | ✅ 已完成 |
+| 9 | 发现问题 → 修订 → 复核记录 | ✅ 已完成 |
 | 5 | 一组失败后可单独重试 | 待做 |
 | 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
 | 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
@@ -304,7 +330,7 @@ python -m ideaflow.spec_cli export --dir runs/spec-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 114 项测试
+python -m unittest discover -s tests -v     # 124 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -350,6 +376,7 @@ ideaflow/
 ├── spec.py         # 设计规格：决策、模块、映射、验收、整合规则
 ├── audit.py        # 自审查：覆盖、约束冲突、验收口径
 ├── spec_doc.py     # 规格导出：Markdown 渲染与同版校验
+├── revisions.py    # 修订：范围裁剪、改前改后与复核记录
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -362,6 +389,7 @@ tests/
 ├── test_pipeline.py
 ├── test_race.py
 ├── test_reviews.py
+├── test_revisions.py
 ├── test_snapshot.py
 ├── test_tradeoffs.py
 └── test_web.py

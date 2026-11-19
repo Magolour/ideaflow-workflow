@@ -47,7 +47,7 @@ INTERFACES: dict[str, list[dict[str, str]]] = {
 }
 
 
-def _feature(text: str) -> str | None:
+def feature_of(text: str) -> str | None:
     for key in VALUE_ORDER:
         words = FEATURE_ALIASES.get(key, (key,))
         if any(word in text for word in words):
@@ -56,7 +56,7 @@ def _feature(text: str) -> str | None:
 
 
 def _module_name(text: str, index: int) -> str:
-    key = _feature(text)
+    key = feature_of(text)
     for name, label in MODULE_NAMES:
         if key and name == key:
             return label
@@ -64,7 +64,7 @@ def _module_name(text: str, index: int) -> str:
 
 
 def _interfaces(text: str, index: int) -> list[dict[str, str]]:
-    key = _feature(text)
+    key = feature_of(text)
     if key and key in INTERFACES:
         return [dict(row) for row in INTERFACES[key]]
     return [{"name": f"handle{index:02d}", "caller": "应用层",
@@ -80,7 +80,7 @@ def _conflict_constraint(choice: str, snapshot: Snapshot) -> dict[str, Any] | No
     return None
 
 
-def _acceptance(decision: dict[str, Any], index: int) -> dict[str, Any]:
+def acceptance_for(decision: dict[str, Any], index: int) -> dict[str, Any]:
     if decision["satisfies"] == "full":
         criterion = (f"在 5 台测试设备上完成「{decision['scope']}」主流程，"
                      f"成功率 100%，单次操作不超过 3 步")
@@ -120,6 +120,13 @@ class Spec:
     @property
     def hash(self) -> str:
         return content_hash(self._content())
+
+    @property
+    def content_fingerprint(self) -> str:
+        """忽略版本号的正文指纹，用于判断修订是否真的改了内容。"""
+        content = self._content()
+        content.pop("version", None)
+        return content_hash(content)
 
     def _content(self) -> dict[str, Any]:
         return {
@@ -177,6 +184,18 @@ class Spec:
         return spec
 
 
+def effort_for(modules: list[dict[str, Any]]) -> dict[str, Any]:
+    """按模块估算重算 PERT；修订后必须走这里，避免手改总工期。"""
+    packages = [{"name": module["name"],
+                 "optimistic": round(module["estimate_days"] * 0.8, 1),
+                 "likely": module["estimate_days"],
+                 "pessimistic": round(module["estimate_days"] * 1.6, 1)}
+                for module in modules]
+    packages.append({"name": "联调、验收与演示准备", "optimistic": 2.0,
+                     "likely": 3.0, "pessimistic": 5.0})
+    return pert(packages)
+
+
 def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
                reviews: dict[str, Any]) -> Spec:
     if len(drafts) < 2:
@@ -209,7 +228,7 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
                 "reason": f"与约束 {conflict['id']}「{conflict['text']}」冲突",
             })
             continue
-        order = VALUE_ORDER.index(_feature(item["text"])) if _feature(item["text"]) else 9
+        order = VALUE_ORDER.index(feature_of(item["text"])) if feature_of(item["text"]) else 9
         eligible.append((order, float(right["cost_days"]) - float(left["cost_days"]),
                          item, left, right))
 
@@ -274,7 +293,7 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
         modules.append(module)
         mapping.append({"requirement_id": item["id"], "module_ids": [module["id"]],
                         "decision_ids": [decision["id"]]})
-        acceptance.append(_acceptance(decision, index))
+        acceptance.append(acceptance_for(decision, index))
 
     open_items: list[dict[str, Any]] = []
     for decision in decisions:
@@ -313,13 +332,7 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
             "resolution": None,
         })
 
-    packages = [{"name": module["name"], "optimistic": round(module["estimate_days"] * 0.8, 1),
-                 "likely": module["estimate_days"],
-                 "pessimistic": round(module["estimate_days"] * 1.6, 1)}
-                for module in modules]
-    packages.append({"name": "联调、验收与演示准备", "optimistic": 2.0,
-                     "likely": 3.0, "pessimistic": 5.0})
-    effort = pert(packages)
+    effort = effort_for(modules)
 
     non_goals = [{
         "item": row["scope"], "choice": row["choice"], "reason": row["reason"],
