@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .artifacts import deliver
 from .contracts import ContractError
+from .demo import run_case
 from .drafts import GROUPS, SATISFIES_LABEL, Draft, run_groups
 from .pipeline import slugify
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
@@ -40,6 +41,12 @@ def _ellipsis(text: str, width: int) -> str:
         kept += char
         used += step
     return kept + "…"
+
+
+def _with_cost(choice: str, cost: float, width: int) -> str:
+    """保留成本数字，只截断方案描述，避免出现「（5…」这种断尾。"""
+    suffix = f"（{cost} 天）"
+    return _ellipsis(choice, max(8, width - _display_width(suffix))) + suffix
 
 
 def _print_snapshot(snapshot: Snapshot, path: Path) -> None:
@@ -140,6 +147,62 @@ def cmd_race(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_case(args: argparse.Namespace) -> int:
+    result = run_case(args.file, args.out, confirm=args.confirm)
+    tradeoffs = result.tradeoffs
+    if args.json:
+        print(json.dumps(tradeoffs, ensure_ascii=False, indent=2))
+        return 0
+
+    project = tradeoffs["project"]
+    print(f"案例：{args.file}")
+    print(f"快照 {result.snapshot.snapshot_id} v{result.snapshot.version} · "
+          f"hash {result.snapshot.hash[:12]}…")
+    deadline = project["deadline_days"]
+    line = f"两组承诺：A {project['a_days']} 天 ｜ B {project['b_days']} 天"
+    if deadline:
+        line += f" ｜ 期限 {deadline} 天"
+    print(line)
+    print()
+
+    if not tradeoffs["items"]:
+        print("两组方案在同一需求上没有选择差异。")
+        return 0
+
+    headers = [("需求", 20), ("A 交付优先", 34), ("B 体验优先", 34), ("差额", 8)]
+    print("  ".join(_pad(title, width) for title, width in headers).rstrip())
+    for row in tradeoffs["items"]:
+        label = _ellipsis(f"{row['requirement_id']} {row['requirement']}", 20)
+        left = _with_cost(row["a"]["choice"], row["a"]["cost_days"], 34)
+        right = _with_cost(row["b"]["choice"], row["b"]["cost_days"], 34)
+        print("  ".join([_pad(label, 20), _pad(left, 34), _pad(right, 34),
+                         f"{row['delta_days']:+.1f} 天"]).rstrip())
+
+    counts = tradeoffs["counts"]
+    print()
+    print(f"取舍 {counts['total']} 条：放弃需求换工期 {counts['requirement_vs_schedule']} 条，"
+          f"多投入换体验 {counts['experience_vs_schedule']} 条")
+    if deadline:
+        print(f"期限对照：A {'在限期内' if project['a_within_deadline'] else '超出期限'} ｜ "
+              f"B {'在限期内' if project['b_within_deadline'] else f'超出 {deadline} 天'}")
+
+    headline = next(row for row in tradeoffs["items"] if row["id"] == tradeoffs["headline"])
+    print()
+    print(f"关键取舍 {headline['id']} · {headline['requirement_id']} {headline['requirement']}")
+    print(f"  A：{headline['a']['choice']}"
+          f"（{headline['a']['cost_days']} 天，{SATISFIES_LABEL[headline['a']['satisfies']]}）")
+    print(f"  B：{headline['b']['choice']}"
+          f"（{headline['b']['cost_days']} 天，{SATISFIES_LABEL[headline['b']['satisfies']]}）")
+    print(f"  → {headline['summary']}")
+
+    print()
+    print("已交付：")
+    for name in result.manifest["files"]:
+        print(f"  {name}")
+    print(f"目录：{Path(args.out)}")
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -196,6 +259,13 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--dir", required=True, help="交付目录")
     trace.add_argument("--item", required=True, help="快照条目编号，例如 R-03")
     trace.set_defaults(func=cmd_trace)
+
+    case = sub.add_parser("case", help="跑固定案例，展示 A/B 的实际取舍")
+    case.add_argument("--file", default="cases/campus-books.md", help="案例文件")
+    case.add_argument("--out", default="runs/case-campus-books", help="产物目录")
+    case.add_argument("--confirm", default="案例演示", help="快照确认人")
+    case.add_argument("--json", action="store_true", help="输出取舍 JSON")
+    case.set_defaults(func=cmd_case)
     return parser
 
 

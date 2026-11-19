@@ -85,8 +85,8 @@ def build_citations(snapshot: Snapshot, drafts: dict[str, Draft]) -> dict[str, A
     }
 
 
-def deliver(directory: str | Path, snapshot: Snapshot,
-            drafts: dict[str, Draft]) -> dict[str, Any]:
+def deliver(directory: str | Path, snapshot: Snapshot, drafts: dict[str, Draft],
+            *, extras: dict[str, Any] | None = None) -> dict[str, Any]:
     """写出四件套并返回清单；重复调用结果稳定（哈希不变）。"""
     root = Path(directory)
     save(snapshot, root)
@@ -112,6 +112,13 @@ def deliver(directory: str | Path, snapshot: Snapshot,
     write_json(root / "citations.json", citations)
     files.append("citations.json")
 
+    extras = extras or {}
+    extra_rows = []
+    for name in sorted(extras):
+        write_json(root / name, extras[name])
+        files.append(name)
+        extra_rows.append({"file": name, "hash": content_hash(extras[name])})
+
     manifest = {
         "run_id": root.name,
         "created_at": now_iso(),
@@ -120,6 +127,7 @@ def deliver(directory: str | Path, snapshot: Snapshot,
         "drafts": draft_rows,
         "citations": {"file": "citations.json", "hash": content_hash(citations),
                       "edges": citations["counts"]["edges"]},
+        "extras": extra_rows,
         "files": files,
     }
     write_json(root / "manifest.json", manifest)
