@@ -75,6 +75,23 @@ python -m ideaflow.server --port 8000
 与「讨论提案」并行的第二条链路，按评审要求逐项实现：先把输入固化成快照，
 再让两组独立出方案、逐份评审、整合成规格，最后做覆盖／冲突／验收自审查。
 
+完整链路（紧凑版案例，约 1 秒跑完）：
+
+```bash
+python -m ideaflow.spec_cli snapshot --file cases/campus-books-tight.md -o runs/tight-demo --confirm 产品负责人
+python -m ideaflow.spec_cli race --dir runs/tight-demo
+python -m ideaflow.spec_cli review --dir runs/tight-demo
+python -m ideaflow.spec_cli audit --dir runs/tight-demo      # 发现 2 条阻断
+python -m ideaflow.spec_cli revise --dir runs/tight-demo     # 裁剪范围，解决期限冲突
+python -m ideaflow.spec_cli escalate --dir runs/tight-demo   # 产出 1 个人工问题
+```
+
+最终产物在 `runs/tight-demo/`：`snapshot.v1.json`、`drafts/`、`citations.json`、
+`review.json`、`spec.v2.json` / `spec.v2.md`、`audit.v1/v2.json`、`revisions.json`、
+`human_question.json`、`manifest.json`。
+
+> `audit`、`revise` 在仍有阻断问题时返回 1，这是刻意设计的流水线信号，不是崩溃。
+
 ### 需求快照
 
 ```bash
