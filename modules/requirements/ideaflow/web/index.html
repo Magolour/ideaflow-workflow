@@ -32,10 +32,15 @@
     <!-- ============ 左侧输入 ============ -->
     <aside class="rail">
       <form id="ideaForm" autocomplete="off">
+        <div class="mode-switch" id="modeSwitch" role="tablist" aria-label="输出类型">
+          <button type="button" class="mode" role="tab" data-mode="proposal" aria-selected="true">设计方案</button>
+          <button type="button" class="mode" role="tab" data-mode="spec" aria-selected="false">设计规格</button>
+        </div>
+
         <div class="rail-head">
-          <p class="eyebrow">Input</p>
-          <h2>从一个想法开始</h2>
-          <p class="rail-sub">六个角色独立出稿、互相批判，再整合成一份带分歧记录的设计文档。</p>
+          <p class="eyebrow" id="railEyebrow">Input</p>
+          <h2 id="railTitle">从一个想法开始</h2>
+          <p class="rail-sub" id="railSub">六个角色独立出稿、互相批判，再整合成一份带分歧记录的设计文档。</p>
         </div>
 
         <div class="field">
@@ -53,7 +58,16 @@
           <div class="chips" id="chips"></div>
         </div>
 
-        <details class="advanced">
+        <div class="field" id="caseField" hidden>
+          <div class="field-label"><span>演示案例</span><span class="optional">填充后仍可修改</span></div>
+          <div class="case-list">
+            <button type="button" class="case-btn" data-case="campus-books">校园二手书 · 14 天</button>
+            <button type="button" class="case-btn" data-case="campus-books-tight">紧凑版 · 9 天</button>
+            <button type="button" class="case-btn" data-case="">自由输入</button>
+          </div>
+        </div>
+
+        <details class="advanced" id="advancedOptions">
           <summary>高级设置</summary>
           <div class="range">
             <label for="rounds">讨论轮次上限 <output id="roundsOut">2</output></label>
@@ -165,6 +179,39 @@
         <div class="panel" data-panel="questions" hidden id="panelQuestions"></div>
       </div>
 
+      <!-- ============ 规格结果 ============ -->
+      <div class="spec-result" id="specResult" hidden>
+        <header class="result-head">
+          <div class="result-title">
+            <p class="eyebrow">Design specification</p>
+            <h2 id="specTitle"></h2>
+            <p class="result-sub" id="specSub"></p>
+          </div>
+          <div class="actions">
+            <a class="btn-ghost" id="specDlMd" href="#">下载规格 .md</a>
+            <a class="btn-solid" id="specDlJson" href="#">下载规格 .json</a>
+            <button type="button" class="btn-ghost" id="specPrint">打印 / PDF</button>
+          </div>
+        </header>
+
+        <div class="spec-banner" id="specBanner" hidden></div>
+        <div class="metrics spec-metrics" id="specMetrics"></div>
+
+        <div class="tabs" id="specTabs" role="tablist">
+          <button class="tab" role="tab" data-stab="snapshot" aria-selected="true">需求快照</button>
+          <button class="tab" role="tab" data-stab="drafts" aria-selected="false">A/B 草案<span class="count" id="countDrafts">0</span></button>
+          <button class="tab" role="tab" data-stab="doc" aria-selected="false">设计规格</button>
+          <button class="tab" role="tab" data-stab="audit" aria-selected="false">审查与修订<span class="count" id="countIssues">0</span></button>
+        </div>
+
+        <div class="panel" data-spanel="snapshot" id="panelSnapshot"></div>
+        <div class="panel" data-spanel="drafts" id="panelDrafts" hidden></div>
+        <div class="panel doc-panel" data-spanel="doc" id="panelSpecDoc" hidden>
+          <article class="paper" id="specPaper"></article>
+        </div>
+        <div class="panel" data-spanel="audit" id="panelAudit" hidden></div>
+      </div>
+
     </section>
   </main>
 </div>
@@ -176,10 +223,10 @@
     <p class="eyebrow">How it works</p>
     <h2>怎么用</h2>
     <ol>
-      <li><b>写下想法</b>：一句话即可，越具体越好；约束会作为讨论的固定前提。</li>
-      <li><b>生成文档</b>：六个角色各自出稿，再互相批判、回应，最后由整合角色写成 11 章文档。</li>
-      <li><b>看结论</b>：顶部给出共识判定与支持度；异议和未解决问题不会被抹掉。</li>
-      <li><b>下载</b>：Markdown 便于继续编辑与入库；HTML 是单文件，可直接打印成 PDF。</li>
+      <li><b>选模式</b>：设计方案产出 11 章提案；设计规格走需求快照、A/B 草案、评审、自审查与人工问题。</li>
+      <li><b>写下想法</b>：一句话即可；也可以直接载入演示案例，填充后仍可修改。</li>
+      <li><b>看结论</b>：提案看共识与少数意见；规格看覆盖、冲突、验收和修订记录。</li>
+      <li><b>下载</b>：提案可下 Markdown / HTML；规格可下同版 Markdown 与 JSON，也可打印成 PDF。</li>
     </ol>
     <p class="help-note">当前使用离线 Mock 智能体：流程、校验、编号、收敛判定都是真实逻辑，文案由模板生成。</p>
     <button class="btn-solid" value="close">知道了</button>

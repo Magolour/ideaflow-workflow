@@ -184,6 +184,65 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"]["code"], "UNKNOWN_RUN")
 
+    def test_case_endpoint(self) -> None:
+        status, _, body = self.get("/api/case?name=campus-books-tight")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertIn("校园二手书", payload["title"])
+        self.assertNotIn("# 校园", payload["text"])
+
+    def test_unknown_case_is_rejected(self) -> None:
+        status, body = self.post("/api/generate", {"flow": "spec", "case": "nope"})
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"]["code"], "INVALID_CASE")
+
+    def test_spec_flow_and_downloads(self) -> None:
+        status, body = self.post("/api/generate", {
+            "flow": "spec", "case": "campus-books-tight", "idea": "案例",
+        })
+        self.assertEqual(status, 202)
+        job = self.wait_job(json.loads(body)["job_id"], timeout=40)
+        self.assertEqual(job["state"], "done", job.get("error"))
+        self.assertEqual(job["flow"], "spec")
+
+        result = job["result"]
+        self.assertEqual(result["flow"], "spec")
+        self.assertEqual(result["status"], "awaiting_human")
+        self.assertEqual([row["spec_version"] for row in result["audits"]], [1, 2])
+        self.assertEqual(len(result["revisions"]), 1)
+        self.assertEqual(result["question"]["id"], "HUMAN-Q-01")
+        self.assertEqual(len(result["drafts"]), 2)
+
+        run_id = quote(result["run_id"])
+        status, headers, body = self.get(
+            f"/api/download?run_id={run_id}&artifact=spec-md")
+        self.assertEqual(status, 200)
+        self.assertIn("text/markdown", headers["Content-Type"])
+        text = body.decode("utf-8")
+        self.assertIn("# 设计规格", text)
+        self.assertIn("需人工决策", text)
+
+        status, headers, body = self.get(
+            f"/api/download?run_id={run_id}&artifact=spec-json")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["hash"], result["spec"]["hash"])
+        self.assertEqual(payload["artifacts"]["markdown"], result["files"]["markdown"])
+
+        status, _, body = self.get(
+            f"/api/download?run_id={run_id}&artifact=question")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["id"], "HUMAN-Q-01")
+
+        status, body = self.post("/api/generate", {"flow": "spec",
+                                                   "case": "campus-books-tight"})
+        self.assertEqual(status, 202)
+        job = self.wait_job(json.loads(body)["job_id"], timeout=40)
+        status, _, body = self.get(
+            f"/api/download?run_id={quote(job['result']['run_id'])}&artifact=nope")
+        self.assertEqual(status, 400)
+
+
 
 if __name__ == "__main__":
     unittest.main()

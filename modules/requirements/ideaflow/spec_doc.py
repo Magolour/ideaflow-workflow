@@ -47,12 +47,14 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
     parts += [f"# 设计规格：{_title(snapshot)}", ""]
     parts += [f"> 规格 `{spec.spec_id}` ｜ 版本 {spec.version} ｜ "
               f"内容哈希 `{spec.hash[:16]}…` ｜ 基线草案 {spec.base_draft}",
+              ">",
               f"> 需求快照 `{spec.snapshot_id}` v{spec.snapshot_version}"
               f"（`{spec.snapshot_hash[:16]}…`）",
+              ">",
               f"> 同版机读文件：`spec.v{spec.version}.json`"]
     if spec.escalation:
-        parts += [f"> ⚠ 存在未决人工问题 `{spec.escalation['id']}`，"
-                  f"确认前不能作为开发依据。"]
+        parts += [">", f"> ⚠ 存在未决人工问题 `{spec.escalation['id']}`，"
+                       f"确认前不能作为开发依据。"]
     parts += [""]
 
     parts += ["## 1 概述", "", spec.architecture, ""]

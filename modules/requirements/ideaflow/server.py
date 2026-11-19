@@ -28,6 +28,7 @@ from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, SEVERITY_LABEL,
 from .pipeline import run
 from .render_html import PAPER_CSS, document_html, render_markdown
 from .roles import ALL_ROLES, DISCUSSION_ROLES
+from .specflow import CASE_NAMES, load_case, run as run_spec
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 STATIC_TYPES = {
@@ -67,6 +68,8 @@ class Job:
     answers: dict[str, str]
     max_rounds: int
     threshold: float
+    flow: str = "proposal"
+    case: str | None = None
     state: str = "queued"
     logs: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, str] | None = None
@@ -87,6 +90,8 @@ class Job:
         payload = {
             "id": self.id,
             "state": self.state,
+            "flow": self.flow,
+            "case": self.case,
             "idea": self.idea,
             "constraints": list(self.constraints),
             "logs": list(self.logs),
@@ -142,6 +147,10 @@ class JobStore:
         def progress(message: str) -> None:
             job.log(message, self)
 
+        if job.flow == "spec":
+            self._execute_spec(job, progress)
+            return
+
         try:
             result = run(job.idea, constraints=job.constraints, out_dir=self.runs_dir,
                          answers=job.answers, max_rounds=job.max_rounds,
@@ -163,6 +172,24 @@ class JobStore:
         job.log("完成：文档已写入运行目录", self)
         job.finished_at = time.time()
         job.result = payload
+        job.state = "done"
+
+    def _execute_spec(self, job: Job, progress: Any) -> None:
+        try:
+            raw = load_case(job.case) if job.case else job.idea
+            result = run_spec(raw, job.constraints, out_dir=self.runs_dir,
+                              case_name=job.case, progress=progress)
+        except ContractError as error:
+            self._fail(job, error.code, error.message, error.path)
+            return
+        except Exception as error:  # noqa: BLE001
+            self._fail(job, "INTERNAL_ERROR", f"{type(error).__name__}: {error}", "")
+            return
+
+        self.attach_run(job, result.run_id, result.out_dir)
+        job.log("完成：规格与审查记录已写入运行目录", self)
+        job.finished_at = time.time()
+        job.result = result.payload
         job.state = "done"
 
     def _fail(self, job: Job, code: str, message: str, path: str) -> None:
@@ -258,8 +285,16 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ApiError(400, "INVALID_BODY", "请求体必须是 JSON 对象")
 
+    flow = payload.get("flow", "proposal")
+    if flow not in ("proposal", "spec"):
+        raise ApiError(400, "INVALID_FLOW", "flow 只支持 proposal 或 spec")
+
+    case = payload.get("case") or None
+    if case is not None and case not in CASE_NAMES:
+        raise ApiError(400, "INVALID_CASE", "未知的案例名")
+
     idea = _clean_text(payload.get("idea", ""), field="想法", limit=MAX_IDEA)
-    if not idea:
+    if not idea and not case:
         raise ApiError(400, "EMPTY_IDEA", "请先写下一句想法")
 
     raw_constraints = payload.get("constraints", [])
@@ -303,8 +338,9 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
     if not 0.3 <= threshold <= 1.0:
         raise ApiError(400, "INVALID_FIELD", "共识阈值应在 0.3—1.0 之间")
 
-    return {"idea": idea, "constraints": constraints, "answers": answers,
-            "max_rounds": max_rounds, "threshold": round(threshold, 2)}
+    return {"idea": idea or case or "", "constraints": constraints, "answers": answers,
+            "max_rounds": max_rounds, "threshold": round(threshold, 2),
+            "flow": flow, "case": case}
 
 
 # ---------------------------------------------------------------- HTTP 层
@@ -332,6 +368,8 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                 elif route.path == "/api/health":
                     self._send_json(HTTPStatus.OK, {"ok": True, "mode": "mock",
                                                     "runs_dir": str(base)})
+                elif route.path == "/api/case":
+                    self._handle_case(parse_qs(route.query))
                 elif route.path == "/api/job":
                     self._handle_job(parse_qs(route.query))
                 elif route.path == "/api/download":
@@ -357,6 +395,18 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
 
         # ---------- 处理函数 ----------
 
+        def _handle_case(self, query: dict[str, list[str]]) -> None:
+            name = (query.get("name") or [""])[0]
+            try:
+                raw = load_case(name)
+            except ContractError as error:
+                raise ApiError(404, error.code, error.message) from None
+            lines = [line for line in raw.splitlines() if not line.strip().startswith("#")]
+            text = "\n".join(lines).strip()
+            title = next((line.strip().lstrip("#").strip()
+                          for line in raw.splitlines() if line.strip()), name)
+            self._send_json(HTTPStatus.OK, {"name": name, "title": title, "text": text})
+
         def _handle_job(self, query: dict[str, list[str]]) -> None:
             job_id = (query.get("id") or [""])[0]
             job = store.get(job_id)
@@ -366,13 +416,19 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
 
         def _handle_download(self, query: dict[str, list[str]]) -> None:
             run_id = (query.get("run_id") or [""])[0]
+            artifact = (query.get("artifact") or [""])[0]
+            run_dir = store.run_dir(run_id)
+            if run_dir is None:
+                raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行，请先生成文档")
+
+            if artifact:
+                self._send_artifact(run_dir, artifact, run_id)
+                return
+
             fmt = (query.get("format") or ["md"])[0]
             if fmt not in ("md", "html"):
                 raise ApiError(400, "INVALID_FORMAT", "format 只支持 md 或 html")
 
-            run_dir = store.run_dir(run_id)
-            if run_dir is None:
-                raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行，请先生成文档")
             target = (run_dir / "proposal.md").resolve()
             if not target.is_relative_to(base) or not target.exists():
                 raise ApiError(404, "UNKNOWN_RUN", "运行目录不在允许范围内")
@@ -384,13 +440,43 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
             else:
                 body = document_html(markdown).encode("utf-8")
                 content_type = "text/html; charset=utf-8"
+            self._send_file(body, content_type, f"{run_id}.{fmt}", f"design-document.{fmt}")
 
-            filename = f"{run_id}.{fmt}"
+        def _send_artifact(self, run_dir: Path, artifact: str, run_id: str) -> None:
+            if artifact not in ("spec-md", "spec-json", "question"):
+                raise ApiError(400, "INVALID_ARTIFACT", "artifact 只支持 spec-md、spec-json、question")
+            if artifact == "question":
+                target = (run_dir / "human_question.json").resolve()
+                content_type = "application/json; charset=utf-8"
+                fallback, suffix = "human-question.json", "question.json"
+            else:
+                meta_path = (run_dir / "spec.json").resolve()
+                if not meta_path.exists():
+                    raise ApiError(404, "UNKNOWN_SPEC", "该次运行没有规格文件")
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                artifacts = meta.get("artifacts", {})
+                key = "markdown" if artifact == "spec-md" else "json"
+                name = artifacts.get(key)
+                if not name:
+                    raise ApiError(404, "UNKNOWN_SPEC", "规格缺少导出记录")
+                target = (run_dir / name).resolve()
+                content_type = ("text/markdown; charset=utf-8" if artifact == "spec-md"
+                                else "application/json; charset=utf-8")
+                fallback, suffix = (("design-spec.md", "spec.md") if artifact == "spec-md"
+                                    else ("design-spec.json", "spec.json"))
+
+            if not target.is_relative_to(base) or not target.exists():
+                raise ApiError(404, "UNKNOWN_RUN", "运行目录不在允许范围内")
+            self._send_file(target.read_bytes(), content_type,
+                            f"{run_id}-{suffix}", fallback)
+
+        def _send_file(self, body: bytes, content_type: str, filename: str,
+                       fallback: str) -> None:
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Content-Disposition",
-                             f"attachment; filename=\"design-document.{fmt}\"; "
+                             f"attachment; filename=\"{fallback}\"; "
                              f"filename*=UTF-8''{quote(filename)}")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()

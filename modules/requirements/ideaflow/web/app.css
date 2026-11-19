@@ -855,3 +855,231 @@ table.plain tr:last-child td { border-bottom: 0; }
   .paper table { font-size: 9pt; }
   .paper tr { break-inside: avoid; }
 }
+
+/* ------------------------- 模式切换与规格流程 ------------------------- */
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 22px;
+  background: #101110;
+  border: 1px solid #2b2d27;
+  border-radius: 10px;
+}
+.mode {
+  border: 0;
+  background: none;
+  color: #9a9c90;
+  padding: 8px 6px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: 0.16s;
+}
+.mode:hover { color: #d8d4c6; }
+.mode[aria-selected="true"] {
+  background: #2c2e28;
+  color: #f2efe4;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px #3b3e35;
+}
+
+.case-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.case-btn {
+  border: 1px solid #34362f;
+  background: #212320;
+  color: #b9b7a9;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: 0.16s;
+}
+.case-btn:hover { border-color: #4d5045; color: #eeece0; }
+.case-btn[aria-pressed="true"] {
+  border-color: var(--brass);
+  background: #2b2d26;
+  color: #f4f0e4;
+}
+
+.spec-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #ecd9b8;
+  border-radius: 10px;
+  background: #fdf6e7;
+  color: #7a5a20;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.spec-banner.ok { border-color: #cfe0c8; background: #eef6ea; color: #3f6b45; }
+.spec-banner b { font-weight: 600; }
+.spec-banner a {
+  margin-left: auto;
+  flex: none;
+  color: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tagtype {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.tagtype.requirement { color: #39628b; background: #e6eef6; }
+.tagtype.constraint { color: #9a6c24; background: #f7edda; }
+.tagtype.open { color: #6b5b8e; background: #efeaf7; }
+
+table.spec-table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.65; }
+table.spec-table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: #f8f6ef;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+}
+table.spec-table td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+table.spec-table tr:last-child td { border-bottom: 0; }
+table.spec-table .src { color: var(--muted-2); font-size: 11px; white-space: nowrap; }
+
+.ab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.draft-card { border: 1px solid var(--line); border-radius: 11px; padding: 15px 16px; background: #fdfcf8; }
+.draft-card header { display: flex; gap: 10px; align-items: flex-start; }
+.draft-card h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.draft-meta { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; }
+.draft-obj { margin: 10px 0 8px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.dec-list { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.dec-list li {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  line-height: 1.6;
+}
+.dec-list li:first-child { border-top: 0; }
+.dec-id { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding-top: 2px; }
+.mini-flag { display: inline-block; margin-left: 4px; color: var(--red); font-size: 10.5px; }
+.score-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.score-row b { color: var(--ink-soft); font-weight: 600; }
+
+.tension {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.tension.requirement_vs_schedule { color: var(--red); background: var(--red-bg); }
+.tension.experience_vs_schedule { color: var(--amber); background: var(--amber-bg); }
+.tension.minor { color: var(--muted); background: #f0eee7; }
+
+.subsection {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 24px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.subsection h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.subsection span { color: var(--muted-2); font-size: 11px; }
+
+.dis-row { padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; line-height: 1.65; }
+.dis-row:last-child { border-bottom: 0; }
+.dis-row .obj-id { margin-right: 6px; }
+
+.audit-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.audit-chip { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.audit-chip b { display: block; margin-bottom: 2px; font-size: 16px; color: var(--ink); font-weight: 600; }
+
+.audit-version {
+  margin: 22px 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.issue { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.issue:last-child { border-bottom: 0; }
+.issue .sev { flex: none; margin-top: 2px; }
+.issue p { margin: 0; font-size: 12.5px; line-height: 1.65; }
+.issue .fix { margin-top: 3px; color: var(--muted-2); font-size: 11.5px; }
+
+.rev-card { margin-top: 12px; border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; background: #fdfcf8; }
+.rev-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.rev-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--brass);
+  border: 1px solid #ddcfae;
+  background: #fbf5e6;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.rev-flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0 10px; font-size: 11px; color: var(--muted); }
+.rev-flow span { background: #f3f0e7; padding: 2px 7px; border-radius: 5px; }
+.rev-flow i { font-style: normal; color: var(--muted-2); }
+.rev-changes { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.7; }
+.rev-changes b { font-weight: 600; }
+.rev-resolved { margin-top: 8px; font-size: 11.5px; color: var(--green); }
+.rev-resolved .rest { color: var(--red); }
+
+.q-card { margin-top: 16px; border: 1px solid #e6d3b3; border-radius: 12px; background: #fffdf7; padding: 16px 18px; }
+.q-card h3 { margin: 6px 0 10px; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.q-bg { margin: 0 0 12px; padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.75; }
+.q-options { width: 100%; border-collapse: collapse; font-size: 12px; }
+.q-options th { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.q-options td { padding: 9px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; line-height: 1.6; }
+.q-options tr:last-child td { border-bottom: 0; }
+.q-options .key { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.q-options tr.rec { background: #fbf6e8; }
+.q-meta { margin: 12px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.75; }
+.q-meta b { color: var(--ink-soft); }
+
+@media print {
+  .spec-result .metrics, .spec-result .tabs, .spec-result .actions,
+  .spec-result .spec-banner { display: none !important; }
+  .spec-result .panel:not([data-spanel="doc"]) { display: none !important; }
+}
+
+.spec-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.muted { color: var(--muted-2); font-size: 11px; }
+
+@media (max-width: 1180px) {
+  .spec-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .spec-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 规格页切换要求即时可读，不做淡入，避免快速切换时出现半透明瞬间 */
+.spec-result .panel { animation: none; }
+
+/* 生成很快，结果直接呈现，避免每次切换都出现淡入瞬间 */
+.result, .panel { animation: none; }
+
+/* 窄屏下表格保持可读宽度，交给面板横向滚动，而不是把汉字挤成竖排 */
+.spec-result .panel:not(.doc-panel) { overflow-x: auto; }
+table.spec-table { min-width: 640px; }
+.spec-banner { flex-wrap: wrap; }
+.spec-banner a { margin-left: auto; }
+
+@media (max-width: 640px) {
+  .snapshot-table { min-width: 0; }
+  .snapshot-table th:nth-child(3), .snapshot-table td:nth-child(3),
+  .snapshot-table th:nth-child(5), .snapshot-table td:nth-child(5) { display: none; }
+}

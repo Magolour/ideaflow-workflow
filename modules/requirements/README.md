@@ -34,11 +34,17 @@ python -m ideaflow.server --port 8000
 # 浏览器打开 http://127.0.0.1:8000/
 ```
 
-左栏填写想法与已知约束（轮次与阈值放在“高级设置”），右栏展示结果。生成任务跑在
-后台线程，页面轮询阶段日志，所以不会出现“点了没反应”；同一进程可连续生成多次，
-产物分别落在 `runs/` 下，互不覆盖。
+左栏顶部可以切换两种输出：
 
-结果页有四个视图：
+| 模式 | 输入 | 结果 |
+| --- | --- | --- |
+| 设计方案 | 想法 + 约束，轮次与阈值在“高级设置” | 11 章提案 |
+| 设计规格 | 想法，或直接选演示案例 | 需求快照 → A/B 草案 → 评审 → 规格 → 审查 → 修订 → 人工问题 |
+
+生成任务跑在后台线程，页面轮询阶段日志，不会出现“点了没反应”；同一进程可连续
+生成多次，产物分别落在 `runs/` 下，互不覆盖。
+
+**设计方案**的结果页有四个视图：
 
 | 视图 | 内容 |
 | --- | --- |
@@ -47,25 +53,43 @@ python -m ideaflow.server --port 8000
 | 异议记录 | 级别、状态、分歧类型、后果与回应，未解决的排在前面 |
 | 待澄清 | 阻断与非阻断问题，以及当前的处理方式 |
 
+**设计规格**的结果页有四个视图：
+
+| 视图 | 内容 |
+| --- | --- |
+| 需求快照 | `R/C/Q` 三类条目，带类型、优先级与来源行号 |
+| A/B 草案 | 两组独立方案、各自决策与评分，下方是取舍对照与评审分歧 |
+| 设计规格 | 同版 Markdown 的排版预览，含需求追溯表、模块接口与验收 |
+| 审查与修订 | 覆盖/约束/验收摘要、逐版问题清单、修订记录、人工问题与选项 |
+
 下载与导出：
 
 | 方式 | 说明 |
 | --- | --- |
-| 下载 .md | 原始 Markdown，便于继续编辑、入库或提交评审 |
-| 下载 .html | 单文件、样式内联，双击即可打开，含自动生成的目录 |
+| 下载 .md | 设计方案的 Markdown；规格模式下为同版规格 Markdown |
+| 下载 .html | 设计方案的单文件 HTML，双击可看、可打印 |
+| 下载规格 .json | 规格模式下导出机读 JSON，与 Markdown 同版本、同哈希 |
 | 打印 / PDF | 只打印正文，自动隐藏输入栏、指标卡与标签页 |
 
 接口只有三个，便于替换前端或接编排器：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/generate` | 提交 `{idea, constraints, max_rounds, threshold, answers}`，返回 `202 {job_id}` |
+| POST | `/api/generate` | 提交 `{flow, idea, constraints, …}`，`flow` 为 `proposal` 或 `spec`；规格模式可带 `case`；返回 `202 {job_id}` |
 | GET | `/api/job?id=` | 轮询任务状态、阶段日志与最终结果 |
-| GET | `/api/download?run_id=&format=md\|html` | 下载文档；`run_id` 必须来自本进程 |
+| GET | `/api/download?run_id=&format=md\|html` | 下载提案文档 |
+| GET | `/api/download?run_id=&artifact=spec-md\|spec-json\|question` | 下载规格 Markdown／JSON／人工问题 |
+| GET | `/api/case?name=` | 读取演示案例，供页面填入输入框 |
 
 另有 `/api/health` 健康检查与 `/static/*` 静态资源。服务默认只监听 `127.0.0.1`，
-需要局域网访问时显式加 `--host 0.0.0.0`。页面支持
-`/?idea=…&constraint=…&auto=1` 预填并直接生成，方便演示和分享。
+需要局域网访问时显式加 `--host 0.0.0.0`。页面支持演示链接：
+
+```text
+/?idea=…&constraint=…&auto=1                              设计方案，直接出结果
+/?mode=spec&case=campus-books-tight&auto=1                设计规格，含修订与人工问题
+/?mode=spec&case=campus-books&auto=1                      设计规格，直接进入人工决策
+/?mode=spec&idea=…&auto=1                                 自由输入，审查通过时为草稿
+```
 
 前端没有构建步骤：`http.server` + 手写 Markdown 渲染（`render_html.py`），
 不需要 npm，也不需要打包。
@@ -372,7 +396,7 @@ python -m ideaflow.spec_cli escalate --dir runs/tight-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 134 项测试
+python -m unittest discover -s tests -v     # 144 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -420,6 +444,7 @@ ideaflow/
 ├── spec_doc.py     # 规格导出：Markdown 渲染与同版校验
 ├── revisions.py    # 修订：范围裁剪、改前改后与复核记录
 ├── escalate.py     # 升级：把冲突变成带选项的人工问题
+├── specflow.py     # 规格流程编排：一次跑完七个阶段
 ├── demo.py         # 固定案例：快照 → 草案 → 取舍，一次跑完
 ├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
@@ -435,6 +460,7 @@ tests/
 ├── test_reviews.py
 ├── test_revisions.py
 ├── test_snapshot.py
+├── test_specflow.py
 ├── test_tradeoffs.py
 └── test_web.py
 ```
