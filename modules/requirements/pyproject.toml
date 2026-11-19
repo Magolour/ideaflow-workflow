@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ideaflow"
+version = "0.1.0"
+description = "把一句想法变成结构化设计提案的多智能体讨论流程（离线可跑）"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ideaflow = "ideaflow.cli:main"
+ideaflow-web = "ideaflow.server:main"
+
+[tool.setuptools]
+packages = ["ideaflow"]
+
+[tool.setuptools.package-data]
+ideaflow = ["web/*.html", "web/*.css", "web/*.js"]

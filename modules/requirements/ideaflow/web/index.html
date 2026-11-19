@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IdeaFlow · 想法生成设计文档</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317181a'/%3E%3Cpath d='M9 22V10h3v12H9zm6 0V10h3l4 8v-8h3v12h-3l-4-8v8h-3z' fill='%23efece2'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/static/app.css" />
+<link rel="stylesheet" href="/static/paper.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 19V5h2.6v14H5zm5.6 0V5h2.6l4.2 8.4V5H20v14h-2.6l-4.2-8.4V19h-2.6z" fill="currentColor"/></svg>
+      </span>
+      <div class="brand-text">
+        <strong>IdeaFlow</strong>
+        <span>想法 → 设计文档</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="status" id="serverStatus"><i></i>检查服务…</span>
+      <button class="link-btn" id="btnHelp" type="button">使用说明</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+
+    <!-- ============ 左侧输入 ============ -->
+    <aside class="rail">
+      <form id="ideaForm" autocomplete="off">
+        <div class="mode-switch" id="modeSwitch" role="tablist" aria-label="输出类型">
+          <button type="button" class="mode" role="tab" data-mode="proposal" aria-selected="true">设计方案</button>
+          <button type="button" class="mode" role="tab" data-mode="spec" aria-selected="false">设计规格</button>
+        </div>
+
+        <div class="rail-head">
+          <p class="eyebrow" id="railEyebrow">Input</p>
+          <h2 id="railTitle">从一个想法开始</h2>
+          <p class="rail-sub" id="railSub">六个角色独立出稿、互相批判，再整合成一份带分歧记录的设计文档。</p>
+        </div>
+
+        <div class="field">
+          <div class="field-label"><label for="idea">一句话想法</label><span id="ideaCount">0 / 1200</span></div>
+          <textarea id="idea" maxlength="1200" rows="5" placeholder="例如：做一个校园二手书交易小程序，学生可以发布、搜索教材并线下交易"></textarea>
+          <p class="field-error" id="ideaError" hidden>先写下一句想法，再生成文档。</p>
+        </div>
+
+        <div class="field">
+          <div class="field-label"><span>已知约束</span><span class="optional">可选</span></div>
+          <div class="chip-input">
+            <input id="constraintInput" maxlength="120" placeholder="两周内出演示版，按 Enter 添加" />
+            <button type="button" id="btnAddConstraint" aria-label="添加约束">+</button>
+          </div>
+          <div class="chips" id="chips"></div>
+        </div>
+
+        <div class="field" id="caseField" hidden>
+          <div class="field-label"><span>演示案例</span><span class="optional">填充后仍可修改</span></div>
+          <div class="case-list">
+            <button type="button" class="case-btn" data-case="campus-books">校园二手书 · 14 天</button>
+            <button type="button" class="case-btn" data-case="campus-books-tight">紧凑版 · 9 天</button>
+            <button type="button" class="case-btn" data-case="">自由输入</button>
+          </div>
+        </div>
+
+        <details class="advanced" id="advancedOptions">
+          <summary>高级设置</summary>
+          <div class="range">
+            <label for="rounds">讨论轮次上限 <output id="roundsOut">2</output></label>
+            <input type="range" id="rounds" min="1" max="4" step="1" value="2" />
+            <p>轮次越多，异议被回应的机会越多；达到上限仍未收敛时会显式记录原因。</p>
+          </div>
+          <div class="range">
+            <label for="threshold">共识支持度阈值 <output id="thresholdOut">70%</output></label>
+            <input type="range" id="threshold" min="40" max="95" step="5" value="70" />
+          </div>
+        </details>
+
+        <button class="btn-generate" id="btnGenerate" type="submit">
+          <span class="btn-label">生成设计文档</span>
+          <span class="btn-tail"><kbd>Ctrl</kbd><kbd>↵</kbd></span>
+        </button>
+        <p class="rail-hint">离线运行，不需要 API Key；同一输入可重复复现结果结构。</p>
+      </form>
+
+      <div class="examples">
+        <p class="field-label"><span>试试这些</span></p>
+        <button type="button" class="example" data-idea="做一个校园二手书交易小程序，学生可以发布、搜索教材并线下交易">校园二手书交易小程序</button>
+        <button type="button" class="example" data-idea="做一个团队值班排班工具，支持换班、请假和提醒">团队值班排班工具</button>
+        <button type="button" class="example" data-idea="把实验室的设备预约流程从微信群搬到线上，能看空闲时段并审批">实验室设备预约</button>
+      </div>
+
+      <div class="rail-foot">
+        <span>零第三方依赖</span><span>·</span><span>Python 标准库</span>
+      </div>
+    </aside>
+
+    <!-- ============ 右侧舞台 ============ -->
+    <section class="stage">
+
+      <div class="empty" id="emptyState">
+        <svg class="empty-art" viewBox="0 0 420 240" fill="none" aria-hidden="true">
+          <rect x="86" y="28" width="152" height="188" rx="8" fill="#fff" stroke="#dcd7c9" />
+          <path d="M106 58h112M106 74h84M106 96h112M106 112h96M106 134h112M106 150h72" stroke="#e2ddcf" stroke-width="5" stroke-linecap="round"/>
+          <rect x="188" y="58" width="146" height="188" rx="8" fill="#fff" stroke="#cfc7b3" transform="rotate(6 188 58)"/>
+          <g transform="rotate(6 188 58)">
+            <path d="M208 92h104M208 108h78M208 130h104M208 146h90M208 168h104M208 184h64" stroke="#e6dfcd" stroke-width="5" stroke-linecap="round"/>
+          </g>
+          <circle cx="322" cy="66" r="20" fill="#17181a"/>
+          <path d="M315 66h14M322 59v14" stroke="#efece2" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="72" cy="176" r="6" fill="#b08d57"/>
+          <path d="M72 182v26" stroke="#b08d57" stroke-width="1.5" stroke-dasharray="3 4"/>
+          <circle cx="72" cy="216" r="4" fill="#b08d57"/>
+        </svg>
+        <p class="eyebrow">Output</p>
+        <h2>一句想法，一份可确认的设计文档</h2>
+        <p class="empty-sub">输入想法后，系统会走完澄清、发散、批判、整合、签署、收敛六个阶段，输出 11 章文档，并保留未解决的问题与少数意见。</p>
+        <div class="empty-steps">
+          <span><b>1</b>填写想法</span>
+          <span><b>2</b>生成文档</span>
+          <span><b>3</b>预览并下载</span>
+        </div>
+      </div>
+
+      <div class="runpanel" id="runPanel" hidden>
+        <div class="run-head">
+          <span class="spinner" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">Working</p>
+            <h2 id="runTitle">正在生成设计文档</h2>
+          </div>
+          <span class="run-time" id="runTime">0.0s</span>
+        </div>
+        <ol class="timeline" id="timeline"></ol>
+        <p class="run-note">阶段由代码驱动，模型只负责生成阶段内容；全部输出都要通过结构校验才会写入黑板。</p>
+      </div>
+
+      <div class="error-card" id="errorPanel" hidden>
+        <p class="eyebrow">Failed</p>
+        <h2>生成没有完成</h2>
+        <p class="error-msg" id="errorMsg"></p>
+        <p class="error-hint">可以调整输入后重试；如果是配置问题，检查端口是否被占用或运行目录权限。</p>
+        <button type="button" class="btn-ghost" id="btnRetry">重新生成</button>
+      </div>
+
+      <div class="result" id="resultPanel" hidden>
+        <header class="result-head">
+          <div class="result-title">
+            <p class="eyebrow">Design document</p>
+            <h2 id="resultTitle"></h2>
+            <p class="result-sub" id="resultSub"></p>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn-ghost" id="btnCopy">复制 Markdown</button>
+            <a class="btn-ghost" id="dlMd" href="#" download>下载 .md</a>
+            <a class="btn-solid" id="dlHtml" href="#" download>下载 .html</a>
+            <button type="button" class="btn-ghost" id="btnPrint">打印 / PDF</button>
+          </div>
+        </header>
+
+        <div class="metrics" id="metrics"></div>
+
+        <div class="tabs" role="tablist" id="tabs">
+          <button class="tab" role="tab" data-tab="doc" aria-selected="true">设计文档</button>
+          <button class="tab" role="tab" data-tab="options" aria-selected="false">候选方案<span class="count" id="countOptions">0</span></button>
+          <button class="tab" role="tab" data-tab="objections" aria-selected="false">异议记录<span class="count" id="countObjections">0</span></button>
+          <button class="tab" role="tab" data-tab="questions" aria-selected="false">待澄清<span class="count" id="countQuestions">0</span></button>
+        </div>
+
+        <div class="panel doc-panel" data-panel="doc">
+          <article class="paper" id="paper"></article>
+        </div>
+        <div class="panel" data-panel="options" hidden id="panelOptions"></div>
+        <div class="panel" data-panel="objections" hidden id="panelObjections"></div>
+        <div class="panel" data-panel="questions" hidden id="panelQuestions"></div>
+      </div>
+
+      <!-- ============ 规格结果 ============ -->
+      <div class="spec-result" id="specResult" hidden>
+        <header class="result-head">
+          <div class="result-title">
+            <p class="eyebrow">Design specification</p>
+            <h2 id="specTitle"></h2>
+            <p class="result-sub" id="specSub"></p>
+          </div>
+          <div class="actions">
+            <a class="btn-ghost" id="specDlMd" href="#">下载规格 .md</a>
+            <a class="btn-solid" id="specDlJson" href="#">下载规格 .json</a>
+            <button type="button" class="btn-ghost" id="specPrint">打印 / PDF</button>
+          </div>
+        </header>
+
+        <div class="spec-banner" id="specBanner" hidden></div>
+        <div class="metrics spec-metrics" id="specMetrics"></div>
+
+        <div class="tabs" id="specTabs" role="tablist">
+          <button class="tab" role="tab" data-stab="snapshot" aria-selected="true">需求快照</button>
+          <button class="tab" role="tab" data-stab="drafts" aria-selected="false">A/B 草案<span class="count" id="countDrafts">0</span></button>
+          <button class="tab" role="tab" data-stab="doc" aria-selected="false">设计规格</button>
+          <button class="tab" role="tab" data-stab="audit" aria-selected="false">审查与修订<span class="count" id="countIssues">0</span></button>
+        </div>
+
+        <div class="panel" data-spanel="snapshot" id="panelSnapshot"></div>
+        <div class="panel" data-spanel="drafts" id="panelDrafts" hidden></div>
+        <div class="panel doc-panel" data-spanel="doc" id="panelSpecDoc" hidden>
+          <article class="paper" id="specPaper"></article>
+        </div>
+        <div class="panel" data-spanel="audit" id="panelAudit" hidden></div>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<dialog class="help" id="helpDialog">
+  <form method="dialog">
+    <p class="eyebrow">How it works</p>
+    <h2>怎么用</h2>
+    <ol>
+      <li><b>选模式</b>：设计方案产出 11 章提案；设计规格走需求快照、A/B 草案、评审、自审查与人工问题。</li>
+      <li><b>写下想法</b>：一句话即可；也可以直接载入演示案例，填充后仍可修改。</li>
+      <li><b>看结论</b>：提案看共识与少数意见；规格看覆盖、冲突、验收和修订记录。</li>
+      <li><b>下载</b>：提案可下 Markdown / HTML；规格可下同版 Markdown 与 JSON，也可打印成 PDF。</li>
+    </ol>
+    <p class="help-note">当前使用离线 Mock 智能体：流程、校验、编号、收敛判定都是真实逻辑，文案由模板生成。</p>
+    <button class="btn-solid" value="close">知道了</button>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
