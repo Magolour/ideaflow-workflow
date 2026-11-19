@@ -70,6 +70,40 @@ python -m ideaflow.server --port 8000
 前端没有构建步骤：`http.server` + 手写 Markdown 渲染（`render_html.py`），
 不需要 npm，也不需要打包。
 
+## 规格流程：需求快照 → 设计规格
+
+与「讨论提案」并行的第二条链路，按评审要求逐项实现：先把输入固化成快照，
+再让两组独立出方案、逐份评审、整合成规格，最后做覆盖／冲突／验收自审查。
+
+### 需求快照
+
+```bash
+python -m ideaflow.spec_cli snapshot --file cases/campus-books.md --confirm 产品负责人
+```
+
+| 能力 | 说明 |
+| --- | --- |
+| 三类条目 | 明确要求 `R-xx`、约束 `C-xx`、待澄清 `Q-xx`；默认按措辞判定，`需求：`／`约束：`／`待澄清：` 前缀优先 |
+| 来源可追溯 | 每条带 `section / start_line / end_line / excerpt`，行号指向原文真实位置 |
+| 版本 | 编辑即升版，旧版 `snapshot.v1.json` 保留；确认只改状态，不升版本 |
+| 完整性 | 落盘内容带 `hash`，读回时校验；改任何字段即报 `HASH_MISMATCH` |
+| 编号稳定 | 已删除的编号进入 `retired_ids`，不会被后来的条目复用 |
+
+实现进度：
+
+| # | 能力 | 状态 |
+| --- | --- | --- |
+| 1 | 需求快照：编号、版本、三类条目、来源行号 | ✅ 已完成 |
+| 2 | 两组 Agent 基于同一快照独立出方案 | 待做 |
+| 3 | 交付快照、A/B 草案及来源引用 | 待做 |
+| 4 | 案例展示两方案的实际取舍 | 待做 |
+| 5 | 一组失败后可单独重试 | 待做 |
+| 6 | 分别评审、记录分歧与采纳理由、整合成规格 | 待做 |
+| 7 | 规格自审查：覆盖、冲突、验收 | 待做 |
+| 8 | 导出同版规格 JSON 与 Markdown | 待做 |
+| 9 | 「发现问题 → 修订 → 复核」记录 | 待做 |
+| 10 | 无法自动解决时产出具体人工问题 | 待做 |
+
 ## 已实现的设计要点
 
 | 文档要求 | 实现位置 |
@@ -103,7 +137,7 @@ python -m ideaflow.server --port 8000
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 30 项测试
+python -m unittest discover -s tests -v     # 46 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -138,10 +172,14 @@ ideaflow/
 ├── estimate.py     # PERT 三点估算
 ├── render_html.py  # Markdown → HTML，预览与离线文档共用
 ├── server.py       # Web 工作台：生成任务、轮询接口、下载
+├── storage.py      # 原子写、稳定序列化与内容哈希
+├── snapshot.py     # 需求快照：三类条目、编号、版本、来源
+├── spec_cli.py     # 规格流程命令行
 ├── web/            # 前端页面（原生 HTML/CSS/JS，无构建）
 └── cli.py          # 命令行入口
 tests/
 ├── test_pipeline.py
+├── test_snapshot.py
 └── test_web.py
 ```
 
