@@ -331,6 +331,7 @@ class RealtimeAgent:
         self.spec_version = "v1.0"
         self.list_version = "v1.0"
         self.graph_id = "G-v1.0"
+        self.plan_id: str | None = None
         self.analysis_summary = ""
         self.tasks: dict[str, dict] = {}
         self.edges: list[dict] = []
@@ -386,6 +387,11 @@ class RealtimeAgent:
             if isinstance(data, dict):
                 payload = data.get("task_list_approved_v1.2", data)
                 self.list_version = payload.get("list_version", self.list_version)
+                if payload.get("plan_id"):
+                    self.plan_id = str(payload["plan_id"])
+                spec_ref = payload.get("spec_ref")
+                if isinstance(spec_ref, dict) and isinstance(spec_ref.get("version"), int):
+                    spec_version = f"v{spec_ref['version']}"
             self.spec_version = spec_version
             try:
                 edges, summary = analyze(tasks, self.mock)
@@ -401,7 +407,8 @@ class RealtimeAgent:
             self.upload_path.parent.mkdir(parents=True, exist_ok=True)
             self.upload_path.write_bytes(raw)
             self.emit("system", "instance", self.instance_id, "created",
-                      f"实例创建，绑定规格 {spec_version}")
+                      f"实例创建，绑定计划 {self.plan_id}（规格 {spec_version}）"
+                      if self.plan_id else f"实例创建，绑定规格 {spec_version}")
             if requirement:
                 self.emit("system", "task_list", f"TL-{self.list_version}",
                           "requirement_parsed",
@@ -753,6 +760,7 @@ class RealtimeAgent:
             "status": self.status,
             "waiting_on": self.waiting_on,
             "spec_version": self.spec_version,
+            "plan_id": self.plan_id,
             "list_version": self.list_version,
             "graph_id": self.graph_id,
             "total": total,
@@ -783,6 +791,7 @@ class RealtimeAgent:
                 "note": "实时编排运行时：完整事件流，顶层为当前状态",
                 "instance_id": self.instance_id,
                 "spec_version": self.spec_version,
+                "plan_id": self.plan_id,
                 "graph_id": self.graph_id,
                 "status": self.status,
                 "waiting_on": self.waiting_on,
