@@ -17,6 +17,8 @@ FILES = {
     "plan": "plan.schema.json",
     "event": "event.schema.json",
     "decision": "decision.schema.json",
+    "artifact": "artifact.schema.json",
+    "delivery": "delivery.schema.json",
 }
 
 NORMAL = {
@@ -27,6 +29,8 @@ NORMAL = {
     "plan": "plan.normal.json",
     "event": "event.normal.json",
     "decision": "decision.normal.json",
+    "artifact": "artifact.normal.json",
+    "delivery": "delivery.normal.json",
 }
 
 INVALID = {
@@ -37,6 +41,8 @@ INVALID = {
     "plan": "plan.invalid.json",
     "event": "event.invalid.json",
     "decision": "decision.invalid.json",
+    "artifact": "artifact.invalid.json",
+    "delivery": "delivery.invalid.json",
 }
 
 

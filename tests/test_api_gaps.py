@@ -95,6 +95,64 @@ class ApiGapTest(unittest.TestCase):
         self.assertGreaterEqual(progress["total"], 2)
         self.assertEqual(progress["spec_version"], "v1")
 
+    @unittest.skip("待实现：任务完成要落产物（artifact），交付记录才有据可依")
+    def test_task_completion_records_artifact(self):
+        with running_server(self.out) as (base, _):
+            post_json(f"{base}/api/start",
+                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            post_json(f"{base}/api/events",
+                      {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
+            for _ in range(20):
+                time.sleep(0.25)
+                progress = get_json(f"{base}/api/progress")
+                if progress["tasks"][0]["status"] == "done":
+                    break
+        self.assertTrue(progress["tasks"][0].get("artifact_ids"),
+                        "任务完成时应登记至少一个产物")
+        artifacts = list((self.out / "artifacts").rglob("*")) if (self.out / "artifacts").exists() else []
+        self.assertTrue(artifacts, "产物应有落盘文件或记录")
+
+    @unittest.skip("待实现：全部任务终态后实例进入 delivery_pending 并生成交付记录")
+    def test_all_done_enters_delivery_pending(self):
+        with running_server(self.out) as (base, _):
+            post_json(f"{base}/api/start",
+                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            post_json(f"{base}/api/events",
+                      {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
+            for _ in range(20):
+                time.sleep(0.25)
+                progress = get_json(f"{base}/api/progress")
+                if progress["status"] == "delivery_pending":
+                    break
+        self.assertEqual(progress["status"], "delivery_pending")
+        delivery = progress["delivery"]
+        self.assertIsNotNone(delivery)
+        self.assertEqual(delivery["status"], "draft")
+        self.assertEqual([item["task_id"] for item in delivery["items"]], ["T1"])
+
+    @unittest.skip("待实现：交付确认后实例 completed，并记录 delivery 决策")
+    def test_delivery_confirm_completes_instance(self):
+        with running_server(self.out) as (base, _):
+            post_json(f"{base}/api/start",
+                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            post_json(f"{base}/api/events",
+                      {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
+            for _ in range(20):
+                time.sleep(0.25)
+                if get_json(f"{base}/api/progress")["status"] == "delivery_pending":
+                    break
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "approve", "operator": "tester"})
+            for _ in range(20):
+                time.sleep(0.25)
+                progress = get_json(f"{base}/api/progress")
+                if progress["status"] == "completed":
+                    break
+        self.assertEqual(progress["status"], "completed")
+        self.assertEqual(progress["delivery"]["status"], "confirmed")
+        self.assertEqual(progress["delivery"]["decided_by"], "human:tester")
+        self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
+
     @unittest.skip("待实现：/api/progress 返回 decisions")
     def test_progress_exposes_decisions(self):
         tasks = {"tasks": [{"task_id": "T1", "name": "确认验收", "suggested_role": "human"}]}

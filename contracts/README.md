@@ -13,7 +13,9 @@
 | `spec.schema.json` | `spec.json` / `spec.v1.json` | 设计规格（当前实际字段） |
 | `plan.schema.json` | `python/plan_adapter.py` 生成，`agent.py` 消费 | 任务 6 字段必填，R/M/估时/依赖可选 |
 | `event.schema.json` | `agent.py` 的 `emit()` | 当前事件字段与动作 |
-| `decision.schema.json` | `agent.py` 的 `_record_decision()` | 写入 `decisions.jsonl`，目标类型含 `task` |
+| `decision.schema.json` | `agent.py` 的 `_record_decision()` | 写入 `decisions.jsonl`，目标类型含 `task/delivery` |
+| `artifact.schema.json` | 执行侧产出 | 任务产物：文件、结构化记录或外链 |
+| `delivery.schema.json` | 全部任务终态后生成 | 交付记录：每任务的产物与验收结论，人工确认后实例完成 |
 | `enums.schema.json` | 全组 | 状态、动作、角色、优先级 |
 
 ## 已知差异（必须先对齐）
@@ -28,7 +30,8 @@
 7. `plan` 的 `depends_on` 必须是任务号（T1），规格里的模块号（M-01）由 `plan_adapter.py` 转换；
 8. 时间戳统一为带偏移的 ISO 8601（如 `2026-11-20T11:00:00+08:00`）；
 9. 枚举以代码为准：快照条目类型为 `requirement/constraint/open`，规格状态含 `awaiting_human`；
-10. `config`、`artifact`、`delivery` 未纳入本版。
+10. `artifact`、`delivery` 已纳入本版，字段按"最小闭环"定义，执行侧实现后可再收紧；
+11. `config` 未纳入本版，当前用 `--mock` 参数与 `.env` 代替。
 
 ## 校验
 
@@ -40,14 +43,20 @@ python -m unittest discover -s tests -v
 `tests/test_decision.py` 校验人工决策记录；
 `tests/test_integration.py` 校验 spec → plan → 编排器；
 `tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
-`tests/test_api_gaps.py` 校验 openapi 结构，并挂着两条待实现的接口断言（`skip`）。
+`tests/test_api_gaps.py` 校验 openapi 结构，并挂着六条待实现的接口断言（`skip`）。
 
 ## 待实现（断言已就位，实现后去掉 skip）
 
 | 缺口 | 契约位置 | 实现方 |
 | --- | --- | --- |
-| `/api/start` 接受 `spec.json` 并调用 `plan_adapter.py` | `openapi.yaml` 的 `StartRequest` | 编排器（成员 4） |
+| 想法入口经需求模块生成规格后再分解 | `openapi.yaml` 的 `StartRequest` | 流程集成（成员 1） |
+| `/api/start` 接受 `spec.json` 并调用 `plan_adapter.py` | 同上 | 编排器（成员 4） |
 | `/api/progress` 返回 `decisions` | `openapi.yaml` 的 `Progress.decisions` | 编排器（成员 4） |
+| 任务完成登记产物 | `artifact.schema.json` | 执行侧（成员 1/4） |
+| 全部终态后进入 `delivery_pending` 并生成交付记录 | `delivery.schema.json` | 执行侧（成员 1/4） |
+| 交付确认后实例 `completed` | `Progress.delivery` | 执行侧（成员 1/4） |
+
+退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
 
 ## 入口约定
 

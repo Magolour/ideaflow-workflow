@@ -158,6 +158,31 @@
         "could",
         "wont"
       ]
+    },
+    "artifactKind": {
+      "type": "string",
+      "enum": [
+        "file",
+        "record",
+        "url"
+      ],
+      "description": "file 需带 path；record 只存结构化记录；url 指向外部资源"
+    },
+    "acceptanceResult": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "skipped"
+      ]
+    },
+    "deliveryStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "confirmed",
+        "rejected"
+      ]
     }
   }
 }

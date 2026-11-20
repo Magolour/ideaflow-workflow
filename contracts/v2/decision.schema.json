@@ -25,7 +25,8 @@
         "draft",
         "spec",
         "plan",
-        "task"
+        "task",
+        "delivery"
       ]
     },
     "target_id": {

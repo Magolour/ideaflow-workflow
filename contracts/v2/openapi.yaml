@@ -157,6 +157,11 @@ components:
           type: array
           description: 按发生顺序返回；无人工操作时为空数组
           items: { $ref: "decision.schema.json" }
+        delivery:
+          description: 全部任务终态后生成；确认前 status=draft，实例停留在 delivery_pending
+          oneOf:
+            - $ref: "delivery.schema.json"
+            - type: "null"
     TaskState:
       type: object
       additionalProperties: true

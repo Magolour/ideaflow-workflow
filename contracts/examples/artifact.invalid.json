@@ -1,0 +1,7 @@
+{
+  "artifact_id": "ART-0002",
+  "task_id": "T2",
+  "kind": "file",
+  "summary": "文件类产物必须给出 path，这里故意缺失",
+  "created_at": "2026-11-20T14:05:00+08:00"
+}
