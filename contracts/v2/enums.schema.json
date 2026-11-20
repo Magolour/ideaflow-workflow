@@ -28,6 +28,7 @@
       "type": "string",
       "enum": [
         "draft",
+        "awaiting_human",
         "confirmed",
         "superseded"
       ]
@@ -71,7 +72,7 @@
       "enum": [
         "requirement",
         "constraint",
-        "question"
+        "open"
       ]
     },
     "role": {

@@ -27,7 +27,8 @@
 6. `requirement_spec` 不单独存在，用 `snapshot` 代替；
 7. `plan` 的 `depends_on` 必须是任务号（T1），规格里的模块号（M-01）由 `plan_adapter.py` 转换；
 8. 时间戳统一为带偏移的 ISO 8601（如 `2026-11-20T11:00:00+08:00`）；
-9. `config`、`artifact`、`delivery` 未纳入本版。
+9. 枚举以代码为准：快照条目类型为 `requirement/constraint/open`，规格状态含 `awaiting_human`；
+10. `config`、`artifact`、`delivery` 未纳入本版。
 
 ## 校验
 
@@ -38,6 +39,7 @@ python -m unittest discover -s tests -v
 `tests/test_contracts.py` 校验 schema 与正常/异常样例；
 `tests/test_decision.py` 校验人工决策记录；
 `tests/test_integration.py` 校验 spec → plan → 编排器；
+`tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
 `tests/test_api_gaps.py` 校验 openapi 结构，并挂着两条待实现的接口断言（`skip`）。
 
 ## 待实现（断言已就位，实现后去掉 skip）
