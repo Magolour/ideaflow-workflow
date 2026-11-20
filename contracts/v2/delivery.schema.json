@@ -7,7 +7,6 @@
   "required": [
     "delivery_id",
     "instance_id",
-    "plan_id",
     "items",
     "status",
     "created_at"
@@ -22,7 +21,8 @@
     },
     "plan_id": {
       "type": "string",
-      "pattern": "^PLAN-[A-Za-z0-9_-]+$"
+      "pattern": "^PLAN-[A-Za-z0-9_-]+$",
+      "description": "从计划入口启动时带计划号；任务清单入口（夹具）无计划号，可省略"
     },
     "items": {
       "type": "array",

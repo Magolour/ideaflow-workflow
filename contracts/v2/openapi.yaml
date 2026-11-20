@@ -125,8 +125,7 @@ components:
       properties:
         instance_id: { type: string }
         status:
-          type: string
-          enum: [created, running, waiting_human, blocked, completed]
+          $ref: "enums.schema.json#/$defs/instanceStatus"
         plan_id:
           type: [string, "null"]
           description: 由 plan.json 或 spec.json 生成后回填；需求/任务入口可为 null
@@ -149,8 +148,7 @@ components:
               required: ["gate_type", "waiting_for", "object_id", "since"]
               properties:
                 gate_type:
-                  type: string
-                  enum: [task_execution, task_failed, delivery_confirm]
+                  $ref: "enums.schema.json#/$defs/gateType"
                 waiting_for: { type: string, const: "human" }
                 object_id: { type: string }
                 since:
@@ -192,11 +190,10 @@ components:
         task_id: { type: string }
         name: { type: string }
         status:
-          type: string
-          enum: [pending, running, done, failed, blocked, skipped]
+          $ref: "enums.schema.json#/$defs/taskStatus"
         attempts: { type: integer, minimum: 0 }
-        suggested_role: { type: string, enum: [ai, human, "ai+human"] }
-        priority: { type: string, enum: [low, medium, high] }
+        suggested_role: { $ref: "enums.schema.json#/$defs/role" }
+        priority: { $ref: "enums.schema.json#/$defs/priority" }
         deliverable: { type: string }
         acceptance_items:
           type: array
@@ -231,6 +228,5 @@ components:
         from: { type: string }
         to: { type: string }
         type:
-          type: string
-          enum: [force, data, resource]
+          $ref: "enums.schema.json#/$defs/edgeType"
         reason: { type: string }

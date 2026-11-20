@@ -193,6 +193,23 @@
         "confirmed",
         "rejected"
       ]
+    },
+    "edgeType": {
+      "type": "string",
+      "enum": [
+        "force",
+        "data",
+        "resource"
+      ],
+      "description": "force 强制前置；data 数据依赖；resource 资源共享不阻塞"
+    },
+    "gateType": {
+      "type": "string",
+      "enum": [
+        "task_execution",
+        "task_failed",
+        "delivery_confirm"
+      ]
     }
   }
 }
