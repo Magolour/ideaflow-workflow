@@ -23,9 +23,19 @@ def plan_from_spec(spec: dict, *, plan_id: str | None = None,
         raise ValueError("设计规格缺少 spec_id 或 version")
 
     tasks = []
+    module_to_task = {}
+    for index, module in enumerate(modules, 1):
+        if module.get("id"):
+            module_to_task[module["id"]] = f"T{index}"
+
     for index, module in enumerate(modules, 1):
         name = module.get("name") or f"模块 {index}"
         role = module.get("suggested_role") or "ai"
+        depends_on = []
+        for ref in module.get("depends_on") or []:
+            if ref not in module_to_task:
+                raise ValueError(f"模块 {module.get('id') or name} 依赖了不存在的模块：{ref}")
+            depends_on.append(module_to_task[ref])
         task = {
             "task_id": f"T{index}",
             "name": name,
@@ -35,7 +45,7 @@ def plan_from_spec(spec: dict, *, plan_id: str | None = None,
             "priority": "high",
             "requirement_refs": list(module.get("requirement_ids") or []),
             "design_refs": [module.get("id")] if module.get("id") else [],
-            "depends_on": list(module.get("depends_on") or []),
+            "depends_on": depends_on,
             "write_paths": list(module.get("write_paths") or []),
             "review_required": "human" in role,
         }
