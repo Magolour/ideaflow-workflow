@@ -1,0 +1,30 @@
+{
+  "draft_id": "DRAFT-A",
+  "group": "A",
+  "group_name": "交付优先",
+  "objective": "最短路径跑通",
+  "snapshot_ref": {
+    "snapshot_id": "REQSET-001",
+    "version": 1,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "summary": "先做发布与搜索",
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "created_at": "2026-11-20T10:05:00+08:00",
+  "attempt": 1,
+  "decisions": [],
+  "claims": [],
+  "assumptions": [],
+  "risks": [],
+  "constraints_checked": [],
+  "packages": [],
+  "estimate": {
+    "rows": [],
+    "expected_total": 3,
+    "deviation_total": 0.5,
+    "commit_days": 3.5,
+    "buffer_low": 2.5,
+    "buffer_high": 4.5
+  },
+  "declined_requirements": []
+}

@@ -17,7 +17,7 @@ import sys
 import threading
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
@@ -48,7 +48,7 @@ load_env()
 
 
 def now_iso() -> str:
-    return datetime.now().replace(microsecond=0).isoformat()
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 # ---------- 输入 ----------
@@ -324,12 +324,14 @@ class RealtimeAgent:
         self.upload_path = upload_path
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.events_path = out_dir / "events.jsonl"
+        self.decisions_path = out_dir / "decisions.jsonl"
         self.state_path = out_dir / "runtime_state.json"
         self.mock = mock
         self.instance_id = "INST-2026-0001"
         self.spec_version = "v1.0"
         self.list_version = "v1.0"
         self.graph_id = "G-v1.0"
+        self.plan_id: str | None = None
         self.analysis_summary = ""
         self.tasks: dict[str, dict] = {}
         self.edges: list[dict] = []
@@ -341,6 +343,7 @@ class RealtimeAgent:
         self.last_error = ""
         self.seq = self._last_seq()
         self.log: list[dict] = []
+        self.decisions: list[dict] = []
         self.queue: queuelib.PriorityQueue = queuelib.PriorityQueue()
         self._tick = itertools.count()
         threading.Thread(target=self._worker, daemon=True).start()
@@ -384,6 +387,11 @@ class RealtimeAgent:
             if isinstance(data, dict):
                 payload = data.get("task_list_approved_v1.2", data)
                 self.list_version = payload.get("list_version", self.list_version)
+                if payload.get("plan_id"):
+                    self.plan_id = str(payload["plan_id"])
+                spec_ref = payload.get("spec_ref")
+                if isinstance(spec_ref, dict) and isinstance(spec_ref.get("version"), int):
+                    spec_version = f"v{spec_ref['version']}"
             self.spec_version = spec_version
             try:
                 edges, summary = analyze(tasks, self.mock)
@@ -399,7 +407,8 @@ class RealtimeAgent:
             self.upload_path.parent.mkdir(parents=True, exist_ok=True)
             self.upload_path.write_bytes(raw)
             self.emit("system", "instance", self.instance_id, "created",
-                      f"实例创建，绑定规格 {spec_version}")
+                      f"实例创建，绑定计划 {self.plan_id}（规格 {spec_version}）"
+                      if self.plan_id else f"实例创建，绑定规格 {spec_version}")
             if requirement:
                 self.emit("system", "task_list", f"TL-{self.list_version}",
                           "requirement_parsed",
@@ -489,6 +498,8 @@ class RealtimeAgent:
         if task:
             task["status"] = {"approve": "done", "reject": "blocked",
                               "skip": "skipped"}[action]
+        self._record_decision(action, task_id, reason,
+                              str(packet.get("operator") or "demo"))
         self.emit(f"human:{packet.get('operator', 'demo')}", "instance",
                   self.instance_id, "human_gate_exited",
                   f"{action} {task_id}" + (f"：{reason}" if reason else ""))
@@ -498,6 +509,25 @@ class RealtimeAgent:
         if action == "reject":
             self._cascade_blocked(task_id)
         self._dispatch_ready()
+
+    def _record_decision(self, action: str, task_id: str, reason: str,
+                         operator: str) -> None:
+        decision = {
+            "decision_id": f"DEC-{len(self.decisions) + 1:04d}",
+            "target_type": "task",
+            "target_id": task_id,
+            "target_version": 1,
+            "action": action,
+            "actor": f"human:{operator}",
+            "created_at": now_iso(),
+        }
+        if reason:
+            decision["reason"] = reason
+        self.decisions.append(decision)
+        with self.decisions_path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(decision, ensure_ascii=False) + "\n")
+        self.emit(f"human:{operator}", "decision", decision["decision_id"],
+                  "decision_recorded", f"{action} {task_id}" + (f"：{reason}" if reason else ""))
 
     def _cascade_blocked(self, root: str) -> list[str]:
         """驳回后把下游未开始的任务一并置为 blocked，避免工作流静默卡死。"""
@@ -730,6 +760,7 @@ class RealtimeAgent:
             "status": self.status,
             "waiting_on": self.waiting_on,
             "spec_version": self.spec_version,
+            "plan_id": self.plan_id,
             "list_version": self.list_version,
             "graph_id": self.graph_id,
             "total": total,
@@ -760,6 +791,7 @@ class RealtimeAgent:
                 "note": "实时编排运行时：完整事件流，顶层为当前状态",
                 "instance_id": self.instance_id,
                 "spec_version": self.spec_version,
+                "plan_id": self.plan_id,
                 "graph_id": self.graph_id,
                 "status": self.status,
                 "waiting_on": self.waiting_on,
@@ -777,8 +809,11 @@ class RealtimeAgent:
                     json.dumps(self.event_stream(), ensure_ascii=False, indent=2),
                     encoding="utf-8")
                 if update_graph:
-                    draw_graph(list(self.tasks.values()), self.edges, self.layers,
-                               self.out_dir / "task_flow.png", self.analysis_summary)
+                    try:
+                        draw_graph(list(self.tasks.values()), self.edges, self.layers,
+                                   self.out_dir / "task_flow.png", self.analysis_summary)
+                    except ImportError:
+                        pass  # 图形是本地可选产物，缺 matplotlib 不影响编排
 
 
 class AgentHandler(BaseHTTPRequestHandler):

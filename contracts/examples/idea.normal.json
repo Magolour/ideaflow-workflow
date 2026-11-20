@@ -1,0 +1,12 @@
+{
+  "schema_version": "2.0",
+  "idea_id": "IDEA-2026-001",
+  "version": 1,
+  "raw_text": "做一个校园二手书交易小程序",
+  "constraints": [
+    "两周内可演示"
+  ],
+  "status": "draft",
+  "created_by": "member2",
+  "created_at": "2026-11-20T10:00:00+08:00"
+}

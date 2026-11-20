@@ -1,0 +1,28 @@
+{
+  "spec_id": "SPEC-2026-001",
+  "version": 1,
+  "snapshot_ref": {
+    "snapshot_id": "REQSET-001",
+    "version": 1,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "review_ref": {
+    "file": "review.json",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "architecture": "前后端分离",
+  "base_draft": "DRAFT-A",
+  "decisions": [],
+  "modules": [],
+  "mapping": [],
+  "acceptance": [],
+  "non_goals": [],
+  "open_items": [],
+  "not_adopted": [],
+  "effort": {},
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "draft",
+  "created_at": "2026-11-20T10:10:00+08:00",
+  "revisions": [],
+  "escalation": null
+}

@@ -1,0 +1,232 @@
+openapi: 3.1.0
+info:
+  title: IdeaFlow 编排器 API（目标态 v2.1）
+  version: "2.1"
+  description: >-
+    与当前实现相比新增两处契约：/api/start 接受 spec.json（第二条入口），
+    /api/progress 返回 decisions。两处实现前，对应断言保持 skip。
+servers:
+  - url: http://127.0.0.1:8000
+paths:
+  /api/start:
+    post:
+      summary: 上传需求、任务清单或设计规格，拆解并建图
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRequest"
+      responses:
+        "200":
+          description: 已接受
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: ["accepted", "progress"]
+                properties:
+                  accepted: { type: boolean }
+                  progress: { $ref: "#/components/schemas/Progress" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503":
+          description: 需求模块不可用，想法入口无法生成规格
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/events:
+    post:
+      summary: AI 回报、人工操作、变更、恢复
+      responses:
+        "202":
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: ["accepted"]
+                properties:
+                  accepted: { type: boolean }
+                  queue_size: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/progress:
+    get:
+      summary: 查询进度；带 since/limit 返回增量事件
+      parameters:
+        - { name: since, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: 当前状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Progress" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/health:
+    get:
+      summary: 健康检查
+      responses:
+        "200": { description: OK }
+components:
+  responses:
+    BadRequest:
+      description: 请求非法
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: 版本或状态冲突
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: ["error"]
+      properties:
+        error: { type: string }
+        last_error: { type: string }
+    StartRequest:
+      description: >-
+        四选一，但「想法」入口必须经需求模块：收到 requirement 时，
+        编排器先取回需求模块产出的设计规格（spec），再交给 plan_adapter 分解，
+        不允许绕过规格直接拆任务（旧的 pm_breakdown 捷径废弃）。
+        另三种入口为任务数组（夹具与联调）、plan.json、spec.json。
+      oneOf:
+        - $ref: "#/components/schemas/RequirementStart"
+        - $ref: "#/components/schemas/TasksStart"
+        - $ref: "plan.schema.json"
+        - $ref: "spec.schema.json"
+    RequirementStart:
+      type: object
+      additionalProperties: false
+      required: ["requirement"]
+      description: >-
+        一句话想法。编排器须经需求模块生成规格后再分解，
+        响应中的 plan_id 与 spec_version 必须来自该规格。
+      properties:
+        requirement: { type: string, minLength: 1 }
+        spec_version: { type: string }
+    TasksStart:
+      type: object
+      additionalProperties: false
+      required: ["tasks"]
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          items: { $ref: "plan.schema.json#/properties/tasks/items" }
+        spec_version: { type: string }
+        list_version: { type: string }
+    Progress:
+      type: object
+      additionalProperties: true
+      required: ["instance_id", "status", "total", "tasks"]
+      properties:
+        instance_id: { type: string }
+        status:
+          $ref: "enums.schema.json#/$defs/instanceStatus"
+        plan_id:
+          type: [string, "null"]
+          description: 由 plan.json 或 spec.json 生成后回填；需求/任务入口可为 null
+        spec_version: { type: string }
+        list_version: { type: string }
+        graph_id: { type: string }
+        total: { type: integer, minimum: 0 }
+        done: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        blocked: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        percent: { type: number, minimum: 0, maximum: 100 }
+        waiting_on:
+          description: 当前人工门；无等待时为 null
+          oneOf:
+            - type: "object"
+              additionalProperties: false
+              required: ["gate_type", "waiting_for", "object_id", "since"]
+              properties:
+                gate_type:
+                  $ref: "enums.schema.json#/$defs/gateType"
+                waiting_for: { type: string, const: "human" }
+                object_id: { type: string }
+                since:
+                  $ref: "enums.schema.json#/$defs/timestamp"
+            - type: "null"
+        edges:
+          type: array
+          description: 当前依赖边，前端据此画图
+          items: { $ref: "#/components/schemas/Edge" }
+        analysis:
+          type: string
+          description: 最近一次依赖分析的结论
+        last_error:
+          type: string
+          description: 最近一次数据包处理失败的原因，成功后清空
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/TaskState" }
+        layers:
+          type: array
+          items: { type: array, items: { type: string } }
+        execution_order:
+          type: array
+          items: { type: string }
+        decisions:
+          type: array
+          description: 按发生顺序返回；无人工操作时为空数组
+          items: { $ref: "decision.schema.json" }
+        delivery:
+          description: 全部任务终态后生成；确认前 status=draft，实例停留在 delivery_pending
+          oneOf:
+            - $ref: "delivery.schema.json"
+            - type: "null"
+    TaskState:
+      type: object
+      additionalProperties: true
+      required: ["task_id", "name", "status"]
+      properties:
+        task_id: { type: string }
+        name: { type: string }
+        status:
+          $ref: "enums.schema.json#/$defs/taskStatus"
+        attempts: { type: integer, minimum: 0 }
+        suggested_role: { $ref: "enums.schema.json#/$defs/role" }
+        priority: { $ref: "enums.schema.json#/$defs/priority" }
+        deliverable: { type: string }
+        acceptance_items:
+          type: array
+          items: { type: string }
+        requirement_refs:
+          type: array
+          description: 追到需求条款（R-xx），计划经 plan_adapter 带入
+          items: { type: string }
+        design_refs:
+          type: array
+          description: 追到设计模块（M-xx）
+          items: { type: string }
+        depends_on:
+          type: array
+          description: 前置任务号（T1），供前端画局部依赖
+          items: { type: string }
+        write_paths:
+          type: array
+          description: 该任务允许改写的路径，执行侧据此限权
+          items: { type: string }
+        estimate_days: { type: number, minimum: 0 }
+        review_required: { type: boolean }
+        artifact_ids:
+          type: array
+          description: 任务完成后登记的产物编号（ART-xx）
+          items: { type: string }
+    Edge:
+      type: object
+      additionalProperties: false
+      required: ["from", "to", "type"]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        type:
+          $ref: "enums.schema.json#/$defs/edgeType"
+        reason: { type: string }

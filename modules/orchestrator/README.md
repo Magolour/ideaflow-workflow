@@ -10,13 +10,14 @@
 ideaflow_orchestrator/
 ├── python/
 │   ├── agent.py            # HTTP 服务、编排、状态机与 output 写入
+│   ├── plan_adapter.py     # spec.json → plan.json 适配器
 │   ├── requirements.txt
 │   └── .env                # 本机模型配置，不发群
 ├── web/
 │   └── index.html          # 网页原型：需求输入、动态图、人工干预
 ├── json/
 │   ├── test_tasks.json     # 独立测试输入，仅供调用方使用
-│   ├── contract_package_v1.1.json  # 可选契约包示例
+│   ├── ../contracts/legacy/v1.1/contract_package_v1.1.json  # 旧契约归档
 │   └── uploaded_tasks.json # POST 成功后保存的上传原文
 └── output/chat_miniapp/    # 上传前的数据产物为空
 ```
@@ -33,11 +34,12 @@ ideaflow_orchestrator/
 
 不再提供 `GET /api/start` 和 `GET /api/events`。上传原文仍保存在项目中，但不提供 GET 取回。
 
-下游产物是 **2 个 JSON + 1 个 JSONL**，另有 1 张本地可选 PNG：
+下游产物是 **2 个 JSON + 2 个 JSONL**，另有 1 张本地可选 PNG：
 
 - `runtime_state.json`：当前任务与依赖状态。
 - `event_stream_example.json`：完整事件流 JSON。
 - `events.jsonl`：一行一个事件的追加式日志。
+- `decisions.jsonl`：一行一条人工批准/驳回/跳过记录。
 - `task_flow.png`：本地可视化，下游无需获取。
 
 ## 二、上下游主线
@@ -103,12 +105,13 @@ Invoke-RestMethod `
   -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
 ```
 
-支持契约包、`{"tasks":[...]}` 或纯任务数组。
+支持契约包、`{"tasks":[...]}`、纯任务数组，以及 `plan_adapter.py` 生成的 `plan.json`；
+带 `plan_id` 与 `spec_ref` 的输入会把计划号、规格版本写进状态和事件。
 
 成功后：
 
 - 原始请求体保存为 `json/uploaded_tasks.json`。
-- output 生成 `runtime_state.json`、`event_stream_example.json`、`events.jsonl` 和 `task_flow.png`。
+- output 生成 `runtime_state.json`、`event_stream_example.json`、`events.jsonl`、`decisions.jsonl` 和 `task_flow.png`。
 - 每个实例只接收一次清单，重复 `POST /api/start` 返回 `409`。
 
 ## 五、执行侧推动工作流
@@ -133,6 +136,7 @@ Invoke-RestMethod `
 - `approve` 确认当前人工任务完成，立即派发下游。
 - `reject`、`skip` 必须填写 `reason`。
 - `reject` 会把该任务及下游未开始任务一并置为 `blocked`。
+- 每次人工操作都会追加一条 `decisions.jsonl` 记录，并发 `decision_recorded` 事件。
 - 人工门不会阻塞同层其他 AI 任务并行执行。
 
 ### 3. 变更（自然语言）
@@ -181,7 +185,7 @@ Invoke-RestMethod `
 ```powershell
 $state = Invoke-RestMethod "http://127.0.0.1:8000/api/progress"
 
-$state | Select-Object status,total,done,running,pending,percent,waiting_on
+$state | Select-Object status,plan_id,spec_version,total,done,running,pending,percent,waiting_on
 $state.tasks
 $state.edges
 $state.layers

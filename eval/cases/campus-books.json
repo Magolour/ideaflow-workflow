@@ -1,0 +1,12 @@
+{
+  "case": "campus-books",
+  "title": "校园二手书小程序",
+  "must_have": [
+    {"id": "M1", "text": "发布二手教材", "keywords": ["发布"], "severity": "severe"},
+    {"id": "M2", "text": "按书名搜索", "keywords": ["搜索"], "severity": "severe"},
+    {"id": "M3", "text": "在线付款与线下自提", "keywords": ["付款"], "severity": "severe"},
+    {"id": "M4", "text": "收藏教材", "keywords": ["收藏"], "severity": "normal"},
+    {"id": "C1", "text": "两周内出演示版、两名开发", "keywords": ["两周", "两名"], "severity": "severe"},
+    {"id": "C2", "text": "首版不做在线支付", "keywords": ["不做在线支付"], "severity": "severe"}
+  ]
+}

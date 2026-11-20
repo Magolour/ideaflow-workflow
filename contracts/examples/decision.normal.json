@@ -1,0 +1,9 @@
+{
+  "decision_id": "DEC-2026-001",
+  "target_type": "plan",
+  "target_id": "PLAN-2026-001",
+  "target_version": 1,
+  "action": "approve",
+  "actor": "human:demo",
+  "created_at": "2026-11-20T10:25:00+08:00"
+}

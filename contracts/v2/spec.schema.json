@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/spec.schema.json",
+  "title": "设计规格（requirements spec.json）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "spec_id",
+    "version",
+    "snapshot_ref",
+    "review_ref",
+    "architecture",
+    "base_draft",
+    "decisions",
+    "modules",
+    "mapping",
+    "acceptance",
+    "non_goals",
+    "open_items",
+    "not_adopted",
+    "effort",
+    "hash",
+    "status",
+    "created_at",
+    "revisions",
+    "escalation"
+  ],
+  "properties": {
+    "spec_id": {
+      "type": "string",
+      "pattern": "^SPEC-[A-Za-z0-9_-]+$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "version",
+        "hash"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "hash": {
+          "$ref": "enums.schema.json#/$defs/hash"
+        }
+      }
+    },
+    "review_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "hash"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "hash": {
+          "$ref": "enums.schema.json#/$defs/hash"
+        }
+      }
+    },
+    "architecture": {
+      "type": "string"
+    },
+    "base_draft": {
+      "type": "string"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "responsibility",
+          "requirement_ids",
+          "decision_ids",
+          "interfaces",
+          "estimate_days",
+          "deliverable",
+          "acceptance_items",
+          "depends_on",
+          "write_paths",
+          "suggested_role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^M-?\\d+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              ]
+            }
+          },
+          "estimate_days": {
+            "type": "number"
+          },
+          "deliverable": {
+            "type": "string"
+          },
+          "acceptance_items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "write_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggested_role": {
+            "$ref": "enums.schema.json#/$defs/role"
+          }
+        }
+      }
+    },
+    "mapping": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement_id",
+          "module_ids",
+          "decision_ids"
+        ],
+        "properties": {
+          "requirement_id": {
+            "type": "string"
+          },
+          "module_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "requirement_id",
+          "criterion",
+          "verify"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "requirement_id": {
+            "type": "string"
+          },
+          "criterion": {
+            "type": "string"
+          },
+          "verify": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "non_goals": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "open_items": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "not_adopted": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "effort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rows",
+        "expected_total",
+        "deviation_total",
+        "commit_days",
+        "buffer_low",
+        "buffer_high"
+      ],
+      "properties": {
+        "rows": {
+          "type": "array"
+        },
+        "expected_total": {
+          "type": "number"
+        },
+        "deviation_total": {
+          "type": "number"
+        },
+        "commit_days": {
+          "type": "number"
+        },
+        "buffer_low": {
+          "type": "number"
+        },
+        "buffer_high": {
+          "type": "number"
+        }
+      }
+    },
+    "hash": {
+      "$ref": "enums.schema.json#/$defs/hash"
+    },
+    "status": {
+      "$ref": "enums.schema.json#/$defs/specStatus"
+    },
+    "created_at": {
+      "$ref": "enums.schema.json#/$defs/timestamp"
+    },
+    "revisions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "escalation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

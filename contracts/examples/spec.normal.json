@@ -1,0 +1,75 @@
+{
+  "spec_id": "SPEC-2026-001",
+  "version": 1,
+  "snapshot_ref": {
+    "snapshot_id": "REQSET-001",
+    "version": 1,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "review_ref": {
+    "file": "review.json",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "architecture": "前后端分离",
+  "base_draft": "DRAFT-A",
+  "decisions": [],
+  "modules": [
+    {
+      "id": "M-01",
+      "name": "图书服务",
+      "responsibility": "发布与搜索",
+      "requirement_ids": [
+        "R-01"
+      ],
+      "decision_ids": [
+        "DEC-01"
+      ],
+      "interfaces": [
+        "GET /api/books"
+      ],
+      "estimate_days": 3,
+      "deliverable": "图书服务交付物",
+      "acceptance_items": [
+        "发布后可检索"
+      ],
+      "depends_on": [],
+      "write_paths": [],
+      "suggested_role": "ai"
+    }
+  ],
+  "mapping": [
+    {
+      "requirement_id": "R-01",
+      "module_ids": [
+        "M-01"
+      ],
+      "decision_ids": [
+        "DEC-01"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-01",
+      "requirement_id": "R-01",
+      "criterion": "发布后可检索",
+      "verify": "手动走查"
+    }
+  ],
+  "non_goals": [],
+  "open_items": [],
+  "not_adopted": [],
+  "effort": {
+    "rows": [],
+    "expected_total": 3,
+    "deviation_total": 0.5,
+    "commit_days": 3.5,
+    "buffer_low": 2.5,
+    "buffer_high": 4.5
+  },
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "draft",
+  "created_at": "2026-11-20T10:10:00+08:00",
+  "revisions": [],
+  "escalation": null
+}

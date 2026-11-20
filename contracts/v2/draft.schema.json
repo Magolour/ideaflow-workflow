@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/draft.schema.json",
+  "title": "A/B 候选草案",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "draft_id",
+    "group",
+    "group_name",
+    "objective",
+    "snapshot_ref",
+    "summary",
+    "hash",
+    "created_at",
+    "attempt",
+    "decisions",
+    "claims",
+    "assumptions",
+    "risks",
+    "constraints_checked",
+    "packages",
+    "estimate",
+    "declined_requirements"
+  ],
+  "properties": {
+    "draft_id": {
+      "type": "string",
+      "pattern": "^DRAFT-[A-Za-z0-9_-]+$"
+    },
+    "group": {
+      "type": "string",
+      "enum": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "group_name": {
+      "type": "string"
+    },
+    "objective": {
+      "type": "string"
+    },
+    "snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "version",
+        "hash"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "hash": {
+          "$ref": "enums.schema.json#/$defs/hash"
+        }
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "hash": {
+      "$ref": "enums.schema.json#/$defs/hash"
+    },
+    "created_at": {
+      "$ref": "enums.schema.json#/$defs/timestamp"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "requirement_ids",
+          "scope",
+          "choice",
+          "reason",
+          "cost_days",
+          "satisfies",
+          "risk"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z]-DEC-\\d+$"
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[RCQ]-?\\d+$"
+            }
+          },
+          "scope": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "cost_days": {
+            "type": "number"
+          },
+          "satisfies": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "constraint_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text",
+          "verify_by"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "verify_by": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints_checked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "constraint_id",
+          "note",
+          "complies"
+        ],
+        "properties": {
+          "constraint_id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "complies": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "optimistic",
+          "likely",
+          "pessimistic"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "optimistic": {
+            "type": "number"
+          },
+          "likely": {
+            "type": "number"
+          },
+          "pessimistic": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "estimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rows",
+        "expected_total",
+        "deviation_total",
+        "commit_days",
+        "buffer_low",
+        "buffer_high"
+      ],
+      "properties": {
+        "rows": {
+          "type": "array"
+        },
+        "expected_total": {
+          "type": "number"
+        },
+        "deviation_total": {
+          "type": "number"
+        },
+        "commit_days": {
+          "type": "number"
+        },
+        "buffer_low": {
+          "type": "number"
+        },
+        "buffer_high": {
+          "type": "number"
+        }
+      }
+    },
+    "declined_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

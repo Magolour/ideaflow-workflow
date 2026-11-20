@@ -283,14 +283,20 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
             }
         decisions.append(decision)
 
+        module_name = _module_name(item["text"], index)
         module = {
             "id": f"M-{index:02d}",
-            "name": _module_name(item["text"], index),
+            "name": module_name,
             "responsibility": decision["choice"],
             "requirement_ids": [item["id"]],
             "decision_ids": [decision["id"]],
             "interfaces": _interfaces(item["text"], index),
             "estimate_days": decision["cost_days"],
+            "deliverable": f"{module_name}交付物",
+            "acceptance_items": [acceptance_for(decision, index)["criterion"]],
+            "depends_on": [],
+            "write_paths": [],
+            "suggested_role": "ai+human" if decision["needs_human"] else "ai",
         }
         modules.append(module)
         mapping.append({"requirement_id": item["id"], "module_ids": [module["id"]],

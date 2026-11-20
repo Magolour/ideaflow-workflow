@@ -10,3 +10,5 @@
 *.log
 *.zip
 .DS_Store
+eval/report.json
+eval/report.md
