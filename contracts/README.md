@@ -62,6 +62,8 @@ python -m unittest discover -s tests -v
 
 任务清单入口不因规格入口上线而删除：它不依赖上游模型，是前端和测试唯一能稳定复现的输入。
 
+作业 2 的演示走**网页粘贴 spec**。页面 `startRun()` 已会把以 `{` 开头的输入按 JSON 解析后直发 `/api/start`，因此前端无需改造；缺的只是后端识别 `modules` 字段（当前会落到 `normalize_tasks` 报「任务清单为空」）。
+
 ## 变更规则
 
 - 字段变更先改 schema、样例、测试，再改代码；
