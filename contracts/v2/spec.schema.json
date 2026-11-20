@@ -95,7 +95,12 @@
           "requirement_ids",
           "decision_ids",
           "interfaces",
-          "estimate_days"
+          "estimate_days",
+          "deliverable",
+          "acceptance_items",
+          "depends_on",
+          "write_paths",
+          "suggested_role"
         ],
         "properties": {
           "id": {
@@ -136,6 +141,30 @@
           },
           "estimate_days": {
             "type": "number"
+          },
+          "deliverable": {
+            "type": "string"
+          },
+          "acceptance_items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "write_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggested_role": {
+            "$ref": "enums.schema.json#/$defs/role"
           }
         }
       }

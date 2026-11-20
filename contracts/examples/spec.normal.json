@@ -27,7 +27,14 @@
       "interfaces": [
         "GET /api/books"
       ],
-      "estimate_days": 3
+      "estimate_days": 3,
+      "deliverable": "图书服务交付物",
+      "acceptance_items": [
+        "发布后可检索"
+      ],
+      "depends_on": [],
+      "write_paths": [],
+      "suggested_role": "ai"
     }
   ],
   "mapping": [
