@@ -31,6 +31,11 @@ paths:
                   progress: { $ref: "#/components/schemas/Progress" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503":
+          description: 需求模块不可用，想法入口无法生成规格
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/events:
     post:
       summary: AI 回报、人工操作、变更、恢复
@@ -83,9 +88,10 @@ components:
         last_error: { type: string }
     StartRequest:
       description: >-
-        四选一，全部保留：一句话需求（requirement）、任务数组（tasks，供夹具与
-        联调使用，不要因为有了 spec 入口就删除）、plan.json（含 tasks/plan_id/spec_ref）、
-        spec.json（含 modules，由编排器调用 plan_adapter 转成计划）。
+        四选一，但「想法」入口必须经需求模块：收到 requirement 时，
+        编排器先取回需求模块产出的设计规格（spec），再交给 plan_adapter 分解，
+        不允许绕过规格直接拆任务（旧的 pm_breakdown 捷径废弃）。
+        另三种入口为任务数组（夹具与联调）、plan.json、spec.json。
       oneOf:
         - $ref: "#/components/schemas/RequirementStart"
         - $ref: "#/components/schemas/TasksStart"
@@ -95,6 +101,9 @@ components:
       type: object
       additionalProperties: false
       required: ["requirement"]
+      description: >-
+        一句话想法。编排器须经需求模块生成规格后再分解，
+        响应中的 plan_id 与 spec_version 必须来自该规格。
       properties:
         requirement: { type: string, minLength: 1 }
         spec_version: { type: string }

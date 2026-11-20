@@ -85,6 +85,16 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual(progress["spec_version"], f"v{spec['version']}")
         self.assertEqual(progress["total"], len(spec["modules"]))
 
+    @unittest.skip("待实现：想法入口必须经需求模块生成规格后再分解（桥需可在测试内离线启动）")
+    def test_requirement_goes_through_spec(self):
+        with running_server(self.out) as (base, _):
+            body = post_json(f"{base}/api/start",
+                             {"requirement": "做一个校园二手书交易小程序，支持发布、搜索和线下交易"})
+        progress = body["progress"]
+        self.assertTrue(progress["plan_id"], "想法入口应产出计划号，说明走了 spec → plan")
+        self.assertGreaterEqual(progress["total"], 2)
+        self.assertEqual(progress["spec_version"], "v1")
+
     @unittest.skip("待实现：/api/progress 返回 decisions")
     def test_progress_exposes_decisions(self):
         tasks = {"tasks": [{"task_id": "T1", "name": "确认验收", "suggested_role": "human"}]}
