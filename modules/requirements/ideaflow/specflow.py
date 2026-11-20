@@ -27,7 +27,7 @@ from .storage import now_iso, read_json, write_json
 from .tradeoffs import build_tradeoffs
 
 CASES_DIR = Path(__file__).resolve().parents[1] / "cases"
-CASE_NAMES = ("campus-books", "campus-books-tight")
+CASE_NAMES = ("campus-books", "campus-books-tight", "device-booking")
 
 Progress = Callable[[str], None]
 

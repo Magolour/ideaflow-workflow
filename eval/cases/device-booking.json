@@ -1,0 +1,14 @@
+{
+  "case": "device-booking",
+  "title": "实验室设备预约系统",
+  "must_have": [
+    {"id": "M1", "text": "查看设备列表", "keywords": ["设备列表"], "severity": "severe"},
+    {"id": "M2", "text": "按时段预约", "keywords": ["时段", "预约"], "severity": "severe"},
+    {"id": "M3", "text": "同一时段冲突检测", "keywords": ["冲突"], "severity": "severe"},
+    {"id": "M4", "text": "取消预约并释放时段", "keywords": ["取消"], "severity": "severe"},
+    {"id": "M5", "text": "高风险设备预约审核", "keywords": ["审核"], "severity": "normal"},
+    {"id": "C1", "text": "首版只做网页端", "keywords": ["网页端"], "severity": "normal"},
+    {"id": "C2", "text": "首版不做费用结算", "keywords": ["费用结算"], "severity": "severe"},
+    {"id": "Q1", "text": "校园卡对接待澄清", "keywords": ["校园卡"], "severity": "normal"}
+  ]
+}
