@@ -24,7 +24,8 @@
         "snapshot",
         "draft",
         "spec",
-        "plan"
+        "plan",
+        "task"
       ]
     },
     "target_id": {
