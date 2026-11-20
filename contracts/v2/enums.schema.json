@@ -113,7 +113,9 @@
         "snapshot",
         "draft",
         "plan",
-        "decision"
+        "decision",
+        "artifact",
+        "delivery"
       ]
     },
     "eventAction": {
@@ -143,7 +145,15 @@
         "spec_confirmed",
         "plan_validated",
         "plan_confirmed",
-        "decision_recorded"
+        "decision_recorded",
+        "artifact_created",
+        "task_review_entered",
+        "task_review_passed",
+        "delivery_created",
+        "delivery_confirmed",
+        "delivery_rejected",
+        "plan_returned",
+        "spec_returned"
       ]
     },
     "actor": {

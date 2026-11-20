@@ -142,8 +142,30 @@ components:
         pending: { type: integer, minimum: 0 }
         percent: { type: number, minimum: 0, maximum: 100 }
         waiting_on:
-          type: [object, "null"]
-          additionalProperties: true
+          description: 当前人工门；无等待时为 null
+          oneOf:
+            - type: "object"
+              additionalProperties: false
+              required: ["gate_type", "waiting_for", "object_id", "since"]
+              properties:
+                gate_type:
+                  type: string
+                  enum: [task_execution, task_failed, delivery_confirm]
+                waiting_for: { type: string, const: "human" }
+                object_id: { type: string }
+                since:
+                  $ref: "enums.schema.json#/$defs/timestamp"
+            - type: "null"
+        edges:
+          type: array
+          description: 当前依赖边，前端据此画图
+          items: { $ref: "#/components/schemas/Edge" }
+        analysis:
+          type: string
+          description: 最近一次依赖分析的结论
+        last_error:
+          type: string
+          description: 最近一次数据包处理失败的原因，成功后清空
         tasks:
           type: array
           items: { $ref: "#/components/schemas/TaskState" }
@@ -179,3 +201,36 @@ components:
         acceptance_items:
           type: array
           items: { type: string }
+        requirement_refs:
+          type: array
+          description: 追到需求条款（R-xx），计划经 plan_adapter 带入
+          items: { type: string }
+        design_refs:
+          type: array
+          description: 追到设计模块（M-xx）
+          items: { type: string }
+        depends_on:
+          type: array
+          description: 前置任务号（T1），供前端画局部依赖
+          items: { type: string }
+        write_paths:
+          type: array
+          description: 该任务允许改写的路径，执行侧据此限权
+          items: { type: string }
+        estimate_days: { type: number, minimum: 0 }
+        review_required: { type: boolean }
+        artifact_ids:
+          type: array
+          description: 任务完成后登记的产物编号（ART-xx）
+          items: { type: string }
+    Edge:
+      type: object
+      additionalProperties: false
+      required: ["from", "to", "type"]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        type:
+          type: string
+          enum: [force, data, resource]
+        reason: { type: string }

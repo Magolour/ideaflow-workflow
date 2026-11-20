@@ -24,7 +24,10 @@ def load_schema(name: str) -> dict:
 def inline(node, by_file):
     if isinstance(node, dict):
         if "$ref" in node:
-            file_name, _, fragment = node["$ref"].partition("#")
+            ref = node["$ref"]
+            if ref.startswith("#/components/schemas/"):
+                return inline(by_file[ref.rsplit("/", 1)[-1]], by_file)
+            file_name, _, fragment = ref.partition("#")
             target = by_file[file_name]
             for part in [p for p in fragment.split("/") if p]:
                 target = target[part]
@@ -63,6 +66,38 @@ def get_json(url: str) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+class RuntimeProgressContractTest(unittest.TestCase):
+    """真实运行时快照必须过 Progress 契约，防止前端字段与实现分叉。"""
+
+    def setUp(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 pyyaml")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+        openapi = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
+        schemas = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
+        schemas["Progress"] = openapi["components"]["schemas"]["Progress"]
+        schemas["TaskState"] = openapi["components"]["schemas"]["TaskState"]
+        schemas["Edge"] = openapi["components"]["schemas"]["Edge"]
+        self.validator = Draft202012Validator(inline(schemas["Progress"], schemas))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_progress_matches_contract(self):
+        agent = RealtimeAgent(out_dir=self.out, mock=True,
+                              upload_path=self.out / "uploaded.json")
+        state = agent.start({"tasks": [
+            {"task_id": "T1", "name": "确认边界", "suggested_role": "human"},
+            {"task_id": "T2", "name": "写接口", "suggested_role": "ai"},
+        ]}, b"{}")
+        payload = {**state, "edges": agent.edges}
+        errors = sorted(self.validator.iter_errors(payload), key=str)
+        self.assertEqual([], [f"{list(error.absolute_path)} {error.message}" for error in errors])
+
+
 class ApiGapTest(unittest.TestCase):
     """成员 4 实现后去掉 skip，绿了即验收。"""
 
@@ -94,6 +129,18 @@ class ApiGapTest(unittest.TestCase):
         self.assertTrue(progress["plan_id"], "想法入口应产出计划号，说明走了 spec → plan")
         self.assertGreaterEqual(progress["total"], 2)
         self.assertEqual(progress["spec_version"], "v1")
+
+    @unittest.skip("待实现：计划带入的需求/设计来源要透传到进度（requirement_refs/design_refs）")
+    def test_task_provenance_reaches_progress(self):
+        from plan_adapter import plan_from_spec
+        spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
+                          .read_text(encoding="utf-8"))
+        plan = plan_from_spec(spec, plan_id="PLAN-001")
+        with running_server(self.out) as (base, _):
+            body = post_json(f"{base}/api/start", plan)
+        task = body["progress"]["tasks"][0]
+        self.assertTrue(task.get("requirement_refs"), "任务应保留对需求条款的引用")
+        self.assertTrue(task.get("design_refs"), "任务应保留对设计模块的引用")
 
     @unittest.skip("待实现：任务完成要落产物（artifact），交付记录才有据可依")
     def test_task_completion_records_artifact(self):
