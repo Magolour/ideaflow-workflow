@@ -300,6 +300,15 @@ class OpenApiContractTest(unittest.TestCase):
         self.assertEqual(schema["properties"]["decisions"]["items"]["$ref"],
                          "decision.schema.json")
 
+    def test_component_schemas_are_valid(self):
+        """openapi 里的内联 schema 也要过 Draft 2020-12 元校验。"""
+        schemas = dict(self.spec["components"]["schemas"])
+        by_file = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
+        by_file.update(schemas)
+        for name, schema in schemas.items():
+            with self.subTest(schema=name):
+                Draft202012Validator.check_schema(inline(schema, by_file))
+
     def test_internal_refs_resolve(self):
         serialized = json.dumps(self.spec)
         for ref in self.spec["components"]["responses"]:

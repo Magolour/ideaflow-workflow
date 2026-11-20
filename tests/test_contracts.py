@@ -92,8 +92,16 @@ class ContractTest(unittest.TestCase):
             with self.subTest(schema=key):
                 Draft202012Validator.check_schema(schema)
 
-    def test_openapi_exists(self):
-        self.assertTrue((V2 / "openapi.yaml").is_file())
+    def test_openapi_is_parseable(self):
+        """文件存在不算契约，能被解析、有 paths 才算。"""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 pyyaml")
+        api = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
+        self.assertIn("openapi", api)
+        self.assertIn("/api/start", api["paths"])
+        self.assertIn("/api/progress", api["paths"])
 
     def test_normal_examples_pass(self):
         for key, filename in NORMAL.items():
