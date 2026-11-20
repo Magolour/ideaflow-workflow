@@ -62,8 +62,9 @@ python -m unittest discover -s tests -v
 | 交付确认后实例 `completed` | `Progress.delivery` | 执行侧（成员 1/4） |
 | 计划来源（`requirement_refs`/`design_refs`）透传到进度 | `openapi.yaml` 的 `TaskState` | 编排器（成员 4） |
 | `resource` 边不阻塞调度与分层 | `openapi.yaml` 的 `Edge.type` | 编排器（成员 4） |
+| 任务失败开门后实例应为 `waiting_human`（现被覆盖成 `blocked`） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 
-共 9 条：`tests/test_api_gaps.py` 7 条、`tests/test_scheduling.py` 2 条。
+共 10 条：`tests/test_api_gaps.py` 7 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条。
 退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
 
 ## 入口约定
