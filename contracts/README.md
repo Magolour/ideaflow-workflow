@@ -46,7 +46,9 @@ python -m unittest discover -s tests -v
 `tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
 `tests/test_api_gaps.py` 校验 openapi 结构，并挂着七条待实现的接口断言（`skip`）；
 `tests/test_scheduling.py` 挂着两条 resource 边不阻塞的调度断言（`skip`）；
-`tests/test_eval_metrics.py` 校验评测指标计算。
+`tests/test_eval_metrics.py` 校验评测指标计算；
+`tests/test_failure.py` 覆盖重试转人工、重复启动、变更包非法（重复编号/成环/悬空边）；
+`tests/test_graph.py` 覆盖拓扑分层、环检测与依赖边校验。
 
 ## 待实现（断言已就位，实现后去掉 skip）
 
