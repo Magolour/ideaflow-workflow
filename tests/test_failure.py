@@ -1,18 +1,45 @@
+import contextlib
 import json
 import tempfile
 import sys
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
-from agent import RealtimeAgent  # noqa: E402
+from agent import AgentHandler, AgentServer, RealtimeAgent  # noqa: E402
 
 TASKS = {"tasks": [
     {"task_id": "T1", "name": "写接口", "suggested_role": "ai"},
     {"task_id": "T2", "name": "写页面", "suggested_role": "ai"},
 ]}
+
+
+@contextlib.contextmanager
+def running_server(out_dir: Path):
+    agent = RealtimeAgent(out_dir=out_dir, mock=True,
+                          upload_path=out_dir / "uploaded.json")
+    handler = type("IsolatedHandler", (AgentHandler,), {"agent": agent})
+    server = AgentServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def post_json(url: str, payload):
+    request = urllib.request.Request(
+        url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 class AgentCase(unittest.TestCase):
@@ -138,6 +165,31 @@ class ChangeValidationTest(AgentCase):
     def test_change_requires_summary(self):
         with self.assertRaises(ValueError):
             self.agent.process({"type": "change", "change_id": "CR-EMPTY"})
+
+
+class HttpStatusTest(AgentCase):
+    """HTTP 层把内部错误映射成对应状态码，而不只是抛异常。"""
+
+    def test_duplicate_start_returns_409(self):
+        with running_server(self.out) as base:
+            post_json(f"{base}/api/start", TASKS)
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                post_json(f"{base}/api/start", TASKS)
+            self.assertEqual(ctx.exception.code, 409)
+            self.assertIn("已启动", json.loads(ctx.exception.read().decode("utf-8"))["error"])
+
+    def test_empty_task_list_returns_400(self):
+        with running_server(self.out) as base:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                post_json(f"{base}/api/start", {"tasks": []})
+            self.assertEqual(ctx.exception.code, 400)
+
+    def test_progress_rejects_negative_since(self):
+        with running_server(self.out) as base:
+            post_json(f"{base}/api/start", TASKS)
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(f"{base}/api/progress?since=-1", timeout=10)
+            self.assertEqual(ctx.exception.code, 400)
 
 
 if __name__ == "__main__":
