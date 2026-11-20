@@ -12,7 +12,7 @@ jobs:
         run: |
           python -m py_compile modules/orchestrator/python/agent.py
           python -m json.tool modules/orchestrator/json/test_tasks.json > /dev/null
-          python -m json.tool modules/orchestrator/json/contract_package_v1.1.json > /dev/null
+          python -m json.tool contracts/legacy/v1.1/contract_package_v1.1.json > /dev/null
       - name: Run requirements module tests
         working-directory: modules/requirements
         run: python -m unittest discover -s tests -v

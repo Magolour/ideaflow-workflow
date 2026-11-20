@@ -16,7 +16,7 @@ ideaflow_orchestrator/
 │   └── index.html          # 网页原型：需求输入、动态图、人工干预
 ├── json/
 │   ├── test_tasks.json     # 独立测试输入，仅供调用方使用
-│   ├── contract_package_v1.1.json  # 可选契约包示例
+│   ├── ../contracts/legacy/v1.1/contract_package_v1.1.json  # 旧契约归档
 │   └── uploaded_tasks.json # POST 成功后保存的上传原文
 └── output/chat_miniapp/    # 上传前的数据产物为空
 ```
