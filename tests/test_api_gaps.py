@@ -130,6 +130,34 @@ class ApiGapTest(unittest.TestCase):
         self.assertGreaterEqual(progress["total"], 2)
         self.assertEqual(progress["spec_version"], "v1")
 
+    @unittest.skip("待实现：plan 自带 depends_on 时直接采用，不再调用模型分析依赖")
+    def test_plan_dependencies_used_without_model(self):
+        plan = {
+            "plan_id": "PLAN-001",
+            "version": 1,
+            "spec_ref": {"spec_id": "SPEC-001", "version": 1, "hash": "a" * 64},
+            "status": "draft",
+            "created_at": "2026-11-20T11:00:00+08:00",
+            "tasks": [
+                {"task_id": "T1", "name": "拆模块", "deliverable": "模块清单",
+                 "acceptance_items": ["评审通过"], "suggested_role": "ai",
+                 "priority": "high"},
+                {"task_id": "T2", "name": "写接口", "deliverable": "接口代码",
+                 "acceptance_items": ["可用"], "suggested_role": "ai",
+                 "priority": "high", "depends_on": ["T1"]},
+                {"task_id": "T3", "name": "写页面", "deliverable": "页面",
+                 "acceptance_items": ["可点"], "suggested_role": "ai",
+                 "priority": "high", "depends_on": ["T1"]},
+            ],
+        }
+        with running_server(self.out) as (base, agent):
+            post_json(f"{base}/api/start", plan)
+        pairs = {(edge["from"], edge["to"]) for edge in agent.edges}
+        self.assertEqual(pairs, {("T1", "T2"), ("T1", "T3")},
+                         "应采用计划依赖，而不是按顺序串成链")
+        self.assertEqual({edge["type"] for edge in agent.edges}, {"force"})
+        self.assertNotIn("mock 模式", agent.analysis_summary)
+
     @unittest.skip("待实现：计划带入的需求/设计来源要透传到进度（requirement_refs/design_refs）")
     def test_task_provenance_reaches_progress(self):
         from plan_adapter import plan_from_spec
