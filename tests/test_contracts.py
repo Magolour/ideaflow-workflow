@@ -32,8 +32,11 @@ NORMAL = {
 INVALID = {
     "idea": "idea.invalid.json",
     "snapshot": "snapshot.invalid.json",
+    "draft": "draft.invalid.json",
     "spec": "spec.invalid.json",
     "plan": "plan.invalid.json",
+    "event": "event.invalid.json",
+    "decision": "decision.invalid.json",
 }
 
 
@@ -79,6 +82,13 @@ class ContractTest(unittest.TestCase):
                 data = json.loads((EXAMPLES / filename).read_text(encoding="utf-8"))
                 errors = sorted(self.validator(key).iter_errors(data), key=str)
                 self.assertEqual([], errors)
+
+    def test_every_contract_has_both_examples(self):
+        documented = [key for key in FILES if key != "enums"]
+        for key in documented:
+            with self.subTest(contract=key):
+                self.assertIn(key, NORMAL)
+                self.assertIn(key, INVALID)
 
     def test_invalid_examples_fail(self):
         for key, filename in INVALID.items():

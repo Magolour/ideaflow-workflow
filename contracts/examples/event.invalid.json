@@ -1,0 +1,11 @@
+{
+  "schema_version": "2.0",
+  "seq": 0,
+  "ts": "2026-11-20T10:21:00+08:00",
+  "actor": "system",
+  "object_type": "task",
+  "object_id": "T2",
+  "object_version": 1,
+  "action": "task_dispatched",
+  "detail": "派发 T2（序号从 0 开始，违反递增约定）"
+}
