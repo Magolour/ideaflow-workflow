@@ -104,12 +104,12 @@
   <section>
     <div class="card">
       <h2>① 需求输入</h2>
-      <textarea id="req" rows="5" placeholder="用一句话描述项目，例如：做一个聊天小程序，包含登录、会话列表、消息收发和未读提醒"></textarea>
+      <textarea id="req" rows="5" placeholder="用一句话描述项目，例如：做一个聊天小程序，包含登录、会话列表、消息收发和未读提醒；也可直接粘贴设计规格或任务 JSON"></textarea>
       <div class="row" style="margin-top:8px">
         <button id="btnStart">生成任务并编排</button>
       </div>
       <p class="hint" style="margin:8px 0 0">
-        提交后由大模型拆解为任务清单，再自动分析依赖并建图。也可直接粘贴任务 JSON。
+        提交后由大模型拆解为任务清单，再自动分析依赖并建图。也可直接粘贴设计规格 JSON（含 modules）或任务 JSON，跳过需求讨论直接编排。
       </p>
     </div>
 
