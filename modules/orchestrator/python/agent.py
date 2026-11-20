@@ -809,8 +809,11 @@ class RealtimeAgent:
                     json.dumps(self.event_stream(), ensure_ascii=False, indent=2),
                     encoding="utf-8")
                 if update_graph:
-                    draw_graph(list(self.tasks.values()), self.edges, self.layers,
-                               self.out_dir / "task_flow.png", self.analysis_summary)
+                    try:
+                        draw_graph(list(self.tasks.values()), self.edges, self.layers,
+                                   self.out_dir / "task_flow.png", self.analysis_summary)
+                    except ImportError:
+                        pass  # 图形是本地可选产物，缺 matplotlib 不影响编排
 
 
 class AgentHandler(BaseHTTPRequestHandler):
