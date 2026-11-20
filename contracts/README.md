@@ -37,7 +37,15 @@ python -m unittest discover -s tests -v
 
 `tests/test_contracts.py` 校验 schema 与正常/异常样例；
 `tests/test_decision.py` 校验人工决策记录；
-`tests/test_integration.py` 校验 spec → plan → 编排器。
+`tests/test_integration.py` 校验 spec → plan → 编排器；
+`tests/test_api_gaps.py` 校验 openapi 结构，并挂着两条待实现的接口断言（`skip`）。
+
+## 待实现（断言已就位，实现后去掉 skip）
+
+| 缺口 | 契约位置 | 实现方 |
+| --- | --- | --- |
+| `/api/start` 接受 `spec.json` 并调用 `plan_adapter.py` | `openapi.yaml` 的 `StartRequest` | 编排器（成员 4） |
+| `/api/progress` 返回 `decisions` | `openapi.yaml` 的 `Progress.decisions` | 编排器（成员 4） |
 
 ## 变更规则
 

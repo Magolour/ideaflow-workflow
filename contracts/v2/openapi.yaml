@@ -1,22 +1,51 @@
 openapi: 3.1.0
 info:
-  title: IdeaFlow 编排器 API（当前实现）
-  version: "2.0"
+  title: IdeaFlow 编排器 API（目标态 v2.1）
+  version: "2.1"
+  description: >-
+    与当前实现相比新增两处契约：/api/start 接受 spec.json（第二条入口），
+    /api/progress 返回 decisions。两处实现前，对应断言保持 skip。
 servers:
   - url: http://127.0.0.1:8000
 paths:
   /api/start:
     post:
-      summary: 上传需求或任务清单，拆解并建图
+      summary: 上传需求、任务清单或设计规格，拆解并建图
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRequest"
       responses:
-        "200": { description: 已接受, content: { application/json: { schema: { type: object } } } }
+        "200":
+          description: 已接受
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: ["accepted", "progress"]
+                properties:
+                  accepted: { type: boolean }
+                  progress: { $ref: "#/components/schemas/Progress" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
   /api/events:
     post:
       summary: AI 回报、人工操作、变更、恢复
       responses:
-        "202": { description: 已入队 }
+        "202":
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: ["accepted"]
+                properties:
+                  accepted: { type: boolean }
+                  queue_size: { type: integer }
         "400": { $ref: "#/components/responses/BadRequest" }
   /api/progress:
     get:
@@ -25,7 +54,11 @@ paths:
         - { name: since, in: query, schema: { type: integer, minimum: 0 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
       responses:
-        "200": { description: 当前状态, content: { application/json: { schema: { type: object } } } }
+        "200":
+          description: 当前状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Progress" }
         "400": { $ref: "#/components/responses/BadRequest" }
   /api/health:
     get:
@@ -48,3 +81,86 @@ components:
       properties:
         error: { type: string }
         last_error: { type: string }
+    StartRequest:
+      description: >-
+        四选一：一句话需求、任务数组、plan.json（含 tasks/plan_id/spec_ref）、
+        spec.json（含 modules，由编排器调用 plan_adapter 转成计划）。
+      oneOf:
+        - $ref: "#/components/schemas/RequirementStart"
+        - $ref: "#/components/schemas/TasksStart"
+        - $ref: "plan.schema.json"
+        - $ref: "spec.schema.json"
+    RequirementStart:
+      type: object
+      additionalProperties: false
+      required: ["requirement"]
+      properties:
+        requirement: { type: string, minLength: 1 }
+        spec_version: { type: string }
+    TasksStart:
+      type: object
+      additionalProperties: false
+      required: ["tasks"]
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          items: { $ref: "plan.schema.json#/properties/tasks/items" }
+        spec_version: { type: string }
+        list_version: { type: string }
+    Progress:
+      type: object
+      additionalProperties: true
+      required: ["instance_id", "status", "total", "tasks"]
+      properties:
+        instance_id: { type: string }
+        status:
+          type: string
+          enum: [created, running, waiting_human, blocked, completed]
+        plan_id:
+          type: [string, "null"]
+          description: 由 plan.json 或 spec.json 生成后回填；需求/任务入口可为 null
+        spec_version: { type: string }
+        list_version: { type: string }
+        graph_id: { type: string }
+        total: { type: integer, minimum: 0 }
+        done: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        blocked: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        percent: { type: number, minimum: 0, maximum: 100 }
+        waiting_on:
+          type: [object, "null"]
+          additionalProperties: true
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/TaskState" }
+        layers:
+          type: array
+          items: { type: array, items: { type: string } }
+        execution_order:
+          type: array
+          items: { type: string }
+        decisions:
+          type: array
+          description: 按发生顺序返回；无人工操作时为空数组
+          items: { $ref: "decision.schema.json" }
+    TaskState:
+      type: object
+      additionalProperties: true
+      required: ["task_id", "name", "status"]
+      properties:
+        task_id: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [pending, running, done, failed, blocked, skipped]
+        attempts: { type: integer, minimum: 0 }
+        suggested_role: { type: string, enum: [ai, human, "ai+human"] }
+        priority: { type: string, enum: [low, medium, high] }
+        deliverable: { type: string }
+        acceptance_items:
+          type: array
+          items: { type: string }
