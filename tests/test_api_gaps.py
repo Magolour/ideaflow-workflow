@@ -228,6 +228,35 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual(progress["delivery"]["decided_by"], "human:tester")
         self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
 
+    @unittest.skip("待实现：一句话到交付的完整链路（桥 + spec 入口 + 执行闭环）")
+    def test_full_chain_from_idea_to_delivery(self):
+        with running_server(self.out) as (base, _):
+            body = post_json(f"{base}/api/start",
+                             {"requirement": "做一个校园二手书交易小程序，支持发布、搜索和线下交易"})
+            progress = body["progress"]
+            self.assertTrue(progress["plan_id"], "想法入口应产出计划号")
+            self.assertEqual(progress["spec_version"], "v1", "规格版本应来自需求模块")
+            self.assertGreaterEqual(progress["total"], 3, "应拆出多个任务")
+
+            for _ in range(40):
+                time.sleep(0.25)
+                progress = get_json(f"{base}/api/progress")
+                if progress["status"] in {"delivery_pending", "blocked"}:
+                    break
+            self.assertEqual(progress["status"], "delivery_pending",
+                             "任务应自动执行完并等待交付确认")
+
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "approve", "operator": "tester"})
+            for _ in range(20):
+                time.sleep(0.25)
+                progress = get_json(f"{base}/api/progress")
+                if progress["status"] == "completed":
+                    break
+            self.assertEqual(progress["status"], "completed")
+            self.assertEqual(progress["delivery"]["status"], "confirmed")
+            self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
+
     @unittest.skip("待实现：/api/progress 返回 decisions")
     def test_progress_exposes_decisions(self):
         tasks = {"tasks": [{"task_id": "T1", "name": "确认验收", "suggested_role": "human"}]}

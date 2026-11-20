@@ -51,3 +51,18 @@ python eval/run_eval.py --real --mode baseline
 **Mock 模式下多 Agent 覆盖率 100% 是假象**：需求模块当前用模板把输入逐条转成条目，
 等于"抄输入"，自然全中。这张表只证明指标链路通了，不构成对多 Agent 的证明。
 真实结论要等 `agents.py` 接上真实模型后，用 `--real` 跑基线、多 Agent 同批对比得出。
+
+## 真实调用冒烟（需求模块）
+
+```bash
+python eval/real_smoke.py                    # 跑案例、校验产物契约
+python eval/real_smoke.py --case device-booking
+python eval/real_smoke.py --require-real     # 仍是 Mock Agent 时返回 2，用于验收门禁
+```
+
+检查三件事：快照与规格是否过 `snapshot`/`spec` 契约；`spec.modules` 的
+`requirement_ids` 是否都能在快照里找到；`spec.snapshot_ref` 是否与快照编号一致。
+
+同时报告 `ideaflow/agents.py` 里有没有 `MockAgent` 之外的真实实现。
+在接入真实模型之前，脚本会明确提示"本次产物来自 MockAgent"，不会把模板结果
+当成真实调用结论。
