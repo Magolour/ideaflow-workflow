@@ -33,6 +33,19 @@ NORMAL = {
     "delivery": "delivery.normal.json",
 }
 
+# 每份异常样例要触发的具体规则，避免 schema 松动后样例"因别的原因"误过
+EXPECTED_FAILURE = {
+    "idea": "non-empty",
+    "snapshot": "does not match",
+    "draft": "minimum",
+    "spec": "non-empty",
+    "plan": "is not one of",
+    "event": "minimum",
+    "decision": "reason",
+    "artifact": "path",
+    "delivery": "decided_by",
+}
+
 INVALID = {
     "idea": "idea.invalid.json",
     "snapshot": "snapshot.invalid.json",
@@ -100,7 +113,11 @@ class ContractTest(unittest.TestCase):
         for key, filename in INVALID.items():
             with self.subTest(example=filename):
                 data = json.loads((EXAMPLES / filename).read_text(encoding="utf-8"))
-                self.assertTrue(list(self.validator(key).iter_errors(data)))
+                errors = [error.message for error in self.validator(key).iter_errors(data)]
+                self.assertTrue(errors, "异常样例必须被拒绝")
+                expected = EXPECTED_FAILURE[key]
+                self.assertTrue(any(expected in message for message in errors),
+                                f"应因 {expected} 失败，实际：{errors}")
 
     def validator(self, key: str):
         return Draft202012Validator(self.inline(self.schemas[key]))

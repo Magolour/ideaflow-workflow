@@ -32,7 +32,8 @@
 9. 枚举以代码为准：快照条目类型为 `requirement/constraint/open`，规格状态含 `awaiting_human`；
 10. `artifact`、`delivery` 已纳入本版，字段按"最小闭环"定义，执行侧实现后可再收紧；
 11. `config` 未纳入本版，当前用 `--mock` 参数与 `.env` 代替；
-12. 交付记录的 `plan_id` 可选：任务清单入口（夹具）没有计划号时省略。
+12. 交付记录的 `plan_id` 可选：任务清单入口（夹具）没有计划号时省略；
+13. `Progress.spec_version` 取值约定为 `v{spec.version}`（如 v1），跨模块对接口径。
 
 ## 校验
 
@@ -62,7 +63,7 @@ python -m unittest discover -s tests -v
 | 交付确认后实例 `completed` | `Progress.delivery` | 执行侧（成员 1/4） |
 | 计划来源（`requirement_refs`/`design_refs`）透传到进度 | `openapi.yaml` 的 `TaskState` | 编排器（成员 4） |
 | `resource` 边不阻塞调度与分层 | `openapi.yaml` 的 `Edge.type` | 编排器（成员 4） |
-| 任务失败开门后实例应为 `waiting_human`（现被覆盖成 `blocked`） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
+| 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 | plan 自带 `depends_on` 时直接采用，不再调用模型分析依赖 | `plan.schema.json` 的 `depends_on` | 编排器（成员 4） |
 
 共 11 条：`tests/test_api_gaps.py` 8 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条。

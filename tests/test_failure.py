@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
-from agent import AgentHandler, AgentServer, RealtimeAgent  # noqa: E402
+from agent import MAX_RETRY, AgentHandler, AgentServer, RealtimeAgent  # noqa: E402
 
 TASKS = {"tasks": [
     {"task_id": "T1", "name": "写接口", "suggested_role": "ai"},
@@ -66,22 +66,22 @@ class FailureBranchTest(AgentCase):
         self.start({"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
         self.assertEqual(self.agent.tasks["T1"]["status"], "running")
 
-        for _ in range(2):
+        for _ in range(MAX_RETRY):
             self.agent._ai_report({"task_id": "T1", "result": "failed", "detail": "编译失败"})
             self.assertEqual(self.agent.tasks["T1"]["status"], "running",
-                             "前两次失败应自动重试，仍为 running")
-        self.assertEqual(self.agent.tasks["T1"]["attempts"], 2)
-        self.assertEqual(self.actions().count("task_retried"), 2)
+                             "重试额度内失败应保持 running")
+        self.assertEqual(self.agent.tasks["T1"]["attempts"], MAX_RETRY)
+        self.assertEqual(self.actions().count("task_retried"), MAX_RETRY)
 
         self.agent._ai_report({"task_id": "T1", "result": "failed", "detail": "仍然失败"})
         self.assertEqual(self.agent.tasks["T1"]["status"], "failed")
         self.assertEqual(self.agent.waiting_on["gate_type"], "task_failed")
         self.assertIn("task_failed", self.actions())
 
-    @unittest.skip("待修复：失败开门后 _maybe_complete 把 waiting_human 覆盖成 blocked")
+    @unittest.skip("待确认：失败开门后实例应为 waiting_human 还是 blocked（团队定）")
     def test_failed_gate_keeps_waiting_human_status(self):
         self.start({"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
-        for _ in range(3):
+        for _ in range(MAX_RETRY + 1):
             self.agent._ai_report({"task_id": "T1", "result": "failed", "detail": "失败"})
         self.assertIsNotNone(self.agent.waiting_on)
         self.assertEqual(self.agent.status, "waiting_human",

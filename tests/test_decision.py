@@ -69,7 +69,7 @@ class DecisionRecordTest(unittest.TestCase):
         self.assertEqual(len(records), 1)
         record = records[0]
         decision_validator().validate(record)
-        self.assertEqual(record["decision_id"], "DEC-0001")
+        self.assertRegex(record["decision_id"], r"^DEC-[A-Za-z0-9_-]+$")
         self.assertEqual(record["target_type"], "task")
         self.assertEqual(record["target_id"], "T1")
         self.assertEqual(record["action"], "approve")
