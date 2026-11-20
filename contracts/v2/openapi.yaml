@@ -83,7 +83,8 @@ components:
         last_error: { type: string }
     StartRequest:
       description: >-
-        四选一：一句话需求、任务数组、plan.json（含 tasks/plan_id/spec_ref）、
+        四选一，全部保留：一句话需求（requirement）、任务数组（tasks，供夹具与
+        联调使用，不要因为有了 spec 入口就删除）、plan.json（含 tasks/plan_id/spec_ref）、
         spec.json（含 modules，由编排器调用 plan_adapter 转成计划）。
       oneOf:
         - $ref: "#/components/schemas/RequirementStart"

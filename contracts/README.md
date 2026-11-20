@@ -47,6 +47,19 @@ python -m unittest discover -s tests -v
 | `/api/start` 接受 `spec.json` 并调用 `plan_adapter.py` | `openapi.yaml` 的 `StartRequest` | 编排器（成员 4） |
 | `/api/progress` 返回 `decisions` | `openapi.yaml` 的 `Progress.decisions` | 编排器（成员 4） |
 
+## 入口约定
+
+`/api/start` 保留四个入口，都算正式支持：
+
+| 入口 | 请求体特征 | 用途 |
+| --- | --- | --- |
+| 想法 | `requirement` | 全流程演示，前段要跑讨论 |
+| 任务清单 | `tasks` | 夹具、前端联调、回归测试，**长期保留** |
+| 计划 | `plan_id` + `tasks` | 编排器直接执行既定计划 |
+| 设计规格 | `modules` | 课堂作业 2 的规定入口，由 `plan_adapter.py` 转计划 |
+
+任务清单入口不因规格入口上线而删除：它不依赖上游模型，是前端和测试唯一能稳定复现的输入。
+
 ## 变更规则
 
 - 字段变更先改 schema、样例、测试，再改代码；
