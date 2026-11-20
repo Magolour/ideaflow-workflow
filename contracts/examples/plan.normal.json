@@ -1,0 +1,36 @@
+{
+  "plan_id": "PLAN-2026-001",
+  "version": 1,
+  "spec_ref": {
+    "spec_id": "SPEC-2026-001",
+    "version": 1,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "max_parallel": 2,
+  "status": "draft",
+  "created_at": "2026-11-20T10:15:00+08:00",
+  "tasks": [
+    {
+      "task_id": "T1",
+      "name": "图书服务",
+      "deliverable": "图书 API",
+      "acceptance_items": [
+        "发布后可检索"
+      ],
+      "suggested_role": "ai",
+      "priority": "high",
+      "requirement_refs": [
+        "R-01"
+      ],
+      "design_refs": [
+        "M-01"
+      ],
+      "estimate_days": 3,
+      "depends_on": [],
+      "write_paths": [
+        "app/books.py"
+      ],
+      "review_required": true
+    }
+  ]
+}

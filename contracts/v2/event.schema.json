@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/event.schema.json",
+  "title": "运行事件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "seq",
+    "ts",
+    "actor",
+    "object_type",
+    "object_id",
+    "action",
+    "detail"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "enums.schema.json#/$defs/schemaVersion"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ts": {
+      "$ref": "enums.schema.json#/$defs/timestamp"
+    },
+    "actor": {
+      "$ref": "enums.schema.json#/$defs/actor"
+    },
+    "object_type": {
+      "$ref": "enums.schema.json#/$defs/objectType"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "object_version": {
+      "type": "integer"
+    },
+    "action": {
+      "$ref": "enums.schema.json#/$defs/eventAction"
+    },
+    "detail": {
+      "type": "string"
+    }
+  }
+}

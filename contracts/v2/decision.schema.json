@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/decision.schema.json",
+  "title": "人工决定",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "target_type",
+    "target_id",
+    "target_version",
+    "action",
+    "actor",
+    "created_at"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "pattern": "^DEC-[A-Za-z0-9_-]+$"
+    },
+    "target_type": {
+      "type": "string",
+      "enum": [
+        "snapshot",
+        "draft",
+        "spec",
+        "plan"
+      ]
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "target_version": {
+      "type": "integer"
+    },
+    "action": {
+      "$ref": "enums.schema.json#/$defs/decisionAction"
+    },
+    "return_to": {
+      "type": "string",
+      "enum": [
+        "snapshot",
+        "spec",
+        "plan"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "actor": {
+      "$ref": "enums.schema.json#/$defs/actor"
+    },
+    "affected_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "$ref": "enums.schema.json#/$defs/timestamp"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "return",
+              "reject"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "return"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "return_to"
+        ]
+      }
+    }
+  ]
+}

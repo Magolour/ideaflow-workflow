@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/enums.schema.json",
+  "title": "IdeaFlow 公共枚举",
+  "$defs": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^(?:sha256:)?[a-f0-9]{64}$"
+    },
+    "snapshotStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "confirmed",
+        "superseded"
+      ]
+    },
+    "specStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "confirmed",
+        "superseded"
+      ]
+    },
+    "planStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "validated",
+        "approved",
+        "superseded"
+      ]
+    },
+    "taskStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "ready",
+        "running",
+        "review",
+        "done",
+        "failed",
+        "blocked",
+        "skipped"
+      ]
+    },
+    "instanceStatus": {
+      "type": "string",
+      "enum": [
+        "created",
+        "running",
+        "waiting_human",
+        "delivery_pending",
+        "completed",
+        "blocked",
+        "aborted"
+      ]
+    },
+    "requirementType": {
+      "type": "string",
+      "enum": [
+        "requirement",
+        "constraint",
+        "question"
+      ]
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "ai",
+        "human",
+        "ai+human"
+      ]
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "decisionAction": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "return",
+        "reject",
+        "skip"
+      ]
+    },
+    "objectType": {
+      "type": "string",
+      "enum": [
+        "instance",
+        "spec",
+        "task_list",
+        "task",
+        "graph",
+        "change_request",
+        "idea",
+        "snapshot",
+        "draft",
+        "plan",
+        "decision"
+      ]
+    },
+    "eventAction": {
+      "type": "string",
+      "enum": [
+        "created",
+        "requirement_parsed",
+        "dependency_confirmed",
+        "graph_built",
+        "task_dispatched",
+        "task_done",
+        "task_retried",
+        "task_failed",
+        "human_gate_entered",
+        "human_gate_exited",
+        "task_blocked",
+        "change_submitted",
+        "change_confirmed",
+        "change_applied",
+        "baseline_refrozen",
+        "replan_done",
+        "task_reopened",
+        "snapshot_created",
+        "snapshot_confirmed",
+        "draft_created",
+        "spec_generated",
+        "spec_confirmed",
+        "plan_validated",
+        "plan_confirmed",
+        "decision_recorded"
+      ]
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(system|ai|human:.+)$"
+    },
+    "snapshotPriority": {
+      "type": "string",
+      "enum": [
+        "must",
+        "should",
+        "could",
+        "wont"
+      ]
+    }
+  }
+}

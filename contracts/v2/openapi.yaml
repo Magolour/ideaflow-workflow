@@ -1,0 +1,50 @@
+openapi: 3.1.0
+info:
+  title: IdeaFlow 编排器 API（当前实现）
+  version: "2.0"
+servers:
+  - url: http://127.0.0.1:8000
+paths:
+  /api/start:
+    post:
+      summary: 上传需求或任务清单，拆解并建图
+      responses:
+        "200": { description: 已接受, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/events:
+    post:
+      summary: AI 回报、人工操作、变更、恢复
+      responses:
+        "202": { description: 已入队 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/progress:
+    get:
+      summary: 查询进度；带 since/limit 返回增量事件
+      parameters:
+        - { name: since, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200": { description: 当前状态, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/health:
+    get:
+      summary: 健康检查
+      responses:
+        "200": { description: OK }
+components:
+  responses:
+    BadRequest:
+      description: 请求非法
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: 版本或状态冲突
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: ["error"]
+      properties:
+        error: { type: string }
+        last_error: { type: string }

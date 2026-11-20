@@ -1,0 +1,13 @@
+{
+  "snapshot_id": "REQSET-001",
+  "version": 0,
+  "status": "draft",
+  "hash": "bad",
+  "created_at": "2026-11-20T10:00:00+08:00",
+  "parent_version": null,
+  "retired_ids": [],
+  "counts": {},
+  "source": {},
+  "items": [],
+  "history": []
+}

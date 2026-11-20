@@ -1,0 +1,65 @@
+{
+  "snapshot_id": "REQSET-001",
+  "version": 1,
+  "status": "confirmed",
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "created_at": "2026-11-20T10:00:00+08:00",
+  "parent_version": null,
+  "confirmed_by": "产品负责人",
+  "confirmed_at": "2026-11-20T10:00:00+08:00",
+  "retired_ids": [],
+  "counts": {
+    "requirement": 1,
+    "constraint": 1,
+    "open": 0
+  },
+  "source": {
+    "raw_text": "做一个校园二手书交易小程序",
+    "char_count": 15
+  },
+  "items": [
+    {
+      "id": "R-01",
+      "type": "requirement",
+      "text": "发布与搜索",
+      "priority": "must",
+      "acceptance": [
+        "发布后可检索"
+      ],
+      "source": {
+        "section": "需求",
+        "start_line": 1,
+        "end_line": 1,
+        "excerpt": "L12"
+      },
+      "label": "需求",
+      "priority_label": "高"
+    },
+    {
+      "id": "C-01",
+      "type": "constraint",
+      "text": "不做在线支付",
+      "priority": "must",
+      "acceptance": [
+        "下单仅生成意向"
+      ],
+      "source": {
+        "section": "需求",
+        "start_line": 1,
+        "end_line": 1,
+        "excerpt": "L18"
+      },
+      "label": "约束",
+      "priority_label": "高"
+    }
+  ],
+  "history": [
+    {
+      "version": 1,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "创建",
+      "actor": "member2",
+      "at": "2026-11-20T10:00:00+08:00"
+    }
+  ]
+}
