@@ -45,15 +45,20 @@ def case_names(selector: str) -> list[str]:
     return [selector]
 
 
-def run_multi(case_name: str) -> tuple[list[str], list[dict], dict]:
-    """多 Agent：需求模块离线跑完整流程，再经 plan_adapter 出计划。"""
+def run_multi(case_name: str, agent=None) -> tuple[list[str], list[dict], dict]:
+    """多 Agent：需求模块跑完整流程，再经 plan_adapter 出计划。"""
     from ideaflow.specflow import load_case, run as run_spec  # noqa: WPS433
     from plan_adapter import plan_from_spec  # noqa: WPS433
 
     started = time.perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
-        result = run_spec(load_case(case_name), out_dir=tmp)
+        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent)
         spec = result.spec.to_json()
+        calls = 0
+        log = result.out_dir / "ai_calls.jsonl"
+        if log.exists():
+            calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
+                         if line.strip()])
     duration = time.perf_counter() - started
 
     texts = [item["text"] for item in result.snapshot.requirements]
@@ -146,16 +151,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="IdeaFlow 评测")
     parser.add_argument("--case", default="all", help="案例名或 all")
     parser.add_argument("--mode", default="both", choices=["multi", "baseline", "both"])
-    parser.add_argument("--real", action="store_true", help="单 Agent 基线调用真实模型")
+    parser.add_argument("--real", action="store_true",
+                        help="多 Agent 与单 Agent 基线都调用真实模型")
     parser.add_argument("--out", type=Path, default=Path(__file__).resolve().parent)
     args = parser.parse_args()
+
+    agent = None
+    if args.real:
+        from ideaflow.agents import LLMAgent  # noqa: WPS433
+
+        try:
+            agent = LLMAgent()
+        except Exception as error:  # noqa: BLE001
+            print(f"真实调用未就绪：{error}")
+            return 2
 
     results = []
     for name in case_names(args.case):
         case = load_case_meta(name)
         runners = []
         if args.mode in ("multi", "both"):
-            runners.append(("multi", lambda n=name: run_multi(n)))
+            runners.append(("multi", lambda n=name: run_multi(n, agent)))
         if args.mode in ("baseline", "both"):
             runners.append(("baseline", lambda n=name: run_baseline(n, args.real)))
         for mode, runner in runners:
@@ -165,7 +181,8 @@ def main() -> int:
                   f"任务 {len(tasks)}，无效依赖 {len(results[-1]['plan']['invalid_dependencies'])}")
 
     report = {"cases": list({row["case"] for row in results}),
-              "real_baseline": args.real, "results": results}
+              "real_baseline": args.real, "real_multi": bool(agent),
+              "results": results}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

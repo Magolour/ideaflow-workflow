@@ -10,6 +10,7 @@ import argparse
 import json
 import sys
 
+from .agents import LLMAgent
 from .contracts import ContractError
 from .pipeline import run
 
@@ -46,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="讨论轮次上限，默认 2")
     parser.add_argument("--threshold", type=float, default=0.7,
                         help="判定共识所需的最低支持度，默认 0.7")
+    parser.add_argument("--live", action="store_true",
+                        help="调用真实模型（需 AI_API_KEY/AI_MODEL）；默认离线模板")
     return parser
 
 
@@ -56,10 +59,11 @@ def main(argv: list[str] | None = None) -> int:
 
     progress = None if args.quiet else (lambda message: print(message, flush=True))
     try:
+        agent = LLMAgent() if args.live else None
         result = run(args.idea, constraints=args.constraint, out_dir=args.out,
                      answers=answers, resolutions=resolutions,
                      max_rounds=args.max_rounds, threshold=args.threshold,
-                     progress=progress)
+                     progress=progress, agent=agent)
     except ContractError as error:
         print(f"生成失败：{error.code} {error.message}", file=sys.stderr)
         if error.path:

@@ -465,9 +465,37 @@ tests/
 └── test_web.py
 ```
 
+## 真实模型（可选）
+
+默认仍是离线模板；加 `--live` 才调用模型。接口保持 `agent.respond(stage, role, context)`，
+调用方不区分模板与模型。
+
+```bash
+export AI_BASE_URL="https://<your-endpoint>/v1"
+export AI_API_KEY="..."
+export AI_MODEL="..."
+
+python -m ideaflow.cli "做一个校园二手书交易小程序" --live
+python -m ideaflow.spec_cli case --live
+```
+
+| 能力 | 说明 |
+| --- | --- |
+| 结构化重试 | 输出不是合法 JSON 或缺字段时，把校验错误回注给模型重试，仍失败则报 `LLM_BAD_OUTPUT` |
+| 双阶段校验 | `synthesize` 与 `sign` 直接用现有契约校验，避免脏数据进入黑板 |
+| 审计 | 每次调用写 `ai_calls.jsonl`：阶段、角色、模型、耗时、token、状态 |
+| 失败语义 | 缺配置报 `LLM_NOT_CONFIGURED`；网络/超时重试后报 `LLM_UNAVAILABLE` |
+
+真实调用冒烟与评测：
+
+```bash
+python eval/real_smoke.py --case device-booking --require-real
+python eval/run_eval.py --case device-booking --real
+```
+
 ## 边界与后续
 
-当前是**离线模拟**：内容由模板生成，流程、校验、编号、状态机、收敛判定都是真实逻辑。
+默认路径是**离线模拟**：内容由模板生成，流程、校验、编号、状态机、收敛判定都是真实逻辑。
 这不是“假装有模型”，而是让流程在没有 Key 的环境里也能演示，并作为真实模型的回归基线。
 
 | 部分 | 内容 | 状态 |
@@ -475,7 +503,7 @@ tests/
 | 一 | 讨论闭环：澄清、发散、批判、整合、签署、Proposal | ✅ 已完成 |
 | 二 | 收敛引擎：分歧分类、终止条件、整合复核、伪共识检测 | ✅ 已完成 |
 | 三 | 盲评与加权评分、阻断项返修、关键路径与里程碑 | 待做 |
-| 四 | 真实模型接入（OpenAI 兼容）、结构校验回注、ai_call 审计 | 待做 |
+| 四 | 真实模型接入（OpenAI 兼容）、结构校验回注、ai_call 审计 | ✅ 已完成（需配置 Key） |
 | 五 | Web 工作台：输入、生成进度、文档预览、下载与打印 | ✅ 基础版完成（人工确认节点待做） |
 
 暂不做：数据库、多租户、真实代码生成与部署。契约变更须升版本并同步文档与样例。
