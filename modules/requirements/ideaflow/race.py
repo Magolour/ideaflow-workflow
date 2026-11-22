@@ -110,7 +110,7 @@ def _record_attempt(race: Race, group: str, attempt: int, state: GroupState,
 
 
 def _attempt(race: Race, snapshot: Snapshot, group: str, attempt: int,
-             *, simulate_failure: bool = False) -> None:
+             *, simulate_failure: bool = False, agent: Any | None = None) -> None:
     state = race.groups[group]
     state.state = "running"
     state.attempts = attempt
@@ -121,7 +121,7 @@ def _attempt(race: Race, snapshot: Snapshot, group: str, attempt: int,
         if simulate_failure:
             raise ContractError("SIMULATED_FAILURE",
                                 f"{group} 组第 {attempt} 次尝试被模拟为失败", "group")
-        draft = build_draft(snapshot, group, attempt=attempt)
+        draft = build_draft(snapshot, group, attempt=attempt, agent=agent)
     except ContractError as error:
         state.state = "failed"
         state.error = {"code": error.code, "message": error.message, "path": error.path}
@@ -145,7 +145,8 @@ def _attempt(race: Race, snapshot: Snapshot, group: str, attempt: int,
 
 def run_race(snapshot: Snapshot, *, groups: tuple[str, ...] = ("A", "B"),
              fail_groups: dict[str, int] | None = None, max_attempts: int = 1,
-             on_attempt: Callable[[Race, str, int], None] | None = None) -> Race:
+             on_attempt: Callable[[Race, str, int], None] | None = None,
+             agent: Any | None = None) -> Race:
     """跑一次赛马。`fail_groups={"B": 1}` 表示 B 组首次尝试注入一次失败。"""
     if snapshot.status != "confirmed":
         raise ContractError("SNAPSHOT_NOT_CONFIRMED", "开始赛马前必须先确认快照", "status")
@@ -162,7 +163,8 @@ def run_race(snapshot: Snapshot, *, groups: tuple[str, ...] = ("A", "B"),
             simulate = remaining[group] > 0
             if simulate:
                 remaining[group] -= 1
-            _attempt(race, snapshot, group, attempt, simulate_failure=simulate)
+            _attempt(race, snapshot, group, attempt, simulate_failure=simulate,
+                     agent=agent)
             if on_attempt is not None:
                 on_attempt(race, group, attempt)
             if race.groups[group].state == "done":
@@ -192,7 +194,8 @@ def load_drafts(race: Race, directory: str | Path) -> None:
             race.drafts[group] = Draft.from_json(read_json(path))
 
 
-def retry_failed(directory: str | Path, *, max_attempts: int = 1) -> Race:
+def retry_failed(directory: str | Path, *, max_attempts: int = 1,
+                 agent: Any | None = None) -> Race:
     """只重跑失败的组；已完成的组不重跑，产物哈希保持不变。"""
     root = Path(directory)
     race = load_race(root)
@@ -202,7 +205,7 @@ def retry_failed(directory: str | Path, *, max_attempts: int = 1) -> Race:
     for group in race.failed_groups:
         start_attempt = race.groups[group].attempts + 1
         for attempt in range(start_attempt, start_attempt + max_attempts):
-            _attempt(race, snapshot, group, attempt)
+            _attempt(race, snapshot, group, attempt, agent=agent)
             if race.groups[group].state == "done":
                 break
     save_race(race, root)

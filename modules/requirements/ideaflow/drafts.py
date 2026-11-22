@@ -17,6 +17,7 @@ from typing import Any
 from .constraints import deadline_days, forbidden_subjects, headcount, shares_topic
 from .contracts import ContractError
 from .estimate import pert
+from .roles import Role
 from .snapshot import Snapshot
 from .storage import content_hash, now_iso
 
@@ -350,8 +351,61 @@ class Draft:
         return draft
 
 
+
+def _group_role(profile: GroupProfile) -> Role:
+    return Role(id=f"group-{profile.id}", name=profile.name, focus=profile.objective,
+                must_answer=("每条明确要求给出本组选择", "与约束冲突必须写明"),
+                forbidden="不得引用快照之外的条目编号")
+
+
+def _decisions_from_agent(group: str, raw: dict[str, Any],
+                          items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scope_of = {item["id"]: item["text"] for item in items}
+    rows = raw.get("decisions") or []
+    if not isinstance(rows, list) or not rows:
+        raise ContractError("EMPTY_DRAFT", "模型草案没有 decisions", "decisions")
+    decisions = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            raise ContractError("INVALID_FIELD", "决策必须是对象", f"decisions[{index}]")
+        refs = [str(item) for item in (row.get("requirement_ids") or [])]
+        if not refs:
+            raise ContractError("EMPTY_REF", "决策必须引用需求编号",
+                                f"decisions[{index}].requirement_ids")
+        decisions.append({
+            "id": f"{group}-DEC-{index:02d}",
+            "requirement_ids": refs,
+            "scope": scope_of.get(refs[0], str(row.get("scope") or "")),
+            "choice": str(row.get("choice") or "").strip(),
+            "reason": str(row.get("reason") or "").strip(),
+            "cost_days": float(row.get("cost_days") or 0),
+            "satisfies": row.get("satisfies") or "full",
+            "risk": str(row.get("risk") or "").strip(),
+        })
+    return decisions
+
+
+def _claims_from_agent(group: str, raw: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = raw.get("claims") or []
+    claims = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict) or not str(row.get("text") or "").strip():
+            continue
+        claim = {"id": f"{group}-{index:02d}", "text": str(row["text"]).strip(),
+                 "evidence": row.get("evidence") if row.get("evidence") in
+                 ("fact", "rule", "value", "assumption") else "rule"}
+        refs = [str(item) for item in (row.get("requirement_ids") or [])]
+        constraints = [str(item) for item in (row.get("constraint_ids") or [])]
+        if refs:
+            claim["requirement_ids"] = refs
+        if constraints:
+            claim["constraint_ids"] = constraints
+        claims.append(claim)
+    return claims
+
 def build_draft(snapshot: Snapshot, group: str, *, attempt: int = 1,
-                context: dict[str, Any] | None = None) -> Draft:
+                context: dict[str, Any] | None = None,
+                agent: Any | None = None) -> Draft:
     if group not in GROUPS:
         raise ContractError("UNKNOWN_GROUP", f"未知方案组 {group}", "group")
     profile = GROUPS[group]
@@ -362,11 +416,32 @@ def build_draft(snapshot: Snapshot, group: str, *, attempt: int = 1,
     if not requirements:
         raise ContractError("NO_REQUIREMENT", "快照里没有明确要求，无法出方案", "items")
 
-    decisions = [_requirement_decision(group, item, index)
-                 for index, item in enumerate(requirements, 1)]
-    packages = _packages(profile, decisions)
-    estimate = pert(packages)
-    claims = _claims(group, decisions, constraints, estimate)
+    if agent is not None:
+        raw = agent.respond("draft", _group_role(profile), deepcopy(view))
+        decisions = _decisions_from_agent(group, raw, requirements)
+        packages = _packages(profile, decisions)
+        estimate = pert(packages)
+        claims = _claims_from_agent(group, raw) or _claims(group, decisions,
+                                                           constraints, estimate)
+        assumptions = [row for row in (raw.get("assumptions") or [])
+                       if isinstance(row, dict) and row.get("text")] or [
+            {"text": "模型给出的方案可以在期限内完成", "verify_by": "评审时逐条核对估算"}]
+        risks = [str(row).strip() for row in (raw.get("risks") or []) if str(row).strip()]
+        risks = risks or [row["risk"] for row in decisions[:2] if row.get("risk")]
+    else:
+        decisions = [_requirement_decision(group, item, index)
+                     for index, item in enumerate(requirements, 1)]
+        packages = _packages(profile, decisions)
+        estimate = pert(packages)
+        claims = _claims(group, decisions, constraints, estimate)
+        assumptions = ([{"text": "学生愿意线下当面交易",
+                         "verify_by": "访谈 5 名学生，记录最近一次交易方式"}]
+                       if group == "A" else
+                       [{"text": "学生愿意为更完整的体验多等一到两周",
+                         "verify_by": "对比两版原型的完成率与回访率"}])
+        risks = ([d["risk"] for d in decisions[:2]] +
+                 (["线下交易缺少凭证，纠纷处理成本高"] if draft_declined(decisions) else []))
+
     checks = _constraint_checks(decisions, constraints, estimate)
 
     draft = Draft(
@@ -381,13 +456,8 @@ def build_draft(snapshot: Snapshot, group: str, *, attempt: int = 1,
                  f"承诺 {estimate['commit_days']} 天"),
         decisions=decisions,
         claims=claims,
-        assumptions=([{"text": "学生愿意线下当面交易",
-                       "verify_by": "访谈 5 名学生，记录最近一次交易方式"}]
-                     if group == "A" else
-                     [{"text": "学生愿意为更完整的体验多等一到两周",
-                       "verify_by": "对比两版原型的完成率与回访率"}]),
-        risks=([d["risk"] for d in decisions[:2]] +
-               (["线下交易缺少凭证，纠纷处理成本高"] if draft_declined(decisions) else [])),
+        assumptions=assumptions,
+        risks=risks,
         constraints_checked=checks,
         packages=packages,
         estimate=estimate,
@@ -430,7 +500,8 @@ def validate_draft(draft: Draft, snapshot: Snapshot) -> None:
 
 
 def run_groups(snapshot: Snapshot, *, groups: Iterable[str] = ("A", "B"),
-               on_context: Any | None = None) -> dict[str, Draft]:
+               on_context: Any | None = None,
+               agent: Any | None = None) -> dict[str, Draft]:
     """依次生成两组草案；每组使用独立上下文，互不可见。"""
     if snapshot.status != "confirmed":
         raise ContractError("SNAPSHOT_NOT_CONFIRMED",
@@ -441,5 +512,5 @@ def run_groups(snapshot: Snapshot, *, groups: Iterable[str] = ("A", "B"),
         context = deepcopy(group_context(snapshot, profile))
         if on_context is not None:
             on_context(group, context)
-        drafts[group] = build_draft(snapshot, group, context=context)
+        drafts[group] = build_draft(snapshot, group, context=context, agent=agent)
     return drafts

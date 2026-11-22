@@ -57,7 +57,8 @@ def load_case(name: str) -> str:
 
 def run(raw_text: str, constraints: list[str] | None = None, *,
         out_dir: str | Path = "runs", confirm: str = "产品经理",
-        case_name: str | None = None, progress: Progress | None = None) -> SpecFlowResult:
+        case_name: str | None = None, progress: Progress | None = None,
+        agent: Any | None = None) -> SpecFlowResult:
     say = progress or (lambda message: None)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     slug = slugify(raw_text, limit=16)
@@ -69,6 +70,8 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         suffix += 1
     run_id = target.name
     target.mkdir(parents=True, exist_ok=False)
+    if agent is not None and hasattr(agent, "bind_run"):
+        agent.bind_run(target)
 
     snapshot = build(raw_text, constraints=constraints).confirm(confirm)
     save(snapshot, target)
@@ -77,7 +80,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         f"{counts['requirement']} 条要求、{counts['constraint']} 条约束、"
         f"{counts['open']} 个待澄清")
 
-    race = run_race(snapshot, max_attempts=2)
+    race = run_race(snapshot, max_attempts=2, agent=agent)
     if race.failed_groups:
         raise ContractError("GROUP_FAILED",
                             f"方案组 {', '.join(race.failed_groups)} 未能完成", "groups")
