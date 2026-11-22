@@ -7,10 +7,18 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import threading
+import time
+import urllib.error
+import urllib.request
 from copy import deepcopy
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Callable, Protocol
 
+from .contracts import ContractError, validate_stances, validate_synthesis
 from .roles import DISCUSSION_ROLES, Role
 
 
@@ -417,9 +425,268 @@ class MockAgent:
                 "work_packages": packages, "open_questions": questions}
 
 
+
+# ---------------------------------------------------------------- 真实模型
+
+STAGE_HINTS: dict[str, str] = {
+    "clarify": '{"role":"<role id>","claims":[],"assumptions":[],"objections":[],'
+               '"questions":["没有答复就无法继续的问题"]}',
+    "diverge": '{"role":"<role id>","claims":[{"text":"主张","reason":"依据",'
+               '"evidence":"fact|rule|value|assumption","assumes":[0]}],'
+               '"assumptions":[{"text":"假设","verify_by":"验证方式"}],'
+               '"objections":[],"questions":["待确认问题"]}',
+    "critique": '{"role":"<role id>","claims":[],"assumptions":[],'
+                '"objections":[{"target":"CLM-001","text":"异议","consequence":"后果",'
+                '"severity":"blocking|major|minor"}],"questions":[]}',
+    "respond": '{"role":"<role id>","claims":[],"assumptions":[],"objections":[],'
+               '"responses":[{"objection":"OBJ-001","position":"accept|refute|conditional",'
+               '"argument":"理由","evidence":"fact|rule|value|assumption"}],"questions":[]}',
+    "synthesize": '{"options":[{"key":"A","name":"方案名","scope":["范围"],'
+                  '"cost_days":"10 天","risk":"风险","tradeoffs":"取舍",'
+                  '"based_on":["CLM-001"]}],"decisions":[{"scope":"范围","choice":"选择",'
+                  '"reason":"理由","based_on":["CLM-001"]}],"not_adopted":[],'
+                  '"non_goals":[{"item":"不做的事","reason":"原因"}],'
+                  '"narrative":{"background":"","users":"","value":"","tech":"",'
+                  '"ops":"","metrics":""},"work_packages":[{"name":"工作包",'
+                  '"deliverable":"交付物","optimistic":1,"likely":2,"pessimistic":4}],'
+                  '"open_questions":[]}',
+    "sign": '{"role":"<role id>","stances":[{"option":"OPT-001",'
+            '"stance":"agree|conditional|oppose|unreviewed","reason":"理由",'
+            '"condition":"有条件时的条件"}],"claims":[],"assumptions":[],'
+            '"objections":[],"questions":[]}',
+    "counterexample": '{"role":"skeptic","claims":[{"text":"反例","reason":"依据",'
+                      '"evidence":"rule","assumes":[]}],"assumptions":[],'
+                      '"objections":[],"questions":[]}',
+    "review": '{"role":"<role id>","reviews":[{"claim":"CLM-001",'
+              '"verdict":"preserved|deferred|omitted|distorted","note":"说明"}],'
+              '"claims":[],"assumptions":[],"objections":[],"questions":[]}',
+    "draft": '{"decisions":[{"requirement_ids":["R-01"],"choice":"方案",'
+             '"reason":"理由","cost_days":2.0,"satisfies":"full|partial|declined",'
+             '"risk":"风险"}],"claims":[{"text":"主张","requirement_ids":["R-01"],'
+             '"evidence":"fact|rule|value|assumption"}],'
+             '"assumptions":[{"text":"假设","verify_by":"验证方式"}],'
+             '"risks":["风险"]}',
+}
+
+STAGE_RULES = {
+    "clarify": "只问没有答复就无法继续的问题，最多 3 个。",
+    "diverge": "从本角色关注点出发，给 2—3 条有依据的主张，至少 1 条假设。",
+    "critique": "只针对其他角色的具体主张提出异议，必须写后果与严重级。",
+    "respond": "逐条回应指到本角色的异议，立场三选一，反对要写理由。",
+    "synthesize": "至少 2 个候选方案、2 个工作包；只能引用给定的主张编号。",
+    "sign": "对每个候选方案给出四态立场之一；有条件必须写条件，反对必须写理由。",
+    "counterexample": "提出一个能推翻当前共识的具体反例。",
+    "review": "只复核给定的主张，逐条给出 preserved/deferred/omitted/distorted。",
+    "draft": "覆盖快照里的每一条明确要求；只能引用给定编号；成本必须大于 0。",
+}
+
+
+class LLMAgent:
+    """OpenAI 兼容接口的角色 Agent。
+
+    与 MockAgent 实现同一个 ``respond(stage, role, context)``：调用方不需要知道
+    背后是模板还是模型。解析失败会把校验错误回注给模型重试；每次调用都记入
+    ``ai_calls.jsonl``（模型、耗时、token、状态），便于审计与成本核算。
+    """
+
+    name = "llm"
+
+    def __init__(self, *, base_url: str | None = None, api_key: str | None = None,
+                 model: str | None = None, timeout: float = 60.0, retries: int = 2,
+                 audit_path: str | Path | None = None,
+                 transport: Callable[[list[dict[str, str]], float, bool],
+                                     tuple[str, dict[str, Any]]] | None = None) -> None:
+        self.base_url = (base_url or os.getenv("AI_BASE_URL")
+                         or "https://api.openai.com/v1").rstrip("/")
+        self.api_key = api_key or os.getenv("AI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
+        self.model = model or os.getenv("AI_MODEL") or ""
+        if not self.api_key:
+            raise ContractError("LLM_NOT_CONFIGURED",
+                                "缺少 AI_API_KEY，无法发起真实模型调用", "api_key")
+        if not self.model:
+            raise ContractError("LLM_NOT_CONFIGURED", "缺少 AI_MODEL", "model")
+        self.timeout = timeout
+        self.retries = max(0, int(retries))
+        self.audit_path = Path(audit_path) if audit_path else None
+        self.transport = transport
+        self._lock = threading.Lock()
+
+    def bind_run(self, run_dir: str | Path) -> None:
+        """把审计日志落到某次运行的目录；由 pipeline / specflow 调用。"""
+        self.audit_path = Path(run_dir) / "ai_calls.jsonl"
+
+    def respond(self, stage: str, role: Role, context: dict[str, Any]) -> dict[str, Any]:
+        if stage not in STAGE_HINTS:
+            raise ContractError("UNKNOWN_STAGE", f"LLMAgent 不支持阶段：{stage}", "stage")
+        messages = [
+            {"role": "system", "content": self._system_prompt(stage, role)},
+            {"role": "user", "content": json.dumps(
+                {"stage": stage, "role": role.id, "context": context},
+                ensure_ascii=False, sort_keys=True)},
+        ]
+        temperature = 0.2 if stage in ("synthesize", "draft") else role.temperature
+        last_error = ""
+        for attempt in range(self.retries + 1):
+            started = time.perf_counter()
+            try:
+                content, usage = self._chat(messages, temperature, stage)
+                data = self._parse_json(content)
+                data = self._postprocess(stage, role, context, data)
+            except ContractError as error:
+                last_error = f"{error.code}: {error.message}"
+                self._log(stage, role, attempt, "invalid", started, usage={}, error=last_error)
+                if attempt >= self.retries:
+                    break
+                messages = messages[:2] + [
+                    {"role": "assistant", "content": content if "content" in locals() else ""},
+                    {"role": "user", "content": f"输出不合格：{last_error}。"
+                                                f"请只返回修正后的 JSON，不要解释。"},
+                ]
+                continue
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                last_error = f"LLM_UNAVAILABLE: {error}"
+                self._log(stage, role, attempt, "error", started, usage={}, error=last_error)
+                if attempt >= self.retries:
+                    raise ContractError("LLM_UNAVAILABLE",
+                                        f"模型调用失败：{error}", "transport") from None
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            self._log(stage, role, attempt, "ok", started, usage=usage)
+            return data
+        raise ContractError("LLM_BAD_OUTPUT",
+                            f"模型输出未通过校验：{last_error}", stage)
+
+    # ---------- 请求与解析 ----------
+
+    def _system_prompt(self, stage: str, role: Role) -> str:
+        return (
+            f"你是「{role.name}」。关注点：{role.focus}。"
+            f"必须回答：{'；'.join(role.must_answer)}。禁区：{role.forbidden}。"
+            f"当前阶段：{stage}。{STAGE_RULES[stage]}"
+            "只输出一个 JSON 对象，不要 Markdown 围栏、不要解释。"
+            f"输出形状：{STAGE_HINTS[stage]}"
+        )
+
+    def _chat(self, messages: list[dict[str, str]], temperature: float,
+              stage: str) -> tuple[str, dict[str, Any]]:
+        if self.transport is not None:
+            return self.transport(messages, temperature, True)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+        }
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.api_key}"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", "ignore")[:300]
+            if error.code in (408, 409, 429) or error.code >= 500:
+                raise urllib.error.URLError(f"HTTP {error.code}: {detail}") from None
+            raise ContractError("LLM_REQUEST_FAILED",
+                                f"模型返回 HTTP {error.code}：{detail}", "http") from None
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise ContractError("LLM_BAD_RESPONSE", "模型响应缺少 choices", "body") from None
+        return content, body.get("usage") or {}
+
+    @staticmethod
+    def _parse_json(content: str) -> dict[str, Any]:
+        text = (content or "").strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            start, end = text.find("{"), text.rfind("}")
+            if start < 0 or end <= start:
+                raise ContractError("LLM_BAD_JSON", "输出里没有 JSON 对象", "content") from None
+            try:
+                data = json.loads(text[start:end + 1])
+            except json.JSONDecodeError as error:
+                raise ContractError("LLM_BAD_JSON", f"JSON 解析失败：{error}", "content") from None
+        if not isinstance(data, dict):
+            raise ContractError("LLM_BAD_JSON", "输出必须是 JSON 对象", "content")
+        return data
+
+    # ---------- 各阶段的最低结构要求 ----------
+
+    def _postprocess(self, stage: str, role: Role, context: dict[str, Any],
+                     data: dict[str, Any]) -> dict[str, Any]:
+        if stage == "synthesize":
+            known = {row["id"] for row in context.get("claims", [])}
+            return validate_synthesis(data, known_claims=known)
+        if stage == "sign":
+            known = {row["id"] for row in context.get("options", [])}
+            return validate_stances(data, role_id=role.id, known_options=known)
+        if stage == "draft":
+            if not isinstance(data.get("decisions"), list) or not data["decisions"]:
+                raise ContractError("EMPTY_DRAFT", "草案没有 decisions", "decisions")
+            return data
+
+        for key in ("claims", "assumptions", "objections", "questions"):
+            data.setdefault(key, [])
+            if not isinstance(data[key], list):
+                raise ContractError("INVALID_OUTPUT", f"{key} 必须是数组", key)
+        data["role"] = role.id
+
+        if stage == "draft":
+            return data
+        if stage == "clarify":
+            data["questions"] = [str(row).strip() for row in data["questions"] if str(row).strip()][:3]
+        if stage == "critique":
+            for index, row in enumerate(data["objections"]):
+                if not isinstance(row, dict) or not row.get("target"):
+                    raise ContractError("INVALID_OUTPUT", "异议必须指向具体主张",
+                                        f"objections[{index}]")
+                row.setdefault("severity", "major")
+        if stage == "respond":
+            for index, row in enumerate(data.get("responses", [])):
+                if not isinstance(row, dict) or row.get("position") not in (
+                        "accept", "refute", "conditional"):
+                    raise ContractError("INVALID_OUTPUT", "回应立场不合法",
+                                        f"responses[{index}]")
+        if stage == "review":
+            for index, row in enumerate(data.get("reviews", [])):
+                if not isinstance(row, dict) or row.get("verdict") not in (
+                        "preserved", "deferred", "omitted", "distorted"):
+                    raise ContractError("INVALID_OUTPUT", "复核结论不合法",
+                                        f"reviews[{index}]")
+        return data
+
+    # ---------- 审计 ----------
+
+    def _log(self, stage: str, role: Role, attempt: int, status: str,
+             started: float, *, usage: dict[str, Any], error: str = "") -> None:
+        if self.audit_path is None:
+            return
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "stage": stage, "role": role.id, "attempt": attempt,
+            "model": self.model, "status": status,
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "error": error,
+        }
+        with self._lock:
+            self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.audit_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def isolated_context(idea: str, constraints: list[str]) -> dict[str, Any]:
     """独立发散阶段的上下文：只有输入，没有任何其他角色的产出。"""
     return {"idea": idea, "constraints": deepcopy(constraints), "claims": []}
 
 
-__all__ = ["Agent", "MockAgent", "DISCUSSION_ROLES", "isolated_context", "brief"]
+__all__ = ["Agent", "MockAgent", "LLMAgent", "DISCUSSION_ROLES",
+           "isolated_context", "brief"]
