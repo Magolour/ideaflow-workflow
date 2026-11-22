@@ -83,6 +83,8 @@ def run(idea: str, *, constraints: list[str] | None = None,
         suffix += 1
     run_id = target.name
     target.mkdir(parents=True, exist_ok=False)
+    if hasattr(agent, "bind_run"):
+        agent.bind_run(target)
 
     board = Blackboard(idea, constraints)
     events = EventLog()

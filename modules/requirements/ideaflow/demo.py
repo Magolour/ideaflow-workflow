@@ -30,12 +30,12 @@ class CaseResult:
 
 
 def run_case(case_file: str | Path = DEFAULT_CASE, out_dir: str | Path = DEFAULT_OUT,
-             *, confirm: str = "案例演示") -> CaseResult:
+             *, confirm: str = "案例演示", agent: Any | None = None) -> CaseResult:
     path = Path(case_file)
     if not path.exists():
         raise ContractError("CASE_NOT_FOUND", f"找不到案例文件 {path}", "case_file")
     snapshot = build(path.read_text(encoding="utf-8")).confirm(confirm)
-    drafts = run_groups(snapshot)
+    drafts = run_groups(snapshot, agent=agent)
     tradeoffs = build_tradeoffs(snapshot, drafts)
     manifest = deliver(out_dir, snapshot, drafts, extras={"tradeoffs.json": tradeoffs})
     return CaseResult(snapshot=snapshot, drafts=drafts, tradeoffs=tradeoffs,
