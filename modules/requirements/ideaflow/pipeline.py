@@ -188,6 +188,9 @@ def run(idea: str, *, constraints: list[str] | None = None,
             if raw is None:
                 continue
             raw = _dedupe_objections(raw, board)
+            if not raw["claims"] and not raw["objections"] and not raw["questions"]:
+                # 本轮只是重复了已有异议，没有新增内容，按正常情况跳过
+                continue
             output = safe_output("critique", role, raw)
             if output is None:
                 continue

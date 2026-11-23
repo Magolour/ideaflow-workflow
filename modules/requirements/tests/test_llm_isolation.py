@@ -22,6 +22,21 @@ class FailingRoleAgent(MockAgent):
         return super().respond(stage, role, context)
 
 
+class DuplicateCritiqueAgent(MockAgent):
+    """每轮都提出同一条异议：第二轮去重后为空，不应报错。"""
+
+    def respond(self, stage, role, context):
+        if stage == "critique" and role.id == "ba":
+            claims = context.get("claims") or []
+            objections = []
+            if claims:
+                objections.append({"target": claims[0]["id"], "text": "重复异议",
+                                   "consequence": "重复", "severity": "major"})
+            return {"role": "ba", "claims": [], "assumptions": [],
+                    "questions": [], "objections": objections}
+        return super().respond(stage, role, context)
+
+
 class CaptureReviewAgent(MockAgent):
     def __init__(self) -> None:
         self.contexts: list[tuple[str, dict]] = []
@@ -62,6 +77,16 @@ class IsolationTest(unittest.TestCase):
         report = self.run_with("clarify", "ba")
         self.assertEqual(report["warnings"][0]["stage"], "clarify")
         self.assertEqual(report["counts"]["rounds"], 1)
+
+    def test_duplicate_critique_does_not_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            result = run("做一个校园二手书交易小程序，支持发布与搜索",
+                         out_dir=folder, agent=DuplicateCritiqueAgent(),
+                         max_rounds=2, threshold=0.99)
+            self.assertTrue((result.out_dir / "proposal.md").exists())
+            self.assertEqual(result.report["counts"]["rounds"], 2)
+            self.assertFalse([row for row in result.report["warnings"]
+                              if row["stage"] == "critique"])
 
     def test_review_context_contains_claim_text(self) -> None:
         agent = CaptureReviewAgent()
