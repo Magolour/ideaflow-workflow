@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ideaflow.agents import LLMAgent
+from ideaflow.agents import LLMAgent, STAGE_HINTS
 from ideaflow.contracts import ContractError
 from ideaflow.roles import DISCUSSION_ROLES
 
@@ -61,7 +61,9 @@ class LLMAgentTest(unittest.TestCase):
         data = agent.respond("diverge", ROLE, {"idea": "二手书", "constraints": []})
         self.assertEqual(data["claims"][0]["text"], "范围应收窄")
         self.assertEqual(len(transport.calls), 2)
-        self.assertIn("输出不合格", transport.calls[1]["messages"][-1]["content"])
+        repair = transport.calls[1]["messages"][-1]["content"]
+        self.assertIn("输出不合格", repair)
+        self.assertIn("必须符合这个形状", repair)
 
     def test_fails_after_retries(self) -> None:
         agent, transport = agent_with(["不是 JSON"], retries=1)
@@ -69,6 +71,24 @@ class LLMAgentTest(unittest.TestCase):
             agent.respond("diverge", ROLE, {"idea": "二手书", "constraints": []})
         self.assertEqual(caught.exception.code, "LLM_BAD_OUTPUT")
         self.assertEqual(len(transport.calls), 2)
+
+    def test_clarify_tolerates_string_claims(self) -> None:
+        reply = json.dumps({
+            "role": "ba",
+            "claims": ["学生需要能发布教材"],
+            "assumptions": ["用户是学生"],
+            "objections": [],
+            "questions": ["由谁验收？"],
+        }, ensure_ascii=False)
+        agent, _ = agent_with([reply])
+        data = agent.respond("clarify", ROLE, {"idea": "二手书", "constraints": []})
+        self.assertEqual(data["claims"], [])
+        self.assertEqual(data["assumptions"], [])
+        self.assertEqual(data["questions"], ["由谁验收？"])
+
+    def test_clarify_hint_does_not_ask_for_claims(self) -> None:
+        self.assertNotIn('"claims"', STAGE_HINTS["clarify"])
+        self.assertIn("questions", STAGE_HINTS["clarify"])
 
     def test_synthesize_is_validated(self) -> None:
         bad = json.dumps({"options": [{"key": "A", "name": "唯一方案", "scope": ["x"],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +10,8 @@ from pathlib import Path
 from ideaflow.contracts import ContractError
 from ideaflow.drafts import build_draft, run_groups
 from ideaflow.snapshot import build
-from ideaflow.specflow import run
+from ideaflow.agents import LLMAgent
+from ideaflow.specflow import load_case, run
 
 CASE = Path(__file__).resolve().parents[1] / "cases" / "campus-books.md"
 
@@ -76,6 +78,40 @@ class DraftAgentTest(unittest.TestCase):
         drafts = run_groups(self.snapshot, agent=agent)
         self.assertEqual({row[1] for row in agent.calls}, {"group-A", "group-B"})
         self.assertEqual(set(drafts), {"A", "B"})
+
+    def test_specflow_with_llm_agent_records_calls(self) -> None:
+        def transport(messages, temperature, json_mode):
+            payload = json.loads(messages[1]["content"])
+            items = payload["context"]["snapshot"]["items"]
+            requirements = [item for item in items if item["type"] == "requirement"]
+            decisions = [{
+                "requirement_ids": [item["id"]],
+                "choice": f"模型方案：{item['text']}",
+                "reason": "最小实现",
+                "cost_days": 2.0,
+                "satisfies": "full",
+                "risk": "低",
+            } for item in requirements]
+            content = json.dumps({
+                "decisions": decisions,
+                "claims": [{"text": "模型主张", "requirement_ids": [requirements[0]["id"]],
+                            "evidence": "rule"}],
+                "assumptions": [{"text": "假设", "verify_by": "访谈"}],
+                "risks": ["风险"],
+            }, ensure_ascii=False)
+            return content, {"prompt_tokens": 12, "completion_tokens": 8}
+
+        agent = LLMAgent(api_key="test", model="test", transport=transport)
+        with tempfile.TemporaryDirectory() as folder:
+            result = run(load_case("device-booking"), out_dir=folder, agent=agent)
+            log = result.out_dir / "ai_calls.jsonl"
+            self.assertTrue(log.exists())
+            rows = [json.loads(line) for line in
+                    log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["status"] for row in rows}, {"ok"})
+            self.assertEqual({row["stage"] for row in rows}, {"draft"})
+            self.assertTrue((result.out_dir / "spec.v1.json").exists())
 
     def test_specflow_passes_agent_and_binds_run(self) -> None:
         agent = FakeDraftAgent()

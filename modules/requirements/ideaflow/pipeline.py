@@ -73,6 +73,30 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
     agent = agent or MockAgent()
     say = progress or (lambda message: None)
+    warnings: list[dict[str, Any]] = []
+
+    def warn(stage: str, role: Any, error: ContractError) -> None:
+        warnings.append({"stage": stage, "role": role.id,
+                         "code": error.code, "message": error.message})
+        say(f"  ! {role.name} 在 {stage} 阶段失败，已跳过：{error.code}")
+
+    def safe_respond(stage: str, role: Any, context: dict[str, Any]) -> dict[str, Any] | None:
+        """单个角色失败不终止整条讨论；记警告后跳过该角色。"""
+        try:
+            return agent.respond(stage, role, context)
+        except ContractError as error:
+            warn(stage, role, error)
+            return None
+
+    def safe_output(stage: str, role: Any, raw: dict[str, Any] | None) -> dict[str, Any] | None:
+        """模型输出不合契约时同样按角色隔离，不写入黑板。"""
+        if raw is None:
+            return None
+        try:
+            return board.add_role_output(raw, role_id=role.id, stage=stage)
+        except ContractError as error:
+            warn(stage, role, error)
+            return None
     created_at = now_iso()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_id = f"{stamp}-{slugify(idea)}"
@@ -95,14 +119,18 @@ def run(idea: str, *, constraints: list[str] | None = None,
     # ---------- 阶段 1：首轮澄清 ----------
     board.stage = "clarify"
     say("阶段 1/7 首轮澄清：需求分析角色提出只能由人回答的阻断问题")
-    clarify = agent.respond("clarify", role_card("ba"), isolated_context(idea, board.constraints))
+    clarify = safe_respond("clarify", role_card("ba"),
+                           isolated_context(idea, board.constraints))
     before = len(board.open_questions)
-    board.add_role_output(clarify, role_id="ba", stage="clarify")
-    blocking = board.open_questions[before:]
-    for row in blocking:
-        row["blocking"] = True
-    events.emit("ba", "clarify_questions", f"提出 {len(blocking)} 个阻断问题",
-                object_type="blackboard", object_id=run_id, version=board.version)
+    blocking = []
+    if clarify is not None:
+        clarify_output = safe_output("clarify", role_card("ba"), clarify)
+        if clarify_output is not None:
+            blocking = board.open_questions[before:]
+            for row in blocking:
+                row["blocking"] = True
+            events.emit("ba", "clarify_questions", f"提出 {len(blocking)} 个阻断问题",
+                        object_type="blackboard", object_id=run_id, version=board.version)
 
     for row in blocking:
         answer = (answers or {}).get(row["id"], "").strip()
@@ -128,8 +156,13 @@ def run(idea: str, *, constraints: list[str] | None = None,
     say("阶段 2/7 独立发散：6 个角色并行、互不可见")
     for role in DISCUSSION_ROLES:
         # 每次都给一份全新上下文，只含原始输入，杜绝互相污染
-        raw = agent.respond("diverge", role, deepcopy(isolated_context(idea, board.constraints)))
-        output = board.add_role_output(raw, role_id=role.id, stage="diverge")
+        raw = safe_respond("diverge", role,
+                           deepcopy(isolated_context(idea, board.constraints)))
+        if raw is None:
+            continue
+        output = safe_output("diverge", role, raw)
+        if output is None:
+            continue
         events.emit(role.id, "claims_written",
                     f"{role.name}：{len(output['claim_ids'])} 条主张、"
                     f"{len(output['assumption_ids'])} 条假设",
@@ -148,11 +181,15 @@ def run(idea: str, *, constraints: list[str] | None = None,
         say(f"阶段 3/7 第 {round_no} 轮结构化批判：必须引用论点编号并表态")
         new_objections = 0
         for role in DISCUSSION_ROLES:
-            raw = agent.respond("critique", role,
-                                deepcopy({"idea": idea, "constraints": board.constraints,
-                                          "claims": view}))
+            raw = safe_respond("critique", role,
+                               deepcopy({"idea": idea, "constraints": board.constraints,
+                                         "claims": view}))
+            if raw is None:
+                continue
             raw = _dedupe_objections(raw, board)
-            output = board.add_role_output(raw, role_id=role.id, stage="critique")
+            output = safe_output("critique", role, raw)
+            if output is None:
+                continue
             new_objections += len(output["objections"])
         events.emit("host", "round_critique",
                     f"第 {round_no} 轮新增 {new_objections} 条异议",
@@ -170,10 +207,14 @@ def run(idea: str, *, constraints: list[str] | None = None,
                         "target_role": role.id, "text": row["text"],
                         "severity": row["severity"],
                         "divergence": board.divergence.get(row["id"], "")} for row in mine]
-            raw = agent.respond("respond", role,
-                                deepcopy({"idea": idea, "objections": payload,
-                                          "round": round_no}))
-            signed = board.add_role_output(raw, role_id=role.id, stage="respond")
+            raw = safe_respond("respond", role,
+                               deepcopy({"idea": idea, "objections": payload,
+                                         "round": round_no}))
+            if raw is None:
+                continue
+            signed = safe_output("respond", role, raw)
+            if signed is None:
+                continue
             board.apply_responses(role.id, signed["responses"])
             events.emit(role.id, "objections_answered",
                         f"{role.name} 回应 {len(signed['responses'])} 条异议",
@@ -219,9 +260,15 @@ def run(idea: str, *, constraints: list[str] | None = None,
     option_view = [{"id": row["id"], "key": row["key"], "name": row["name"]}
                    for row in board.options]
     for role in DISCUSSION_ROLES:
-        raw = agent.respond("sign", role, deepcopy({"idea": idea, "options": option_view}))
-        signed = validate_stances(raw, role_id=role.id,
-                                 known_options={row["id"] for row in board.options})
+        raw = safe_respond("sign", role, deepcopy({"idea": idea, "options": option_view}))
+        if raw is None:
+            continue
+        try:
+            signed = validate_stances(raw, role_id=role.id,
+                                      known_options={row["id"] for row in board.options})
+        except ContractError as error:
+            warn("sign", role, error)
+            continue
         for item in signed["stances"]:
             board.record_stance(role.id, item["option"], item["stance"],
                                 reason=item["reason"], condition=item["condition"])
@@ -233,15 +280,23 @@ def run(idea: str, *, constraints: list[str] | None = None,
     board.stage = "guard"
     if needs_counterexample(board):
         say("阶段 6/7 伪共识检查：全部立场一致，要求质疑者提出反例")
-        raw = agent.respond("counterexample", role_card("skeptic"),
-                            deepcopy({"idea": idea, "options": option_view}))
-        output = board.add_role_output(raw, role_id="skeptic", stage="guard")
-        board.set_pseudo_check({"triggered": True, "raised": output["claim_ids"],
-                                "note": "全票通过，主持人要求质疑者提供反例"})
-        events.emit("host", "pseudo_consensus_probe",
-                    f"触发反例复核，新增 {len(output['claim_ids'])} 条反面论点",
-                    object_type="claim", object_id=",".join(output["claim_ids"]),
-                    version=board.version)
+        raw = safe_respond("counterexample", role_card("skeptic"),
+                           deepcopy({"idea": idea, "options": option_view}))
+        if raw is None:
+            board.set_pseudo_check({"triggered": False, "raised": [],
+                                    "note": "质疑角色生成反例失败，本次未触发复核"})
+        else:
+            output = safe_output("guard", role_card("skeptic"), raw)
+            if output is None:
+                board.set_pseudo_check({"triggered": False, "raised": [],
+                                        "note": "质疑角色输出不合格，本次未触发复核"})
+            else:
+                board.set_pseudo_check({"triggered": True, "raised": output["claim_ids"],
+                                    "note": "全票通过，主持人要求质疑者提供反例"})
+                events.emit("host", "pseudo_consensus_probe",
+                            f"触发反例复核，新增 {len(output['claim_ids'])} 条反面论点",
+                            object_type="claim", object_id=",".join(output["claim_ids"]),
+                            version=board.version)
     else:
         board.set_pseudo_check({"triggered": False, "raised": [],
                                 "note": "存在反对立场，未触发全票复核"})
@@ -252,11 +307,15 @@ def run(idea: str, *, constraints: list[str] | None = None,
         own = [{"id": row["id"]} for row in board.claims if row["role"] == role.id]
         if not own:
             continue
-        raw = agent.respond("review", role,
-                            deepcopy({"claims": own, "adopted": adopted,
-                                      "not_adopted": not_adopted}))
-        reviews = board.add_role_output(raw, role_id=role.id, stage="review")["reviews"]
-        board.apply_reviews(role.id, reviews)
+        raw = safe_respond("review", role,
+                           deepcopy({"claims": own, "adopted": adopted,
+                                     "not_adopted": not_adopted}))
+        if raw is None:
+            continue
+        review_output = safe_output("review", role, raw)
+        if review_output is None:
+            continue
+        board.apply_reviews(role.id, review_output["reviews"])
     for issue in integrity_issues(board):
         board.objections.append({
             "id": f"OBJ-{len(board.objections) + 1:03d}",
@@ -319,6 +378,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
         "support": option_support(board),
         "consensus": board.snapshot()["consensus"],
         "opinions": opinion_counts,
+        "warnings": warnings,
     }
     (target / "run.json").write_text(
         json.dumps({**report, "idea": idea, "constraints": board.constraints,

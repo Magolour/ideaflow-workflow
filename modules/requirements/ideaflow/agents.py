@@ -429,8 +429,7 @@ class MockAgent:
 # ---------------------------------------------------------------- 真实模型
 
 STAGE_HINTS: dict[str, str] = {
-    "clarify": '{"role":"<role id>","claims":[],"assumptions":[],"objections":[],'
-               '"questions":["没有答复就无法继续的问题"]}',
+    "clarify": '{"role":"<role id>","questions":["没有答复就无法继续的问题"]}',
     "diverge": '{"role":"<role id>","claims":[{"text":"主张","reason":"依据",'
                '"evidence":"fact|rule|value|assumption","assumes":[0]}],'
                '"assumptions":[{"text":"假设","verify_by":"验证方式"}],'
@@ -540,7 +539,8 @@ class LLMAgent:
                 messages = messages[:2] + [
                     {"role": "assistant", "content": content if "content" in locals() else ""},
                     {"role": "user", "content": f"输出不合格：{last_error}。"
-                                                f"请只返回修正后的 JSON，不要解释。"},
+                                                f"请只返回修正后的 JSON，不要解释。"
+                                                f"必须符合这个形状：{STAGE_HINTS[stage]}"},
                 ]
                 continue
             except (urllib.error.URLError, TimeoutError, OSError) as error:
@@ -641,7 +641,14 @@ class LLMAgent:
         if stage == "draft":
             return data
         if stage == "clarify":
-            data["questions"] = [str(row).strip() for row in data["questions"] if str(row).strip()][:3]
+            # 模型常把 claims 写成字符串数组；澄清阶段不产生主张，直接丢弃非对象项
+            for key in ("claims", "assumptions", "objections"):
+                data[key] = [row for row in data.get(key) or [] if isinstance(row, dict)]
+            questions = [str(row).strip() for row in data.get("questions") or []
+                         if str(row).strip()]
+            if not questions:
+                raise ContractError("EMPTY_CLARIFY", "澄清阶段没有提出问题", "questions")
+            data["questions"] = questions[:3]
         if stage == "critique":
             for index, row in enumerate(data["objections"]):
                 if not isinstance(row, dict) or not row.get("target"):
