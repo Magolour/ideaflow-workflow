@@ -1083,3 +1083,31 @@ table.spec-table { min-width: 640px; }
   .snapshot-table th:nth-child(3), .snapshot-table td:nth-child(3),
   .snapshot-table th:nth-child(5), .snapshot-table td:nth-child(5) { display: none; }
 }
+
+/* 真实模型开关与角色跳过警告 */
+.live-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border: 1px dashed #3a3d34;
+  border-radius: 9px;
+  font-size: 11.5px;
+  color: #a9a79b;
+  cursor: pointer;
+}
+.live-toggle input { margin-top: 2px; accent-color: var(--brass); }
+.live-toggle em { display: block; font-style: normal; margin-top: 2px; color: #7f8177; }
+
+.run-warnings {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e2c9a2;
+  border-radius: 9px;
+  background: #fdf6e7;
+  color: #7a5a20;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.warn-row + .warn-row { margin-top: 4px; }

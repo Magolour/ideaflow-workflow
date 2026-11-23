@@ -58,12 +58,17 @@ def real_agents() -> list[str]:
             and not getattr(value, "_is_protocol", False)]
 
 
-def check(case_name: str) -> dict:
+def check(case_name: str, agent=None) -> dict:
     from ideaflow.specflow import load_case, run as run_spec  # noqa: WPS433
 
     by_file = load_schemas()
     with tempfile.TemporaryDirectory() as tmp:
-        result = run_spec(load_case(case_name), out_dir=tmp)
+        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent)
+        calls = 0
+        log = result.out_dir / "ai_calls.jsonl"
+        if log.exists():
+            calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
+                         if line.strip()])
     snapshot = result.snapshot.to_json()
     spec = result.spec.to_json()
 
@@ -90,6 +95,8 @@ def check(case_name: str) -> dict:
         "modules": len(spec["modules"]),
         "errors": errors,
         "real_agents": real_agents(),
+        "agent": getattr(agent, "name", "mock"),
+        "ai_calls": calls,
     }
 
 
@@ -97,19 +104,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="需求模块真实调用冒烟")
     parser.add_argument("--case", default="campus-books")
     parser.add_argument("--require-real", action="store_true",
-                        help="需求模块仍是 MockAgent 时返回 2（用于验收门禁）")
+                        help="必须真实调用模型；缺少配置或没有调用记录时返回 2")
     args = parser.parse_args()
 
+    agent = None
+    if args.require_real:
+        from ideaflow.agents import LLMAgent  # noqa: WPS433
+        from ideaflow.contracts import ContractError  # noqa: WPS433
+
+        try:
+            agent = LLMAgent()
+        except ContractError as error:
+            print(f"未就绪：{error.code} {error.message}")
+            return 2
+
     try:
-        result = check(args.case)
+        result = check(args.case, agent=agent)
     except Exception as exc:  # 调用失败、案例不存在、契约异常
         print(f"运行失败：{type(exc).__name__}: {exc}")
         return 2
 
-    real = result["real_agents"]
     print(f"案例 {result['case']}：快照 {result['requirements']} 项，"
           f"模块 {result['modules']} 个，规格状态 {result['status']}")
-    print("模型实现：" + ("、".join(real) if real else "仅 MockAgent（离线模板，未发起真实调用）"))
+    print(f"模型：{result['agent']} ｜ 真实调用 {result['ai_calls']} 次")
 
     if result["errors"]:
         print("契约校验：失败")
@@ -118,10 +135,11 @@ def main() -> int:
         return 1
 
     print("契约校验：通过")
-    if not real:
-        print("提示：需求模块尚未接入真实模型，本次产物来自 MockAgent；"
-              "接入后再跑本脚本即为真实调用验证。")
-        return 2 if args.require_real else 0
+    if args.require_real and result["ai_calls"] == 0:
+        print("未就绪：没有产生真实模型调用记录")
+        return 2
+    if not args.require_real:
+        print("提示：本次使用 MockAgent；加 --require-real 才会发起真实调用。")
     return 0
 
 

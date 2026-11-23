@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .agents import LLMAgent
 from .artifacts import deliver
 from .audit import audit_hash, audit_spec, save_audit
 from .constraints import deadline_days
@@ -224,7 +225,8 @@ def cmd_retry(args: argparse.Namespace) -> int:
 
 
 def cmd_case(args: argparse.Namespace) -> int:
-    result = run_case(args.file, args.out, confirm=args.confirm)
+    agent = LLMAgent() if args.live else None
+    result = run_case(args.file, args.out, confirm=args.confirm, agent=agent)
     tradeoffs = result.tradeoffs
     if args.json:
         print(json.dumps(tradeoffs, ensure_ascii=False, indent=2))
@@ -664,6 +666,8 @@ def build_parser() -> argparse.ArgumentParser:
     case.add_argument("--out", default="runs/case-campus-books", help="产物目录")
     case.add_argument("--confirm", default="案例演示", help="快照确认人")
     case.add_argument("--json", action="store_true", help="输出取舍 JSON")
+    case.add_argument("--live", action="store_true",
+                      help="调用真实模型（需 AI_API_KEY/AI_MODEL）")
     case.set_defaults(func=cmd_case)
     return parser
 

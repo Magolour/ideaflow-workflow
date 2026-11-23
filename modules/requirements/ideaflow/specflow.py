@@ -57,7 +57,8 @@ def load_case(name: str) -> str:
 
 def run(raw_text: str, constraints: list[str] | None = None, *,
         out_dir: str | Path = "runs", confirm: str = "产品经理",
-        case_name: str | None = None, progress: Progress | None = None) -> SpecFlowResult:
+        case_name: str | None = None, progress: Progress | None = None,
+        agent: Any | None = None) -> SpecFlowResult:
     say = progress or (lambda message: None)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     slug = slugify(raw_text, limit=16)
@@ -69,6 +70,8 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         suffix += 1
     run_id = target.name
     target.mkdir(parents=True, exist_ok=False)
+    if agent is not None and hasattr(agent, "bind_run"):
+        agent.bind_run(target)
 
     snapshot = build(raw_text, constraints=constraints).confirm(confirm)
     save(snapshot, target)
@@ -77,10 +80,14 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         f"{counts['requirement']} 条要求、{counts['constraint']} 条约束、"
         f"{counts['open']} 个待澄清")
 
-    race = run_race(snapshot, max_attempts=2)
+    race = run_race(snapshot, max_attempts=2, agent=agent)
     if race.failed_groups:
+        details = []
+        for group in race.failed_groups:
+            error = race.groups[group].error or {}
+            details.append(f"{group} {error.get('code', '')} {error.get('message', '')}".strip())
         raise ContractError("GROUP_FAILED",
-                            f"方案组 {', '.join(race.failed_groups)} 未能完成", "groups")
+                            "方案组未能完成：" + "；".join(details), "groups")
     save_race(race, target)
     say("两组草案：" + " ｜ ".join(
         f"{group} {draft.commit_days} 天" for group, draft in sorted(race.drafts.items())))
@@ -138,11 +145,17 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         "manifest": "manifest.json",
     }
     markdown = (target / files["markdown"]).read_text(encoding="utf-8")
+    log = target / "ai_calls.jsonl"
+    ai_calls = 0
+    if log.exists():
+        ai_calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
+                        if line.strip()])
     payload = _payload(run_id, snapshot, race, reviews, spec, audits, question, files,
-                       markdown, case_name)
+                       markdown, case_name, ai_calls=ai_calls)
     write_json(target / "flow.json", {
         "run_id": run_id, "flow": "spec", "case": case_name,
-        "status": spec.status, "spec": {"id": spec.spec_id, "version": spec.version,
+        "status": spec.status,
+        "ai_calls": ai_calls, "spec": {"id": spec.spec_id, "version": spec.version,
                                         "hash": spec.hash},
         "question": question["id"] if question else None,
         "created_at": now_iso(),
@@ -172,7 +185,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
 def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spec: Any,
              audits: list[dict[str, Any]], question: dict[str, Any] | None,
              files: dict[str, str], markdown: str,
-             case_name: str | None) -> dict[str, Any]:
+             case_name: str | None, *, ai_calls: int = 0) -> dict[str, Any]:
     items = [{
         "id": item["id"], "type": item["type"],
         "label": {"requirement": "明确要求", "constraint": "约束", "open": "待澄清"}[item["type"]],
@@ -211,6 +224,7 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
         "case": case_name,
         "title": _title(snapshot),
         "status": spec.status,
+        "ai_calls": ai_calls,
         "status_label": {"draft": "草稿", "awaiting_human": "待人工决策",
                          "confirmed": "已确认"}.get(spec.status, spec.status),
         "snapshot": {"id": snapshot.snapshot_id, "version": snapshot.version,
@@ -221,7 +235,8 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
                     "ranking": reviews["ranking"]},
         "spec": {
             "id": spec.spec_id, "version": spec.version, "hash": spec.hash,
-            "status": spec.status, "base_draft": spec.base_draft,
+            "status": spec.status,
+        "ai_calls": ai_calls, "base_draft": spec.base_draft,
             "architecture": spec.architecture,
             "decisions": spec.decisions, "modules": spec.modules,
             "mapping": spec.mapping, "acceptance": spec.acceptance,

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import time
@@ -184,6 +185,16 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"]["code"], "UNKNOWN_RUN")
 
+    def test_live_requires_server_key(self) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"AI_API_KEY": "", "DASHSCOPE_API_KEY": ""}):
+            status, body = self.post("/api/generate", {
+                "idea": "做一个排班工具", "live": True,
+            })
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"]["code"], "LLM_NOT_CONFIGURED")
+
     def test_case_endpoint(self) -> None:
         status, _, body = self.get("/api/case?name=campus-books-tight")
         self.assertEqual(status, 200)
@@ -212,6 +223,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(result["revisions"]), 1)
         self.assertEqual(result["question"]["id"], "HUMAN-Q-01")
         self.assertEqual(len(result["drafts"]), 2)
+        self.assertEqual(result["ai_calls"], 0)
 
         run_id = quote(result["run_id"])
         status, headers, body = self.get(
