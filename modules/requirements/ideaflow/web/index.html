@@ -67,6 +67,13 @@
           </div>
         </div>
 
+        <label class="live-toggle">
+          <input type="checkbox" id="liveModel" />
+          <span>使用真实模型
+            <em>需服务端配置 AI_API_KEY / AI_MODEL</em>
+          </span>
+        </label>
+
         <details class="advanced" id="advancedOptions">
           <summary>高级设置</summary>
           <div class="range">
@@ -84,7 +91,7 @@
           <span class="btn-label">生成设计文档</span>
           <span class="btn-tail"><kbd>Ctrl</kbd><kbd>↵</kbd></span>
         </button>
-        <p class="rail-hint">离线运行，不需要 API Key；同一输入可重复复现结果结构。</p>
+        <p class="rail-hint">默认离线；勾选“使用真实模型”时，服务端需配置 AI_API_KEY 与 AI_MODEL。</p>
       </form>
 
       <div class="examples">
@@ -143,7 +150,7 @@
         <p class="eyebrow">Failed</p>
         <h2>生成没有完成</h2>
         <p class="error-msg" id="errorMsg"></p>
-        <p class="error-hint">可以调整输入后重试；如果是配置问题，检查端口是否被占用或运行目录权限。</p>
+        <p class="error-hint" id="errorHint">可以调整输入后重试；如果是配置问题，检查端口是否被占用或运行目录权限。</p>
         <button type="button" class="btn-ghost" id="btnRetry">重新生成</button>
       </div>
 
@@ -162,6 +169,7 @@
           </div>
         </header>
 
+        <div class="run-warnings" id="runWarnings" hidden></div>
         <div class="metrics" id="metrics"></div>
 
         <div class="tabs" role="tablist" id="tabs">

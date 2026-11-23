@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import threading
 import time
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
+from .agents import LLMAgent
 from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, SEVERITY_LABEL,
                         STANCE_LABEL, ContractError)
 from .pipeline import run
@@ -70,6 +72,7 @@ class Job:
     threshold: float
     flow: str = "proposal"
     case: str | None = None
+    live: bool = False
     state: str = "queued"
     logs: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, str] | None = None
@@ -92,6 +95,7 @@ class Job:
             "state": self.state,
             "flow": self.flow,
             "case": self.case,
+            "live": self.live,
             "idea": self.idea,
             "constraints": list(self.constraints),
             "logs": list(self.logs),
@@ -151,10 +155,17 @@ class JobStore:
             self._execute_spec(job, progress)
             return
 
+        agent = None
+        if job.live:
+            try:
+                agent = LLMAgent()
+            except ContractError as error:
+                self._fail(job, error.code, error.message, error.path)
+                return
         try:
             result = run(job.idea, constraints=job.constraints, out_dir=self.runs_dir,
                          answers=job.answers, max_rounds=job.max_rounds,
-                         threshold=job.threshold, progress=progress)
+                         threshold=job.threshold, progress=progress, agent=agent)
         except ContractError as error:
             self._fail(job, error.code, error.message, error.path)
             return
@@ -175,10 +186,17 @@ class JobStore:
         job.state = "done"
 
     def _execute_spec(self, job: Job, progress: Any) -> None:
+        agent = None
+        if job.live:
+            try:
+                agent = LLMAgent()
+            except ContractError as error:
+                self._fail(job, error.code, error.message, error.path)
+                return
         try:
             raw = load_case(job.case) if job.case else job.idea
             result = run_spec(raw, job.constraints, out_dir=self.runs_dir,
-                              case_name=job.case, progress=progress)
+                              case_name=job.case, progress=progress, agent=agent)
         except ContractError as error:
             self._fail(job, error.code, error.message, error.path)
             return
@@ -262,6 +280,7 @@ def _result_payload(result: Any) -> dict[str, Any]:
         "decisions": board["decisions"],
         "objections": objections,
         "questions": questions,
+        "warnings": result.report.get("warnings", []),
         "assumptions": board["assumptions"],
         "work_packages": board["work_packages"],
         "non_goals": board["non_goals"],
@@ -284,6 +303,10 @@ def _clean_text(value: Any, *, field: str, limit: int) -> str:
 def _parse_generate(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ApiError(400, "INVALID_BODY", "请求体必须是 JSON 对象")
+
+    live = bool(payload.get("live"))
+    if live and not (os.getenv("AI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")):
+        raise ApiError(400, "LLM_NOT_CONFIGURED", "服务端未配置 AI_API_KEY，无法使用真实模型")
 
     flow = payload.get("flow", "proposal")
     if flow not in ("proposal", "spec"):
@@ -340,7 +363,7 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
 
     return {"idea": idea or case or "", "constraints": constraints, "answers": answers,
             "max_rounds": max_rounds, "threshold": round(threshold, 2),
-            "flow": flow, "case": case}
+            "flow": flow, "case": case, "live": live}
 
 
 # ---------------------------------------------------------------- HTTP 层

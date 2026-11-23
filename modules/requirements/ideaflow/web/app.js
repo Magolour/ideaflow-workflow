@@ -44,6 +44,7 @@ const els = {
   timeline: $("#timeline"),
   errorPanel: $("#errorPanel"),
   errorMsg: $("#errorMsg"),
+  errorHint: $("#errorHint"),
   retry: $("#btnRetry"),
   resultPanel: $("#resultPanel"),
   resultTitle: $("#resultTitle"),
@@ -87,6 +88,8 @@ const els = {
   specDlMd: $("#specDlMd"),
   specDlJson: $("#specDlJson"),
   specPrint: $("#specPrint"),
+  liveModel: $("#liveModel"),
+  runWarnings: $("#runWarnings"),
 };
 
 /* ------------------------------ 工具 ------------------------------ */
@@ -310,6 +313,13 @@ function renderResult(data) {
   els.resultTitle.textContent = heading || data.idea;
   els.resultSub.textContent = `运行 ${data.run_id} · ${formatTime(data.created_at)} · 角色实现 ${data.agent || "mock"}`;
 
+  const warnings = data.warnings || [];
+  els.runWarnings.hidden = warnings.length === 0;
+  els.runWarnings.innerHTML = warnings.map((row) => `<div class="warn-row">
+      <b>${escapeHtml(row.role)}</b> 在 ${escapeHtml(row.stage)} 阶段被跳过：
+      ${escapeHtml(row.code)} ${escapeHtml(row.message)}
+    </div>`).join("");
+
   els.metrics.innerHTML = metricBlock(data);
   els.paper.innerHTML = data.html;
   els.countOptions.textContent = data.options.length;
@@ -362,6 +372,15 @@ function showError(error) {
   const code = error.code || "ERROR";
   const path = error.path ? `（位置：${error.path}）` : "";
   els.errorMsg.textContent = `${code} · ${error.message}${path}`;
+  const hints = {
+    LLM_NOT_CONFIGURED: "在服务端设置 AI_API_KEY 与 AI_MODEL 后重试；或取消勾选“使用真实模型”。",
+    LLM_UNAVAILABLE: "真实模型调用失败，可查看 run.json 与 ai_calls.jsonl，或改用离线模式。",
+    LLM_BAD_OUTPUT: "模型输出未通过契约校验，可降低温度、换模型后重试；其余角色会继续。",
+  };
+  els.errorHint.textContent = hints[code]
+    || (code === "NETWORK"
+      ? "请确认本地服务已启动，且端口未被占用。"
+      : "可以调整输入后重试；如果是配置问题，检查运行目录权限。");
   showOnly(els.errorPanel);
 }
 
@@ -385,14 +404,16 @@ async function generate() {
   showOnly(els.runPanel);
   startClock();
 
+  const live = Boolean(els.liveModel && els.liveModel.checked);
   const body = state.mode === "spec"
-    ? { flow: "spec", idea, constraints: state.constraints, case: state.case }
+    ? { flow: "spec", idea, constraints: state.constraints, case: state.case, live }
     : {
       flow: "proposal",
       idea,
       constraints: state.constraints,
       max_rounds: Number(els.rounds.value),
       threshold: Number(els.threshold.value) / 100,
+      live,
     };
 
   try {
@@ -403,12 +424,19 @@ async function generate() {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload?.error?.message || `服务返回 ${response.status}`);
+      const failure = new Error(payload?.error?.message || `服务返回 ${response.status}`);
+      failure.code = payload?.error?.code || `HTTP_${response.status}`;
+      failure.path = payload?.error?.path || "";
+      throw failure;
     }
     state.jobId = payload.job_id;
     pollJob();
   } catch (error) {
-    showError({ code: "NETWORK", message: `${error.message}。请确认本地服务已启动。` });
+    showError({
+      code: error.code || "NETWORK",
+      message: error.code ? error.message : `${error.message}。请确认本地服务已启动。`,
+      path: error.path || "",
+    });
   }
 }
 
@@ -546,7 +574,8 @@ function renderSpecResult(data) {
 
   els.specTitle.textContent = `设计规格：${data.title}`;
   els.specSub.textContent = `${spec.id} v${spec.version} ｜ 内容哈希 ${spec.hash.slice(0, 12)}… `
-    + `｜ 快照 ${data.snapshot.id} v${data.snapshot.version} ｜ ${data.status_label}`;
+    + `｜ 快照 ${data.snapshot.id} v${data.snapshot.version} ｜ ${data.status_label}`
+    + (data.ai_calls ? ` ｜ 模型调用 ${data.ai_calls} 次` : "");
 
   if (data.question) {
     els.specBanner.className = "spec-banner";
@@ -920,6 +949,7 @@ const presetCase = query.get("case");
 const autoRun = query.get("auto") === "1";
 
 setMode(query.get("mode") === "spec" ? "spec" : "proposal");
+if (query.get("live") === "1") els.liveModel.checked = true;
 bind();
 renderChips();
 checkServer();

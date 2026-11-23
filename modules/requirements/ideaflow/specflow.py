@@ -141,11 +141,17 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         "manifest": "manifest.json",
     }
     markdown = (target / files["markdown"]).read_text(encoding="utf-8")
+    log = target / "ai_calls.jsonl"
+    ai_calls = 0
+    if log.exists():
+        ai_calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
+                        if line.strip()])
     payload = _payload(run_id, snapshot, race, reviews, spec, audits, question, files,
-                       markdown, case_name)
+                       markdown, case_name, ai_calls=ai_calls)
     write_json(target / "flow.json", {
         "run_id": run_id, "flow": "spec", "case": case_name,
-        "status": spec.status, "spec": {"id": spec.spec_id, "version": spec.version,
+        "status": spec.status,
+        "ai_calls": ai_calls, "spec": {"id": spec.spec_id, "version": spec.version,
                                         "hash": spec.hash},
         "question": question["id"] if question else None,
         "created_at": now_iso(),
@@ -175,7 +181,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
 def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spec: Any,
              audits: list[dict[str, Any]], question: dict[str, Any] | None,
              files: dict[str, str], markdown: str,
-             case_name: str | None) -> dict[str, Any]:
+             case_name: str | None, *, ai_calls: int = 0) -> dict[str, Any]:
     items = [{
         "id": item["id"], "type": item["type"],
         "label": {"requirement": "明确要求", "constraint": "约束", "open": "待澄清"}[item["type"]],
@@ -214,6 +220,7 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
         "case": case_name,
         "title": _title(snapshot),
         "status": spec.status,
+        "ai_calls": ai_calls,
         "status_label": {"draft": "草稿", "awaiting_human": "待人工决策",
                          "confirmed": "已确认"}.get(spec.status, spec.status),
         "snapshot": {"id": snapshot.snapshot_id, "version": snapshot.version,
@@ -224,7 +231,8 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
                     "ranking": reviews["ranking"]},
         "spec": {
             "id": spec.spec_id, "version": spec.version, "hash": spec.hash,
-            "status": spec.status, "base_draft": spec.base_draft,
+            "status": spec.status,
+        "ai_calls": ai_calls, "base_draft": spec.base_draft,
             "architecture": spec.architecture,
             "decisions": spec.decisions, "modules": spec.modules,
             "mapping": spec.mapping, "acceptance": spec.acceptance,
