@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ideaflow.agents import LLMAgent, STAGE_HINTS
 from ideaflow.contracts import ContractError
@@ -131,6 +134,51 @@ class LLMAgentTest(unittest.TestCase):
             agent.bind_run(Path(folder) / "run")
             agent.respond("diverge", ROLE, {"idea": "二手书", "constraints": []})
             self.assertTrue((Path(folder) / "run" / "ai_calls.jsonl").exists())
+
+    def test_payload_supports_provider_options(self) -> None:
+        captured = {}
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(request, timeout):
+            captured.update(json.loads(request.data.decode("utf-8")))
+            body = {"choices": [{"message": {"content": DIVERGE}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        env = {"AI_JSON_MODE": "1", "AI_EXTRA_BODY": '{"enable_thinking": false}'}
+        with patch.dict(os.environ, env), patch("urllib.request.urlopen", fake_urlopen):
+            agent = LLMAgent(api_key="k", model="qwen-plus")
+            agent.respond("diverge", ROLE, {"idea": "二手书", "constraints": []})
+        self.assertEqual(captured["response_format"], {"type": "json_object"})
+        self.assertFalse(captured["enable_thinking"])
+        self.assertEqual(captured["model"], "qwen-plus")
+
+    def test_json_mode_can_be_disabled(self) -> None:
+        captured = {}
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(request, timeout):
+            captured.update(json.loads(request.data.decode("utf-8")))
+            body = {"choices": [{"message": {"content": DIVERGE}}]}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        with patch.dict(os.environ, {"AI_JSON_MODE": "0"}), \
+                patch("urllib.request.urlopen", fake_urlopen):
+            agent = LLMAgent(api_key="k", model="qwen-plus")
+            agent.respond("diverge", ROLE, {"idea": "二手书", "constraints": []})
+        self.assertNotIn("response_format", captured)
 
     def test_missing_credentials(self) -> None:
         with self.assertRaises(ContractError) as caught:

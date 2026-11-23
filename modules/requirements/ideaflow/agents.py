@@ -508,7 +508,24 @@ class LLMAgent:
         self.retries = max(0, int(retries))
         self.audit_path = Path(audit_path) if audit_path else None
         self.transport = transport
+        self.json_mode = os.getenv("AI_JSON_MODE", "1").lower() not in ("0", "false")
+        self.extra_body = self._load_extra_body()
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _load_extra_body() -> dict[str, Any]:
+        raw = os.getenv("AI_EXTRA_BODY", "").strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            raise ContractError("LLM_NOT_CONFIGURED",
+                                "AI_EXTRA_BODY 不是合法 JSON", "AI_EXTRA_BODY") from None
+        if not isinstance(data, dict):
+            raise ContractError("LLM_NOT_CONFIGURED",
+                                "AI_EXTRA_BODY 必须是 JSON 对象", "AI_EXTRA_BODY")
+        return data
 
     def bind_run(self, run_dir: str | Path) -> None:
         """把审计日志落到某次运行的目录；由 pipeline / specflow 调用。"""
@@ -571,12 +588,14 @@ class LLMAgent:
               stage: str) -> tuple[str, dict[str, Any]]:
         if self.transport is not None:
             return self.transport(messages, temperature, True)
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
         }
+        if self.json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        payload.update(self.extra_body)
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),

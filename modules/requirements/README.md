@@ -483,6 +483,20 @@ python -m ideaflow.cli "做一个校园二手书交易小程序" --live
 python -m ideaflow.spec_cli case --live
 ```
 
+千问（DashScope 的 OpenAI 兼容模式）示例：
+
+```powershell
+$env:AI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:AI_MODEL="qwen-plus"          # 或 qwen-max / qwen3-max
+$env:AI_EXTRA_BODY='{"enable_thinking": false}'   # qwen3 系列建议关闭思考
+```
+
+注意：
+
+- `AI_BASE_URL` 要带 `/v1`，代码会再拼 `/chat/completions`；
+- 千问部分模型不支持 `response_format`，若返回 400，加 `AI_JSON_MODE=0`；
+- qwen3 系列默认思考模式，`content` 可能为空，用 `AI_EXTRA_BODY` 关闭思考。
+
 | 能力 | 说明 |
 | --- | --- |
 | 结构化重试 | 输出不是合法 JSON 或缺字段时，把校验错误回注给模型重试，仍失败则报 `LLM_BAD_OUTPUT` |
