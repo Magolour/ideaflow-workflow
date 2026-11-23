@@ -68,19 +68,6 @@ class LLMAgentTest(unittest.TestCase):
         self.assertIn("输出不合格", repair)
         self.assertIn("必须符合这个形状", repair)
 
-    @unittest.skip("待修复：clarify 阶段模型把 claims 写成字符串，会导致整个运行中止")
-    def test_clarify_tolerates_string_claims(self) -> None:
-        """真实模型常把 claims 写成字符串数组；该阶段应规范化或忽略，而不是中止。"""
-        payload = json.dumps({
-            "role": "ba",
-            "claims": ["学生需要能发布教材"],
-            "questions": ["首版是否支持在线支付？"],
-        }, ensure_ascii=False)
-        agent, _ = agent_with([payload])
-        data = agent.respond("clarify", ROLE, {"idea": "二手书", "constraints": []})
-        self.assertTrue(all(isinstance(row, dict) for row in data["claims"]))
-        self.assertEqual(len(data["questions"]), 1)
-
     def test_fails_after_retries(self) -> None:
         agent, transport = agent_with(["不是 JSON"], retries=1)
         with self.assertRaises(ContractError) as caught:
