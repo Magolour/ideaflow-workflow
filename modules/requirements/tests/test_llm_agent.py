@@ -162,6 +162,37 @@ class LLMAgentTest(unittest.TestCase):
             agent.respond("synthesize", ROLE,
                           {"idea": "x", "claims": [{"id": "CLM-001"}]})
 
+    def test_draft_normalizes_cost_and_satisfies(self) -> None:
+        reply = json.dumps({
+            "decisions": [{
+                "requirement_ids": ["R-01"],
+                "choice": "最小实现",
+                "reason": "先跑通",
+                "cost_days": "2 天",
+                "satisfies": "完全满足",
+            }],
+        }, ensure_ascii=False)
+        agent, _ = agent_with([reply], retries=0)
+        context = {"snapshot": {"items": [
+            {"id": "R-01", "type": "requirement", "text": "发布教材"}]}}
+        data = agent.respond("draft", ROLE, context)
+        self.assertEqual(data["decisions"][0]["cost_days"], 2.0)
+        self.assertEqual(data["decisions"][0]["satisfies"], "full")
+
+    def test_draft_missing_requirement_is_retried(self) -> None:
+        reply = json.dumps({"decisions": [{
+            "requirement_ids": ["R-01"], "choice": "x", "cost_days": 1,
+        }]}, ensure_ascii=False)
+        agent, transport = agent_with([reply], retries=1)
+        context = {"snapshot": {"items": [
+            {"id": "R-01", "type": "requirement", "text": "发布"},
+            {"id": "R-02", "type": "requirement", "text": "搜索"}]}}
+        with self.assertRaises(ContractError) as caught:
+            agent.respond("draft", ROLE, context)
+        self.assertEqual(caught.exception.code, "LLM_BAD_OUTPUT")
+        self.assertIn("DRAFT_COVERAGE", caught.exception.message)
+        self.assertEqual(len(transport.calls), 2)
+
     def test_draft_requires_decisions(self) -> None:
         agent, _ = agent_with([json.dumps({"decisions": []})])
         with self.assertRaises(ContractError) as caught:

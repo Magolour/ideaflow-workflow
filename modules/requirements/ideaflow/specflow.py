@@ -82,8 +82,12 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
 
     race = run_race(snapshot, max_attempts=2, agent=agent)
     if race.failed_groups:
+        details = []
+        for group in race.failed_groups:
+            error = race.groups[group].error or {}
+            details.append(f"{group} {error.get('code', '')} {error.get('message', '')}".strip())
         raise ContractError("GROUP_FAILED",
-                            f"方案组 {', '.join(race.failed_groups)} 未能完成", "groups")
+                            "方案组未能完成：" + "；".join(details), "groups")
     save_race(race, target)
     say("两组草案：" + " ｜ ".join(
         f"{group} {draft.commit_days} 天" for group, draft in sorted(race.drafts.items())))

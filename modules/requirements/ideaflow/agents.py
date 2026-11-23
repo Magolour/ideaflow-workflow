@@ -649,9 +649,7 @@ class LLMAgent:
                                if isinstance(row, dict) and row.get("option") in known]
             return validate_stances(data, role_id=role.id, known_options=known)
         if stage == "draft":
-            if not isinstance(data.get("decisions"), list) or not data["decisions"]:
-                raise ContractError("EMPTY_DRAFT", "草案没有 decisions", "decisions")
-            return data
+            return self._normalize_draft(data, context)
 
         for key in ("claims", "assumptions", "objections", "questions"):
             data.setdefault(key, [])
@@ -735,6 +733,57 @@ class LLMAgent:
                 raise ContractError("EMPTY_REVIEWS",
                                     "必须复核至少一条自己的论点，claim 用给定编号",
                                     "reviews")
+        return data
+
+    @staticmethod
+    def _normalize_draft(data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        items = context.get("snapshot", {}).get("items", [])
+        requirements = {item["id"]: item["text"] for item in items
+                        if item.get("type") == "requirement"}
+        rows = data.get("decisions")
+        if not isinstance(rows, list) or not rows:
+            raise ContractError("EMPTY_DRAFT", "草案没有 decisions", "decisions")
+        satisfies_map = {"full": "full", "完全满足": "full",
+                         "partial": "partial", "部分满足": "partial",
+                         "declined": "declined", "不满足": "declined"}
+        rows = [row for row in rows if isinstance(row, dict)
+                and any(str(item) in requirements
+                        for item in (row.get("requirement_ids") or []))]
+        if not rows:
+            raise ContractError("EMPTY_DRAFT", "草案没有可用的需求决策", "decisions")
+        data["decisions"] = rows
+        covered: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            refs = [str(item) for item in (row.get("requirement_ids") or [])
+                    if str(item) in requirements]
+            if not refs:
+                continue
+            covered.update(refs)
+            row["requirement_ids"] = refs
+            raw_cost = row.get("cost_days")
+            if isinstance(raw_cost, bool):
+                raw_cost = None
+            if isinstance(raw_cost, str):
+                match = re.search(r"\d+(?:\.\d+)?", raw_cost)
+                raw_cost = float(match.group()) if match else None
+            try:
+                row["cost_days"] = float(raw_cost)
+            except (TypeError, ValueError):
+                row["cost_days"] = 2.0
+            if row["cost_days"] <= 0:
+                row["cost_days"] = 1.0
+            row["satisfies"] = satisfies_map.get(str(row.get("satisfies") or "").strip(),
+                                                 "full")
+            row["choice"] = (str(row.get("choice") or "").strip()
+                             or f"{requirements[refs[0]]}的最小实现")
+            row["reason"] = str(row.get("reason") or "").strip() or "模型未说明理由"
+            row["risk"] = str(row.get("risk") or "").strip()
+        missing = sorted(set(requirements) - covered)
+        if missing:
+            raise ContractError("DRAFT_COVERAGE",
+                                f"草案遗漏需求：{', '.join(missing)}", "decisions")
         return data
 
     # ---------- 审计 ----------
