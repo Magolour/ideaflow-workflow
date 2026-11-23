@@ -93,6 +93,26 @@ class LLMAgentTest(unittest.TestCase):
         self.assertNotIn('"claims"', STAGE_HINTS["clarify"])
         self.assertIn("questions", STAGE_HINTS["clarify"])
 
+    def test_critique_drops_unknown_targets(self) -> None:
+        reply = json.dumps({
+            "role": "ba",
+            "objections": [{"target": "CLM-999", "text": "异议",
+                            "consequence": "后果", "severity": "major"}],
+        }, ensure_ascii=False)
+        agent, _ = agent_with([reply])
+        data = agent.respond("critique", ROLE,
+                             {"claims": [{"id": "CLM-001", "role": "ba"}]})
+        self.assertEqual(data["objections"], [])
+
+    def test_review_drops_foreign_claims(self) -> None:
+        reply = json.dumps({
+            "role": "ba",
+            "reviews": [{"claim": "CLM-999", "verdict": "preserved", "note": "x"}],
+        }, ensure_ascii=False)
+        agent, _ = agent_with([reply])
+        data = agent.respond("review", ROLE, {"claims": [{"id": "CLM-001"}]})
+        self.assertEqual(data["reviews"], [])
+
     def test_synthesize_is_validated(self) -> None:
         bad = json.dumps({"options": [{"key": "A", "name": "唯一方案", "scope": ["x"],
                                       "cost_days": "1 天", "risk": "低",

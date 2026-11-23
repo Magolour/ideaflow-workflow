@@ -78,7 +78,8 @@ def run(idea: str, *, constraints: list[str] | None = None,
     def warn(stage: str, role: Any, error: ContractError) -> None:
         warnings.append({"stage": stage, "role": role.id,
                          "code": error.code, "message": error.message})
-        say(f"  ! {role.name} 在 {stage} 阶段失败，已跳过：{error.code}")
+        detail = f"{error.code} {error.message}".strip()
+        say(f"  ! {role.name} 在 {stage} 阶段失败，已跳过：{detail}")
 
     def safe_respond(stage: str, role: Any, context: dict[str, Any]) -> dict[str, Any] | None:
         """单个角色失败不终止整条讨论；记警告后跳过该角色。"""
@@ -315,7 +316,11 @@ def run(idea: str, *, constraints: list[str] | None = None,
         review_output = safe_output("review", role, raw)
         if review_output is None:
             continue
-        board.apply_reviews(role.id, review_output["reviews"])
+        own_ids = {row["id"] for row in own}
+        reviews = [row for row in review_output["reviews"] if row["claim"] in own_ids]
+        if not reviews:
+            continue
+        board.apply_reviews(role.id, reviews)
     for issue in integrity_issues(board):
         board.objections.append({
             "id": f"OBJ-{len(board.objections) + 1:03d}",

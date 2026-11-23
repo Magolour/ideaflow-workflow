@@ -645,6 +645,8 @@ class LLMAgent:
             return validate_synthesis(data, known_claims=known)
         if stage == "sign":
             known = {row["id"] for row in context.get("options", [])}
+            data["stances"] = [row for row in (data.get("stances") or [])
+                               if isinstance(row, dict) and row.get("option") in known]
             return validate_stances(data, role_id=role.id, known_options=known)
         if stage == "draft":
             if not isinstance(data.get("decisions"), list) or not data["decisions"]:
@@ -656,6 +658,20 @@ class LLMAgent:
             if not isinstance(data[key], list):
                 raise ContractError("INVALID_OUTPUT", f"{key} 必须是数组", key)
         data["role"] = role.id
+
+        # 模型常见的形状偏差先归一化，避免整条 run 因一个字段中止
+        data["claims"] = [row for row in data["claims"]
+                          if isinstance(row, dict) and str(row.get("text") or "").strip()]
+        for row in data["claims"]:
+            row["assumes"] = []
+            if row.get("evidence") not in ("fact", "rule", "value", "assumption"):
+                row["evidence"] = "rule"
+        data["assumptions"] = [row for row in data["assumptions"]
+                               if isinstance(row, dict) and str(row.get("text") or "").strip()]
+        for row in data["assumptions"]:
+            row.setdefault("verify_by", "待验证")
+        data["objections"] = [row for row in data["objections"] if isinstance(row, dict)]
+        data["questions"] = [str(row).strip() for row in data["questions"] if str(row).strip()]
 
         if stage == "draft":
             return data
@@ -669,23 +685,43 @@ class LLMAgent:
                 raise ContractError("EMPTY_CLARIFY", "澄清阶段没有提出问题", "questions")
             data["questions"] = questions[:3]
         if stage == "critique":
-            for index, row in enumerate(data["objections"]):
-                if not isinstance(row, dict) or not row.get("target"):
-                    raise ContractError("INVALID_OUTPUT", "异议必须指向具体主张",
-                                        f"objections[{index}]")
-                row.setdefault("severity", "major")
+            known = {row["id"] for row in context.get("claims", [])}
+            kept = []
+            for row in data["objections"]:
+                target = str(row.get("target") or "").strip()
+                if target not in known:
+                    continue
+                row["target"] = target
+                row["severity"] = (row.get("severity")
+                                   if row.get("severity") in ("blocking", "major", "minor")
+                                   else "major")
+                row.setdefault("consequence", "未说明后果")
+                kept.append(row)
+            data["objections"] = kept
         if stage == "respond":
-            for index, row in enumerate(data.get("responses", [])):
-                if not isinstance(row, dict) or row.get("position") not in (
-                        "accept", "refute", "conditional"):
-                    raise ContractError("INVALID_OUTPUT", "回应立场不合法",
-                                        f"responses[{index}]")
+            known = {row["id"] for row in context.get("objections", [])}
+            kept = []
+            for row in data.get("responses", []):
+                if not isinstance(row, dict) or row.get("objection") not in known:
+                    continue
+                if row.get("position") not in ("accept", "refute", "conditional"):
+                    continue
+                row.setdefault("argument", "未提供理由")
+                if row.get("evidence") not in ("fact", "rule", "value", "assumption"):
+                    row["evidence"] = "rule"
+                kept.append(row)
+            data["responses"] = kept
         if stage == "review":
-            for index, row in enumerate(data.get("reviews", [])):
-                if not isinstance(row, dict) or row.get("verdict") not in (
-                        "preserved", "deferred", "omitted", "distorted"):
-                    raise ContractError("INVALID_OUTPUT", "复核结论不合法",
-                                        f"reviews[{index}]")
+            known = {row["id"] for row in context.get("claims", [])}
+            kept = []
+            for row in data.get("reviews", []):
+                if not isinstance(row, dict) or row.get("claim") not in known:
+                    continue
+                if row.get("verdict") not in ("preserved", "deferred", "omitted", "distorted"):
+                    continue
+                row.setdefault("note", "未说明")
+                kept.append(row)
+            data["reviews"] = kept
         return data
 
     # ---------- 审计 ----------

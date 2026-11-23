@@ -22,6 +22,17 @@ class FailingRoleAgent(MockAgent):
         return super().respond(stage, role, context)
 
 
+class ForeignReviewAgent(MockAgent):
+    """复核时引用了别人的论点：应被过滤，而不是中止整条 run。"""
+
+    def respond(self, stage, role, context):
+        if stage == "review" and role.id == "user":
+            return {"role": "user", "claims": [], "assumptions": [], "objections": [],
+                    "questions": [],
+                    "reviews": [{"claim": "CLM-001", "verdict": "preserved", "note": "x"}]}
+        return super().respond(stage, role, context)
+
+
 class IsolationTest(unittest.TestCase):
     def run_with(self, stage: str, role_id: str) -> dict:
         with tempfile.TemporaryDirectory() as folder:
@@ -41,6 +52,12 @@ class IsolationTest(unittest.TestCase):
         report = self.run_with("clarify", "ba")
         self.assertEqual(report["warnings"][0]["stage"], "clarify")
         self.assertEqual(report["counts"]["rounds"], 1)
+
+    def test_foreign_review_is_filtered(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            result = run("做一个校园二手书交易小程序，支持发布与搜索",
+                         out_dir=folder, agent=ForeignReviewAgent())
+            self.assertTrue((result.out_dir / "proposal.md").exists())
 
 
 if __name__ == "__main__":
