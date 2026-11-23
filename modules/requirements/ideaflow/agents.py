@@ -471,11 +471,11 @@ STAGE_RULES = {
     "clarify": "只问没有答复就无法继续的问题，最多 3 个。",
     "diverge": "从本角色关注点出发，给 2—3 条有依据的主张，至少 1 条假设。",
     "critique": "只针对其他角色的具体主张提出异议，必须写后果与严重级。",
-    "respond": "逐条回应指到本角色的异议，立场三选一，反对要写理由。",
+    "respond": "逐条回应指到本角色的异议，至少 1 条；objection 只能用给定编号，立场三选一。",
     "synthesize": "至少 2 个候选方案、2 个工作包；只能引用给定的主张编号。",
     "sign": "对每个候选方案给出四态立场之一；有条件必须写条件，反对必须写理由。",
     "counterexample": "提出一个能推翻当前共识的具体反例。",
-    "review": "只复核给定的主张，逐条给出 preserved/deferred/omitted/distorted。",
+    "review": "至少复核 1 条给定主张；claim 只能用给定编号，结论四选一。",
     "draft": "覆盖快照里的每一条明确要求；只能引用给定编号；成本必须大于 0。",
 }
 
@@ -675,6 +675,8 @@ class LLMAgent:
 
         if stage == "draft":
             return data
+        if stage == "diverge" and not data["claims"]:
+            raise ContractError("EMPTY_DIVERGE", "至少给出 1 条主张", "claims")
         if stage == "clarify":
             # 模型常把 claims 写成字符串数组；澄清阶段不产生主张，直接丢弃非对象项
             for key in ("claims", "assumptions", "objections"):
@@ -698,6 +700,9 @@ class LLMAgent:
                 row.setdefault("consequence", "未说明后果")
                 kept.append(row)
             data["objections"] = kept
+            if not kept and not data["claims"] and not data["questions"]:
+                raise ContractError("EMPTY_CRITIQUE",
+                                    "至少提出一条针对给定论点的异议", "objections")
         if stage == "respond":
             known = {row["id"] for row in context.get("objections", [])}
             kept = []
@@ -711,6 +716,10 @@ class LLMAgent:
                     row["evidence"] = "rule"
                 kept.append(row)
             data["responses"] = kept
+            if not kept:
+                raise ContractError("EMPTY_RESPONSES",
+                                    "必须回应至少一条给定异议，objection 用给定编号",
+                                    "responses")
         if stage == "review":
             known = {row["id"] for row in context.get("claims", [])}
             kept = []
@@ -722,6 +731,10 @@ class LLMAgent:
                 row.setdefault("note", "未说明")
                 kept.append(row)
             data["reviews"] = kept
+            if not kept:
+                raise ContractError("EMPTY_REVIEWS",
+                                    "必须复核至少一条自己的论点，claim 用给定编号",
+                                    "reviews")
         return data
 
     # ---------- 审计 ----------

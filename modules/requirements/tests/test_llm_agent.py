@@ -93,25 +93,57 @@ class LLMAgentTest(unittest.TestCase):
         self.assertNotIn('"claims"', STAGE_HINTS["clarify"])
         self.assertIn("questions", STAGE_HINTS["clarify"])
 
+    def test_empty_responses_trigger_retry(self) -> None:
+        empty = json.dumps({"role": "ba", "responses": []})
+        valid = json.dumps({"role": "ba", "responses": [
+            {"objection": "OBJ-001", "position": "accept",
+             "argument": "接受并补齐", "evidence": "rule"}]}, ensure_ascii=False)
+        agent, transport = agent_with([empty, valid])
+        data = agent.respond("respond", ROLE, {"objections": [{"id": "OBJ-001"}]})
+        self.assertEqual(len(data["responses"]), 1)
+        self.assertEqual(len(transport.calls), 2)
+        self.assertIn("EMPTY_RESPONSES", transport.calls[1]["messages"][-1]["content"])
+
+    def test_empty_reviews_trigger_retry(self) -> None:
+        empty = json.dumps({"role": "ba", "reviews": []})
+        valid = json.dumps({"role": "ba", "reviews": [
+            {"claim": "CLM-001", "verdict": "preserved", "note": "未失真"}]},
+            ensure_ascii=False)
+        agent, transport = agent_with([empty, valid])
+        data = agent.respond("review", ROLE, {"claims": [{"id": "CLM-001"}]})
+        self.assertEqual(len(data["reviews"]), 1)
+        self.assertEqual(len(transport.calls), 2)
+
     def test_critique_drops_unknown_targets(self) -> None:
-        reply = json.dumps({
+        bad = json.dumps({
             "role": "ba",
             "objections": [{"target": "CLM-999", "text": "异议",
                             "consequence": "后果", "severity": "major"}],
         }, ensure_ascii=False)
-        agent, _ = agent_with([reply])
+        good = json.dumps({
+            "role": "ba",
+            "objections": [{"target": "CLM-001", "text": "异议",
+                            "consequence": "后果", "severity": "major"}],
+        }, ensure_ascii=False)
+        agent, transport = agent_with([bad, good])
         data = agent.respond("critique", ROLE,
                              {"claims": [{"id": "CLM-001", "role": "ba"}]})
-        self.assertEqual(data["objections"], [])
+        self.assertEqual([row["target"] for row in data["objections"]], ["CLM-001"])
+        self.assertIn("EMPTY_CRITIQUE", transport.calls[1]["messages"][-1]["content"])
 
     def test_review_drops_foreign_claims(self) -> None:
-        reply = json.dumps({
+        bad = json.dumps({
             "role": "ba",
             "reviews": [{"claim": "CLM-999", "verdict": "preserved", "note": "x"}],
         }, ensure_ascii=False)
-        agent, _ = agent_with([reply])
+        good = json.dumps({
+            "role": "ba",
+            "reviews": [{"claim": "CLM-001", "verdict": "preserved", "note": "未失真"}],
+        }, ensure_ascii=False)
+        agent, transport = agent_with([bad, good])
         data = agent.respond("review", ROLE, {"claims": [{"id": "CLM-001"}]})
-        self.assertEqual(data["reviews"], [])
+        self.assertEqual([row["claim"] for row in data["reviews"]], ["CLM-001"])
+        self.assertIn("EMPTY_REVIEWS", transport.calls[1]["messages"][-1]["content"])
 
     def test_synthesize_is_validated(self) -> None:
         bad = json.dumps({"options": [{"key": "A", "name": "唯一方案", "scope": ["x"],
