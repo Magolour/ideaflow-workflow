@@ -305,7 +305,8 @@ def run(idea: str, *, constraints: list[str] | None = None,
     adopted = [claim_id for row in board.decisions for claim_id in row.get("based_on", [])]
     not_adopted = [row["claim"] for row in board.not_adopted]
     for role in DISCUSSION_ROLES:
-        own = [{"id": row["id"]} for row in board.claims if row["role"] == role.id]
+        own = [{"id": row["id"], "text": row["text"], "evidence": row["evidence"]}
+               for row in board.claims if row["role"] == role.id]
         if not own:
             continue
         raw = safe_respond("review", role,

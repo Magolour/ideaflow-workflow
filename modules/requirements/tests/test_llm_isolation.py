@@ -22,6 +22,16 @@ class FailingRoleAgent(MockAgent):
         return super().respond(stage, role, context)
 
 
+class CaptureReviewAgent(MockAgent):
+    def __init__(self) -> None:
+        self.contexts: list[tuple[str, dict]] = []
+
+    def respond(self, stage, role, context):
+        if stage == "review":
+            self.contexts.append((role.id, context))
+        return super().respond(stage, role, context)
+
+
 class ForeignReviewAgent(MockAgent):
     """复核时引用了别人的论点：应被过滤，而不是中止整条 run。"""
 
@@ -52,6 +62,17 @@ class IsolationTest(unittest.TestCase):
         report = self.run_with("clarify", "ba")
         self.assertEqual(report["warnings"][0]["stage"], "clarify")
         self.assertEqual(report["counts"]["rounds"], 1)
+
+    def test_review_context_contains_claim_text(self) -> None:
+        agent = CaptureReviewAgent()
+        with tempfile.TemporaryDirectory() as folder:
+            run("做一个校园二手书交易小程序，支持发布与搜索",
+                out_dir=folder, agent=agent)
+        self.assertTrue(agent.contexts)
+        for _, context in agent.contexts:
+            for claim in context["claims"]:
+                self.assertTrue(claim["text"])
+                self.assertIn("evidence", claim)
 
     def test_foreign_review_is_filtered(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
