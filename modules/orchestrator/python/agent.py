@@ -354,7 +354,7 @@ def requirements_dir() -> Path:
     configured = os.getenv("REQUIREMENTS_DIR")
     if configured:
         return Path(configured)
-    return ROOT.parent.parent / "requirements"
+    return ROOT.parent / "requirements"
 
 
 def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
@@ -377,7 +377,7 @@ def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
         except Exception as exc:
             raise RequirementsUnavailable(f"需求模块模型初始化失败：{exc}") from None
     try:
-        result = run_specflow(requirement, out_dir=out_dir, agent=agent)
+        result = run_specflow(requirement, out_dir=out_dir, agent=agent, discuss=True)
         spec_path = Path(result.out_dir) / "spec.json"
         return json.loads(spec_path.read_text(encoding="utf-8"))
     except Exception as exc:

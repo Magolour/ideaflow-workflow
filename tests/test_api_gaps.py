@@ -108,7 +108,6 @@ class ApiGapTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    @unittest.skip("待实现：/api/start 接受 spec.json 并调用 plan_adapter")
     def test_start_accepts_spec_json(self):
         spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
                           .read_text(encoding="utf-8"))
@@ -130,7 +129,6 @@ class ApiGapTest(unittest.TestCase):
         self.assertGreaterEqual(progress["total"], 2)
         self.assertEqual(progress["spec_version"], "v1")
 
-    @unittest.skip("待实现：plan 自带 depends_on 时直接采用，不再调用模型分析依赖")
     def test_plan_dependencies_used_without_model(self):
         plan = {
             "plan_id": "PLAN-001",
@@ -158,7 +156,6 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual({edge["type"] for edge in agent.edges}, {"force"})
         self.assertNotIn("mock 模式", agent.analysis_summary)
 
-    @unittest.skip("待实现：计划带入的需求/设计来源要透传到进度（requirement_refs/design_refs）")
     def test_task_provenance_reaches_progress(self):
         from plan_adapter import plan_from_spec
         spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
@@ -257,7 +254,6 @@ class ApiGapTest(unittest.TestCase):
             self.assertEqual(progress["delivery"]["status"], "confirmed")
             self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
 
-    @unittest.skip("待实现：/api/progress 返回 decisions")
     def test_progress_exposes_decisions(self):
         tasks = {"tasks": [{"task_id": "T1", "name": "确认验收", "suggested_role": "human"}]}
         with running_server(self.out) as (base, _):
