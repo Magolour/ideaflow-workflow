@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from ideaflow.contracts import ContractError
-from ideaflow.snapshot import Snapshot, build, load, save
+from ideaflow.snapshot import Snapshot, _discussion_items, build, load, save
 
 RAW = """# 校园二手书小程序
 
@@ -158,3 +158,46 @@ class PersistenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiscussionMappingTest(unittest.TestCase):
+    """讨论结论进快照的规则：去重、封顶、可追溯。"""
+
+    class Board:
+        def __init__(self, assumptions, questions=(), objections=(), non_goals=()):
+            self.assumptions = list(assumptions)
+            self.open_questions = list(questions)
+            self.objections = list(objections)
+            self.non_goals = list(non_goals)
+
+        def unresolved_blocking(self):
+            return [row for row in self.objections if row.get("severity") == "blocking"]
+
+    def test_duplicate_assumptions_collapse(self):
+        board = self.Board([
+            {"text": "用户集中在校内", "role": "ba", "round": 1},
+            {"text": "用户集中在校内。", "role": "risk", "round": 2},
+            {"text": "用户 集中 在校内", "role": "tech", "round": 2},
+        ])
+        items = _discussion_items(board)
+        self.assertEqual(len(items), 1)
+
+    def test_items_do_not_repeat_raw_text(self):
+        board = self.Board([{"text": "两周内出演示版", "role": "ba", "round": 1}])
+        items = _discussion_items(board, existing=["两周内出演示版"])
+        self.assertEqual(items, [])
+
+    def test_limit_keeps_must_first(self):
+        board = self.Board(
+            [{"text": f"假设 {index}", "role": "ba", "round": 1} for index in range(10)],
+            questions=[{"text": "必须回答的问题", "blocking": True, "source": "ba"}],
+        )
+        items = _discussion_items(board, limit=3)
+        self.assertEqual(len(items), 3)
+        self.assertEqual(items[0]["priority"], "must")
+
+    def test_source_carries_actor_and_round(self):
+        board = self.Board([{"text": "用户集中在校内", "role": "risk", "round": 2}])
+        source = _discussion_items(board)[0]["source"]
+        self.assertEqual(source["actor"], "risk")
+        self.assertEqual(source["round"], 2)

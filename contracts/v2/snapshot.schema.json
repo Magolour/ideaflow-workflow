@@ -151,6 +151,15 @@
               },
               "excerpt": {
                 "type": "string"
+              },
+              "actor": {
+                "type": "string",
+                "description": "提出者（讨论角色）；原文条目可省略"
+              },
+              "round": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "讨论轮次；原文条目可省略"
               }
             }
           },

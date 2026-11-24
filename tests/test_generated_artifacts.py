@@ -92,6 +92,8 @@ class DiscussionEnrichedContractTest(unittest.TestCase):
         for item in items:
             self.assertIn(item["type"], {"requirement", "constraint", "open"})
             self.assertTrue(item["text"].strip())
+        self.assertTrue(any(item["source"].get("actor") for item in items),
+                        "讨论条目应记录提出者")
 
 
 if __name__ == "__main__":
