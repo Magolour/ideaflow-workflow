@@ -22,6 +22,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
+from plan_adapter import plan_from_spec
+
 PYTHON_DIR = Path(__file__).resolve().parent
 ROOT = PYTHON_DIR.parent
 UPLOAD_PATH = ROOT / "json" / "uploaded_tasks.json"
@@ -73,14 +75,22 @@ def normalize_tasks(data) -> tuple[list[dict], str]:
         if task_id in seen:
             raise ValueError(f"任务编号重复：{task_id}")
         seen.add(task_id)
-        normalized.append({
+        task = {
             "task_id": task_id,
             "name": str(item.get("name") or "").strip(),
             "deliverable": str(item.get("deliverable") or "").strip(),
             "acceptance_items": list(item.get("acceptance_items") or []),
             "suggested_role": item.get("suggested_role", "ai"),
             "priority": item.get("priority", "medium"),
-        })
+            "requirement_refs": list(item.get("requirement_refs") or []),
+            "design_refs": list(item.get("design_refs") or []),
+            "depends_on": [str(ref) for ref in item.get("depends_on") or []],
+            "write_paths": list(item.get("write_paths") or []),
+            "review_required": bool(item.get("review_required", False)),
+        }
+        if isinstance(item.get("estimate_days"), (int, float)):
+            task["estimate_days"] = float(item["estimate_days"])
+        normalized.append(task)
     if not normalized:
         raise ValueError("任务清单为空")
     return normalized, spec_version
@@ -178,7 +188,29 @@ def topo_layers(task_ids: list[str], edges: list[dict]) -> tuple[list[list[str]]
     return layers, [task_id for layer in layers for task_id in layer]
 
 
+def planned_edges(tasks: list[dict]) -> list[dict]:
+    """计划自带 depends_on 时直接转成 force 边，不再调用模型。"""
+    task_ids = {task["task_id"] for task in tasks}
+    edges, seen = [], set()
+    for task in tasks:
+        for source in task.get("depends_on") or []:
+            source = str(source).strip()
+            if source not in task_ids:
+                raise ValueError(f"计划依赖引用了不存在的任务：{source} -> {task['task_id']}")
+            key = (source, task["task_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"from": source, "to": task["task_id"],
+                          "type": "force", "reason": "计划自带依赖"})
+    return edges
+
+
 def analyze(tasks: list[dict], mock: bool) -> tuple[list[dict], str]:
+    if any(task.get("depends_on") for task in tasks):
+        edges = planned_edges(tasks)
+        topo_layers([task["task_id"] for task in tasks], edges)
+        return edges, "采用计划自带依赖（未调用模型）"
     if mock:
         edges = [{"from": tasks[i]["task_id"], "to": tasks[i + 1]["task_id"],
                   "type": "force", "reason": "mock 模式按清单顺序串行"}
@@ -314,6 +346,44 @@ def pm_breakdown(requirement: str, mock: bool = False) -> tuple[list[dict], str]
     raise ValueError(f"需求拆解连续 2 次未通过校验：{last_error}")
 
 
+class RequirementsUnavailable(RuntimeError):
+    """需求模块不可用：HTTP 层转成 503，不静默降级成一句话直拆。"""
+
+
+def requirements_dir() -> Path:
+    configured = os.getenv("REQUIREMENTS_DIR")
+    if configured:
+        return Path(configured)
+    return ROOT.parent.parent / "requirements"
+
+
+def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
+    """一句话需求 -> 需求模块离线生成 spec.json。"""
+    source = requirements_dir()
+    if not (source / "ideaflow" / "specflow.py").exists():
+        raise RequirementsUnavailable(f"需求模块不可用：{source}")
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+    try:
+        from ideaflow.specflow import run as run_specflow
+    except ImportError as exc:
+        raise RequirementsUnavailable(f"需求模块导入失败：{exc}") from None
+
+    agent = None
+    if os.getenv("REQUIREMENTS_LIVE", "").lower() in {"1", "true", "yes"}:
+        try:
+            from ideaflow.agents import LLMAgent
+            agent = LLMAgent()
+        except Exception as exc:
+            raise RequirementsUnavailable(f"需求模块模型初始化失败：{exc}") from None
+    try:
+        result = run_specflow(requirement, out_dir=out_dir, agent=agent)
+        spec_path = Path(result.out_dir) / "spec.json"
+        return json.loads(spec_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RequirementsUnavailable(f"需求模块执行失败：{exc}") from exc
+
+
 class RealtimeAgent:
     """按优先级处理数据包，维护实例状态并追加事件流。"""
 
@@ -378,13 +448,26 @@ class RealtimeAgent:
                 raise RuntimeError("实例已启动，不能重复输入任务清单")
             pm_summary = ""
             requirement = ""
-            if isinstance(data, dict) and not data.get("tasks") and str(data.get("requirement") or "").strip():
+            plan = None
+            if (isinstance(data, dict) and data.get("spec_id") and data.get("modules")
+                    and not data.get("tasks")):
+                try:
+                    plan = plan_from_spec(data)
+                except ValueError as exc:
+                    raise ValueError(f"设计规格无法生成计划：{exc}") from None
+                tasks, spec_version = normalize_tasks(plan)
+            elif isinstance(data, dict) and not data.get("tasks") and str(data.get("requirement") or "").strip():
                 requirement = str(data["requirement"]).strip()
-                tasks, pm_summary = pm_breakdown(requirement, self.mock)
-                spec_version = str(data.get("spec_version") or "v1.0")
+                spec = requirement_to_spec(requirement, self.out_dir / "requirements")
+                plan = plan_from_spec(spec)
+                tasks, spec_version = normalize_tasks(plan)
+                pm_summary = f"需求模块生成 {spec['spec_id']} v{spec['version']}"
             else:
                 tasks, spec_version = normalize_tasks(data)
-            if isinstance(data, dict):
+            if plan is not None:
+                self.plan_id = str(plan["plan_id"])
+                spec_version = f"v{plan['spec_ref']['version']}"
+            elif isinstance(data, dict):
                 payload = data.get("task_list_approved_v1.2", data)
                 self.list_version = payload.get("list_version", self.list_version)
                 if payload.get("plan_id"):
@@ -777,11 +860,18 @@ class RealtimeAgent:
                 {"task_id": t["task_id"], "name": t["name"], "status": t["status"],
                  "attempts": t["attempts"], "suggested_role": t["suggested_role"],
                  "priority": t["priority"], "deliverable": t["deliverable"],
-                 "acceptance_items": t["acceptance_items"]}
+                 "acceptance_items": t["acceptance_items"],
+                 "requirement_refs": t.get("requirement_refs", []),
+                 "design_refs": t.get("design_refs", []),
+                 "depends_on": t.get("depends_on", []),
+                 "write_paths": t.get("write_paths", []),
+                 "review_required": t.get("review_required", False),
+                 **({"estimate_days": t["estimate_days"]} if "estimate_days" in t else {})}
                 for t in self.tasks.values()
             ],
             "layers": self.layers,
             "execution_order": self.order,
+            "decisions": list(self.decisions),
         }
 
     def event_stream(self) -> dict:
@@ -872,6 +962,29 @@ class AgentHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/health":
             self._send(200, {"status": "ok", "started": self.agent.started,
                              "instance_status": self.agent.status})
+        elif parsed.path == "/api/import":
+            query = parse_qs(parsed.query)
+            target = (query.get("path", [""])[0] or "").strip()
+            if not target:
+                self._send(400, {"error": "缺少 path 参数"})
+                return
+            source = Path(target).expanduser()
+            if not source.is_file():
+                self._send(404, {"error": f"文件不存在：{source}"})
+                return
+            if source.suffix.lower() not in {".md", ".markdown", ".txt", ".json"}:
+                self._send(400, {"error": "只支持 md / markdown / txt / json 文件"})
+                return
+            if source.stat().st_size > 512 * 1024:
+                self._send(400, {"error": "文件超过 512KB，请精简后再导入"})
+                return
+            try:
+                content = source.read_text(encoding="utf-8-sig")
+            except UnicodeDecodeError:
+                self._send(400, {"error": "文件不是 UTF-8 编码"})
+                return
+            self._send(200, {"path": str(source), "suffix": source.suffix.lower(),
+                             "content": content})
         elif parsed.path == "/api/progress":
             query = parse_qs(parsed.query)
             paged = "since" in query or "limit" in query
@@ -920,6 +1033,8 @@ class AgentHandler(BaseHTTPRequestHandler):
                                  "progress": self.agent.snapshot()})
             else:
                 self._send(404, {"error": "not found"})
+        except RequirementsUnavailable as exc:
+            self._send(503, {"error": str(exc)})
         except RuntimeError as exc:
             self._send(409, {"error": str(exc)})
         except (ValueError, json.JSONDecodeError) as exc:
