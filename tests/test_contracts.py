@@ -19,6 +19,7 @@ FILES = {
     "decision": "decision.schema.json",
     "artifact": "artifact.schema.json",
     "delivery": "delivery.schema.json",
+    "features": "features.schema.json",
 }
 
 NORMAL = {
@@ -31,6 +32,7 @@ NORMAL = {
     "decision": "decision.normal.json",
     "artifact": "artifact.normal.json",
     "delivery": "delivery.normal.json",
+    "features": "features.normal.json",
 }
 
 # 每份异常样例要触发的具体规则，避免 schema 松动后样例"因别的原因"误过
@@ -44,6 +46,7 @@ EXPECTED_FAILURE = {
     "decision": "reason",
     "artifact": "path",
     "delivery": "decided_by",
+    "features": "source_refs",
 }
 
 INVALID = {
@@ -56,6 +59,7 @@ INVALID = {
     "decision": "decision.invalid.json",
     "artifact": "artifact.invalid.json",
     "delivery": "delivery.invalid.json",
+    "features": "features.invalid.json",
 }
 
 

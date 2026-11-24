@@ -1,0 +1,16 @@
+{
+  "snapshot_ref": {
+    "snapshot_id": "REQSET-001",
+    "version": 1
+  },
+  "features": [
+    {
+      "id": "F-01",
+      "name": "聊天会话",
+      "description": "消息收发",
+      "inferred": true,
+      "priority": "high"
+    }
+  ],
+  "created_at": "2026-11-25T10:00:00+08:00"
+}

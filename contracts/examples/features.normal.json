@@ -1,0 +1,49 @@
+{
+  "snapshot_ref": {
+    "snapshot_id": "REQSET-001",
+    "version": 1
+  },
+  "features": [
+    {
+      "id": "F-01",
+      "name": "聊天会话",
+      "description": "一对一与群聊的消息收发、未读与撤回",
+      "source_refs": ["CLM-001", "OPT-A"],
+      "inferred": true,
+      "priority": "high"
+    },
+    {
+      "id": "F-02",
+      "name": "好友通讯录",
+      "description": "添加好友、备注、分组与黑名单",
+      "source_refs": ["CLM-004"],
+      "inferred": true,
+      "priority": "high"
+    },
+    {
+      "id": "F-03",
+      "name": "朋友圈",
+      "description": "图文发布、可见范围与点赞评论",
+      "source_refs": ["CLM-007", "OPT-B"],
+      "inferred": true,
+      "priority": "medium"
+    },
+    {
+      "id": "F-04",
+      "name": "账号与登录",
+      "description": "注册、登录、设备管理与安全设置",
+      "source_refs": ["R-01"],
+      "inferred": false,
+      "priority": "high"
+    },
+    {
+      "id": "F-05",
+      "name": "消息通知",
+      "description": "新消息提醒、免打扰与通知设置",
+      "source_refs": ["CLM-009"],
+      "inferred": true,
+      "priority": "medium"
+    }
+  ],
+  "created_at": "2026-11-25T10:00:00+08:00"
+}

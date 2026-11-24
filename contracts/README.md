@@ -16,6 +16,7 @@
 | `decision.schema.json` | `agent.py` 的 `_record_decision()` | 写入 `decisions.jsonl`，目标类型含 `task/delivery` |
 | `artifact.schema.json` | 执行侧产出 | 任务产物：文件、结构化记录或外链 |
 | `delivery.schema.json` | 全部任务终态后生成 | 交付记录：每任务的产物与验收结论，人工确认后实例完成 |
+| `features.schema.json` | 讨论收敛后归纳 | 功能清单（F-xx），模块划分的输入 |
 | `enums.schema.json` | 全组 | 状态、动作、角色、优先级 |
 
 ## 已知差异（必须先对齐）
@@ -51,7 +52,8 @@ python -m unittest discover -s tests -v
 `tests/test_scheduling.py` 挂着两条 resource 边不阻塞的调度断言（`skip`）；
 `tests/test_eval_metrics.py` 校验评测指标计算；
 `tests/test_failure.py` 覆盖重试转人工、重复启动、变更包非法（重复编号/成环/悬空边）；
-`tests/test_graph.py` 覆盖拓扑分层、环检测与依赖边校验。
+`tests/test_graph.py` 覆盖拓扑分层、环检测与依赖边校验；
+`tests/test_feature_synthesis.py` 覆盖功能清单契约、命名、来源与模块对应。
 
 ## 待实现（断言已就位，实现后去掉 skip）
 
@@ -64,8 +66,9 @@ python -m unittest discover -s tests -v
 | 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 | 一句话到交付的完整链路（桥 + spec 入口 + 执行闭环） | `openapi.yaml` 的 `/api/start` | 成员 1/4 |
 | 计划评审：模块覆盖、任务粒度、依赖合法性与成环 | 新增 `plan_review.review_plan(spec, plan)` | 编排器（成员 4） |
+| 需求归纳：把讨论结论整理成功能清单 `features.json` | `features.schema.json` | 需求模块（成员 2/3） |
 
-共 12 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`tests/test_plan_review.py` 5 条。
+共 17 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`tests/test_plan_review.py` 5 条、`tests/test_feature_synthesis.py` 5 条。
 
 已解除挂起（断言现在生效，改坏了会红）：
 想法入口经规格、`/api/start` 接受 `spec.json`、`/api/progress` 返回 `decisions`、
