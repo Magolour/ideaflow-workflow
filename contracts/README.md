@@ -45,7 +45,7 @@ python -m unittest discover -s tests -v
 `tests/test_decision.py` 校验人工决策记录；
 `tests/test_integration.py` 校验 spec → plan → 编排器；
 `tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
-`tests/test_api_gaps.py` 校验 openapi 结构，并挂着七条待实现的接口断言（`skip`）；
+`tests/test_api_gaps.py` 校验 openapi 结构，并挂着九条待实现的接口断言（`skip`）；
 `tests/test_scheduling.py` 挂着两条 resource 边不阻塞的调度断言（`skip`）；
 `tests/test_eval_metrics.py` 校验评测指标计算；
 `tests/test_failure.py` 覆盖重试转人工、重复启动、变更包非法（重复编号/成环/悬空边）；
@@ -66,8 +66,9 @@ python -m unittest discover -s tests -v
 | 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 | plan 自带 `depends_on` 时直接采用，不再调用模型分析依赖 | `plan.schema.json` 的 `depends_on` | 编排器（成员 4） |
 | 一句话到交付的完整链路（桥 + spec 入口 + 执行闭环） | `openapi.yaml` 的 `/api/start` | 成员 1/4 |
+| 讨论阶段接入规格（`discuss=True` 时先跑六角色讨论） | `specflow.py` 的 `run(discuss=...)` | 需求模块（成员 2） |
 
-共 12 条：`tests/test_api_gaps.py` 9 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条。
+共 13 条：`tests/test_api_gaps.py` 9 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`modules/requirements/tests/test_specflow.py` 1 条。
 退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
 
 ## 入口约定
