@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .agents import MockAgent
 from .artifacts import deliver
 from .audit import audit_spec, save_audit
 from .contracts import ContractError
 from .escalate import escalate, save_question
+from .pipeline import run as run_discussion
 from .pipeline import slugify
 from .race import run_race, save_race
 from .reviews import review_all
@@ -46,6 +48,15 @@ class SpecFlowResult:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+def _merge_ai_calls(source: Path, destination: Path) -> None:
+    log = source / "ai_calls.jsonl"
+    if not log.exists():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("a", encoding="utf-8") as target:
+        target.write(log.read_text(encoding="utf-8"))
+
+
 def load_case(name: str) -> str:
     if not re.fullmatch(r"[a-z0-9-]+", name or ""):
         raise ContractError("INVALID_CASE", f"非法的案例名 {name}", "case")
@@ -58,7 +69,8 @@ def load_case(name: str) -> str:
 def run(raw_text: str, constraints: list[str] | None = None, *,
         out_dir: str | Path = "runs", confirm: str = "产品经理",
         case_name: str | None = None, progress: Progress | None = None,
-        agent: Any | None = None) -> SpecFlowResult:
+        agent: Any | None = None, discuss: bool = False,
+        discuss_rounds: int = 2) -> SpecFlowResult:
     say = progress or (lambda message: None)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     slug = slugify(raw_text, limit=16)
@@ -73,14 +85,28 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
     if agent is not None and hasattr(agent, "bind_run"):
         agent.bind_run(target)
 
-    snapshot = build(raw_text, constraints=constraints).confirm(confirm)
+    board = None
+    if discuss:
+        say("先跑讨论：澄清 → 六角色发散 → 批判/回应 → 整合 → 签署")
+        discussion = run_discussion(raw_text, constraints=constraints,
+                                    out_dir=target / "discussion", agent=agent,
+                                    max_rounds=discuss_rounds, progress=progress)
+        board = discussion.board
+        _merge_ai_calls(discussion.out_dir, target / "ai_calls.jsonl")
+        if agent is not None and hasattr(agent, "bind_run"):
+            agent.bind_run(target)
+        say(f"讨论完成：{len(board.claims)} 条主张、"
+            f"{len(board.unresolved_blocking())} 条未解决阻断")
+
+    snapshot = build(raw_text, constraints=constraints, board=board).confirm(confirm)
     save(snapshot, target)
     counts = snapshot.counts()
     say(f"快照 {snapshot.snapshot_id} v{snapshot.version}："
         f"{counts['requirement']} 条要求、{counts['constraint']} 条约束、"
         f"{counts['open']} 个待澄清")
 
-    race = run_race(snapshot, max_attempts=2, agent=agent)
+    draft_agent = None if isinstance(agent, MockAgent) else agent
+    race = run_race(snapshot, max_attempts=2, agent=draft_agent)
     if race.failed_groups:
         details = []
         for group in race.failed_groups:
