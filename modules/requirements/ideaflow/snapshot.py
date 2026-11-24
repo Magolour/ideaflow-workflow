@@ -420,7 +420,7 @@ def _discussion_items(board: Any, *, existing: Iterable[str] = (),
 
     - 与原文条目、彼此之间做归一化去重；
     - 条目带上提出者与轮次（source.actor / source.round），便于追溯；
-    - limit 用于封顶，must 优先保留，防止真实模型把快照撑爆。
+    - limit 只约束可选项；must（阻断、非目标）一律保留，避免把关键结论截掉。
     """
     items: list[dict[str, Any]] = []
     seen = {_normalize_text(text) for text in existing}
@@ -476,12 +476,13 @@ def _discussion_items(board: Any, *, existing: Iterable[str] = (),
         item = row.get("item", "")
         reason = row.get("reason", "")
         if item:
-            add("constraint", f"不做 {item}（{reason}）" if reason else f"不做 {item}",
-                "must", [f"确认首版不实现 {item}"])
+            add("constraint", f"不做 {item}", "must",
+                [f"确认首版不实现 {item}"])
 
-    if limit is not None and len(items) > limit:
-        items.sort(key=lambda row: 0 if row["priority"] == "must" else 1)
-        items = items[:limit]
+    if limit is not None:
+        must = [row for row in items if row["priority"] == "must"]
+        optional = [row for row in items if row["priority"] != "must"]
+        items = must + optional[:max(0, limit - len(must))]
     return items
 
 
@@ -518,7 +519,7 @@ def build(raw_text: str, *, constraints: Iterable[str] | None = None,
         parsed.extend(_discussion_items(
             board,
             existing=[str(row.get("text") or "") for row in parsed],
-            limit=max(8, len(parsed) * 3),
+            limit=max(8, len(parsed) * 2),
         ))
 
     items = _dedupe(parsed)

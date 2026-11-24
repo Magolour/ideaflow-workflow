@@ -70,6 +70,10 @@ def _override_question(spec: Spec, snapshot: Snapshot, issue: dict[str, Any],
     background.append(
         f"规格 v{spec.version} 当前承诺 {spec.effort['commit_days']} 天"
         + (f"，期限为 {deadline} 天。" if deadline else "。"))
+    others = [row for row in blocking if row["id"] != issue["id"]]
+    if others:
+        background.append("另有 %d 条阻断待处理：%s" % (
+            len(others), "；".join(f"{row['id']} {row['message']}" for row in others[:3])))
 
     options = [
         {"key": "A", "text": f"保留「{requirement['text']}」，"
@@ -117,6 +121,10 @@ def _deadline_question(spec: Spec, snapshot: Snapshot, issue: dict[str, Any],
             f"当前规格 v{spec.version} 的 PERT 承诺为 {commit} 天，"
             f"期限约束为 {deadline} 天。",
             "自动裁剪只会简化模块，不会改变验收标准；再压下去会牺牲可演示性。",
+            *(["另有 %d 条阻断待处理：%s" % (
+                len(others), "；".join(f"{row['id']} {row['message']}"
+                                      for row in others[:3]))
+               ] if (others := [row for row in blocking if row["id"] != issue["id"]]) else []),
         ],
         "options": [
             {"key": "A", "text": f"把期限放宽到 {commit} 天", "cost_days": commit,

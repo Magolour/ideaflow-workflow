@@ -196,6 +196,16 @@ class DiscussionMappingTest(unittest.TestCase):
         self.assertEqual(len(items), 3)
         self.assertEqual(items[0]["priority"], "must")
 
+    def test_limit_never_drops_must(self):
+        board = self.Board(
+            [],
+            questions=[{"text": f"阻断 {index}", "blocking": True, "source": "ba"}
+                       for index in range(5)],
+        )
+        items = _discussion_items(board, limit=2)
+        self.assertEqual(len(items), 5)
+        self.assertTrue(all(row["priority"] == "must" for row in items))
+
     def test_source_carries_actor_and_round(self):
         board = self.Board([{"text": "用户集中在校内", "role": "risk", "round": 2}])
         source = _discussion_items(board)[0]["source"]

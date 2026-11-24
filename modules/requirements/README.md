@@ -103,6 +103,27 @@ python -m ideaflow.server --port 8000
 与「讨论提案」并行的第二条链路，按评审要求逐项实现：先把输入固化成快照，
 再让两组独立出方案、逐份评审、整合成规格，最后做覆盖／冲突／验收自审查。
 
+默认直接切原文；要体现多 Agent 协作，先跑讨论再增强快照：
+
+```python
+from ideaflow.agents import LLMAgent
+from ideaflow.specflow import load_case, run
+
+run(load_case("campus-books"), out_dir="runs/discuss",
+    discuss=True, discuss_rounds=2, agent=LLMAgent())
+```
+
+| 映射 | 说明 |
+| --- | --- |
+| 原文 R/C | 保持逐字切分与来源行号 |
+| 假设 | → `open`，前缀“推断假设：” |
+| 未解决待澄清 / 阻断异议 | → `open`；阻断项 `priority=must` |
+| 非目标 | → `constraint`（“不做 X”，不带讨论理由） |
+| 讨论补充上限 | 原文条数的 2 倍；`must` 不参与截断 |
+| 重复项 | 去空白与标点后比对，原文、假设、问题之间去重 |
+
+讨论产物在 `target/discussion/`，模型调用记录合并到规格运行目录的 `ai_calls.jsonl`。
+
 完整链路（紧凑版案例，约 1 秒跑完）：
 
 ```bash
