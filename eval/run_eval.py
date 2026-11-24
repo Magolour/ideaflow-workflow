@@ -83,10 +83,12 @@ def run_multi(case_name: str, agent=None) -> tuple[list[str], list[dict], dict]:
     # 覆盖率只看需求与约束；待澄清项不计入，否则讨论自己生成的条目会抬高覆盖率
     texts = [item["text"] for item in result.snapshot.requirements]
     texts += [item["text"] for item in result.snapshot.constraints]
+    question_texts = [item["text"] for item in result.snapshot.questions]
     tasks = plan_from_spec(spec)["tasks"]
     human = len(result.snapshot.questions) + (1 if result.question else 0)
     return texts, tasks, {"duration_s": duration, "tokens": tokens or None,
-                          "human_interventions": human, "ai_calls": calls}
+                          "human_interventions": human, "ai_calls": calls,
+                          "question_texts": question_texts}
 
 
 def chat_with_usage(system: str, user: str) -> tuple[str, int | None]:
@@ -215,7 +217,9 @@ def main() -> int:
                                          errors=[reason]))
                 print(f"[{name}/{mode}] 失败：{reason}")
                 continue
-            results.append(summarize(case, texts, tasks, mode=mode, **run))
+            results.append(summarize(case, texts, tasks, mode=mode,
+                                     question_texts=run.pop("question_texts", None),
+                                     **run))
             print(f"[{name}/{mode}] 覆盖 {results[-1]['requirements']['coverage_rate']:.0%}，"
                   f"任务 {len(tasks)}，无效依赖 {len(results[-1]['plan']['invalid_dependencies'])}")
 

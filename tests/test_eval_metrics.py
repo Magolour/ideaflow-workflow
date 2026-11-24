@@ -28,6 +28,18 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(result["missing_ids"], ["M2"])
         self.assertEqual(result["severe_missing_ids"], ["M2"])
 
+
+    def test_question_item_matches_question_corpus(self):
+        must_have = [{"id": "Q1", "keywords": ["校园卡"], "kind": "question"}]
+        result = coverage(["支持预约"], must_have, ["是否需要对接校园卡？"])
+        self.assertEqual(result["missing_ids"], [])
+        self.assertEqual(result["rate"], 1.0)
+
+    def test_question_item_not_matched_by_requirements(self):
+        must_have = [{"id": "Q1", "keywords": ["校园卡"], "kind": "question"}]
+        result = coverage(["支持预约"], must_have, [])
+        self.assertEqual(result["missing_ids"], ["Q1"])
+
     def test_keywords_must_all_match(self):
         item = [{"id": "X", "text": "两周两名", "keywords": ["两周", "两名"]}]
         self.assertEqual(coverage(["两周内完成"], item)["missing_ids"], ["X"])

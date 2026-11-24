@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 RULES = {
-    "coverage": "必含项的关键词全部出现在需求、约束或待澄清文本中才算命中",
+    "coverage": "必含项的关键词出现在对应语料中才算命中；kind=question 的项查待澄清，其余查需求与约束",
     "severe": "must_have 中 severity=severe 且未命中，计入严重遗漏",
     "invalid_dependency": "指向不存在的任务、自依赖、成环，任一即计一次",
     "human_interventions": "快照待澄清项 + 升级产生的人工问题",
@@ -15,13 +15,19 @@ def _corpus(texts: list[str]) -> str:
     return "\n".join(texts).lower()
 
 
-def coverage(requirement_texts: list[str], must_have: list[dict]) -> dict:
-    """按关键词判定必含项是否出现，返回覆盖明细与比率。"""
+def coverage(requirement_texts: list[str], must_have: list[dict],
+             question_texts: list[str] | None = None) -> dict:
+    """按关键词判定必含项是否出现，返回覆盖明细与比率。
+
+    kind=question 的必含项到待澄清文本里找，其余到需求与约束里找。
+    """
     corpus = _corpus(requirement_texts)
+    questions = _corpus(question_texts or [])
     covered, missing = [], []
     for item in must_have:
+        target = questions if item.get("kind") == "question" else corpus
         keywords = [k.lower() for k in item.get("keywords") or []]
-        hit = bool(keywords) and all(k in corpus for k in keywords)
+        hit = bool(keywords) and all(k in target for k in keywords)
         (covered if hit else missing).append(item)
     total = len(must_have)
     return {
@@ -71,9 +77,10 @@ def invalid_dependencies(tasks: list[dict]) -> list[str]:
 def summarize(case: dict, requirement_texts: list[str], tasks: list[dict],
               *, duration_s: float, tokens: int | None,
               human_interventions: int, mode: str,
+              question_texts: list[str] | None = None,
               ai_calls: int | None = None,
               errors: list[str] | None = None) -> dict:
-    cov = coverage(requirement_texts, case.get("must_have") or [])
+    cov = coverage(requirement_texts, case.get("must_have") or [], question_texts)
     deps = invalid_dependencies(tasks)
     return {
         "case": case["case"],
