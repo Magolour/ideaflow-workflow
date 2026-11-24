@@ -47,7 +47,7 @@ python -m unittest discover -s tests -v
 `tests/test_decision.py` 校验人工决策记录；
 `tests/test_integration.py` 校验 spec → plan → 编排器；
 `tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
-`tests/test_api_gaps.py` 校验 openapi 结构，并挂着九条待实现的接口断言（`skip`）；
+`tests/test_api_gaps.py` 校验 openapi 结构，并挂着四条待实现的接口断言（`skip`）；
 `tests/test_scheduling.py` 挂着两条 resource 边不阻塞的调度断言（`skip`）；
 `tests/test_eval_metrics.py` 校验评测指标计算；
 `tests/test_failure.py` 覆盖重试转人工、重复启动、变更包非法（重复编号/成环/悬空边）；
@@ -57,20 +57,19 @@ python -m unittest discover -s tests -v
 
 | 缺口 | 契约位置 | 实现方 |
 | --- | --- | --- |
-| 想法入口经需求模块生成规格后再分解 | `openapi.yaml` 的 `StartRequest` | 流程集成（成员 1） |
-| `/api/start` 接受 `spec.json` 并调用 `plan_adapter.py` | 同上 | 编排器（成员 4） |
-| `/api/progress` 返回 `decisions` | `openapi.yaml` 的 `Progress.decisions` | 编排器（成员 4） |
 | 任务完成登记产物 | `artifact.schema.json` | 执行侧（成员 1/4） |
 | 全部终态后进入 `delivery_pending` 并生成交付记录 | `delivery.schema.json` | 执行侧（成员 1/4） |
 | 交付确认后实例 `completed` | `Progress.delivery` | 执行侧（成员 1/4） |
-| 计划来源（`requirement_refs`/`design_refs`）透传到进度 | `openapi.yaml` 的 `TaskState` | 编排器（成员 4） |
 | `resource` 边不阻塞调度与分层 | `openapi.yaml` 的 `Edge.type` | 编排器（成员 4） |
 | 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
-| plan 自带 `depends_on` 时直接采用，不再调用模型分析依赖 | `plan.schema.json` 的 `depends_on` | 编排器（成员 4） |
 | 一句话到交付的完整链路（桥 + spec 入口 + 执行闭环） | `openapi.yaml` 的 `/api/start` | 成员 1/4 |
-| 讨论阶段接入规格（`discuss=True` 时先跑六角色讨论） | `specflow.py` 的 `run(discuss=...)` | 需求模块（成员 2） |
 
-共 13 条：`tests/test_api_gaps.py` 9 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`modules/requirements/tests/test_specflow.py` 1 条。
+共 7 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条。
+
+已解除挂起（断言现在生效，改坏了会红）：
+想法入口经规格、`/api/start` 接受 `spec.json`、`/api/progress` 返回 `decisions`、
+计划来源透传、计划自带 `depends_on` 时不再调模型、讨论阶段接入规格。
+
 退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
 
 ## 入口约定
