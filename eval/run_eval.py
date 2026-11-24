@@ -69,19 +69,23 @@ def run_multi(case_name: str, agent=None) -> tuple[list[str], list[dict], dict]:
         result = run_spec(load_case(case_name), out_dir=tmp, agent=agent,
                           discuss=agent is not None)
         spec = result.spec.to_json()
-        calls = 0
+        calls, tokens = 0, 0
         log = result.out_dir / "ai_calls.jsonl"
         if log.exists():
-            calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
-                         if line.strip()])
+            for line in log.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                calls += 1
+                record = json.loads(line)
+                tokens += (record.get("prompt_tokens") or 0) + (record.get("completion_tokens") or 0)
     duration = time.perf_counter() - started
 
+    # 覆盖率只看需求与约束；待澄清项不计入，否则讨论自己生成的条目会抬高覆盖率
     texts = [item["text"] for item in result.snapshot.requirements]
     texts += [item["text"] for item in result.snapshot.constraints]
-    texts += [item["text"] for item in result.snapshot.questions]
     tasks = plan_from_spec(spec)["tasks"]
     human = len(result.snapshot.questions) + (1 if result.question else 0)
-    return texts, tasks, {"duration_s": duration, "tokens": None,
+    return texts, tasks, {"duration_s": duration, "tokens": tokens or None,
                           "human_interventions": human, "ai_calls": calls}
 
 
