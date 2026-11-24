@@ -19,6 +19,9 @@ python eval/run_eval.py --real --mode baseline
 
 输出 `eval/report.json` 与 `eval/report.md`。
 
+报告头部包含模型、提交号（含是否有未提交改动）、生成时间与判定规则；
+单条案例失败不会中断整份报告，失败原因写进该条结果的 `errors`。
+
 ## 两种被测对象
 
 | 模式 | 说明 |

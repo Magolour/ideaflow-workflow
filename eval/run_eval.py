@@ -17,13 +17,14 @@ import sys
 import tempfile
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "modules" / "requirements"))
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
-from metrics import summarize  # noqa: E402
+from metrics import RULES, summarize  # noqa: E402
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_BASE_URL = "https://ws-381dxklyh659xv9g.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
@@ -33,6 +34,19 @@ BASELINE_PROMPT = (
     "你是需求分析师。把下面的产品想法整理成需求清单，"
     "只输出 JSON 对象：{\"requirements\":[\"一条一句话的需求\", ...]}，不要解释。"
 )
+
+
+def git_revision() -> tuple[str, bool]:
+    """取当前提交与是否有未提交改动，报告据此可复核。"""
+    import subprocess
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain"],
+                                    capture_output=True, text=True, check=True).stdout.strip())
+        return commit or "unknown", dirty
+    except Exception:  # noqa: BLE001 - 无 git 时不影响评测
+        return "unknown", False
 
 
 def load_case_meta(name: str) -> dict:
@@ -134,6 +148,11 @@ def run_baseline(case_name: str, real: bool) -> tuple[list[str], list[dict], dic
 
 
 def to_markdown(report: dict) -> str:
+    header = (f"模型：{report['model']} ｜ 提交：{report['commit']}"
+              f"{'（有未提交改动）' if report['dirty'] else ''}"
+              f" ｜ 生成时间：{report['generated_at']}\n\n")
+    rules = "判定规则：\n" + "\n".join(f"- {key}：{text}"
+                                   for key, text in report["scoring_rules"].items()) + "\n\n"
     rows = ["| 案例 | 模式 | 覆盖率 | 严重遗漏 | 需求条数 | 任务数 | 无效依赖 | 人工介入 | 耗时(s) | tokens |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in report["results"]:
@@ -144,7 +163,12 @@ def to_markdown(report: dict) -> str:
             f"| {len(row['plan']['invalid_dependencies'])} "
             f"| {row['run']['human_interventions']} "
             f"| {row['run']['duration_s']} | {row['run']['tokens'] or '-'} |")
-    return "\n".join(rows) + "\n"
+    failed = [row for row in report["results"] if row.get("errors")]
+    notes = ""
+    if failed:
+        notes = "\n失败原因：\n" + "\n".join(
+            f"- {row['case']}/{row['mode']}：{'；'.join(row['errors'])}" for row in failed) + "\n"
+    return header + rules + "\n".join(rows) + "\n" + notes
 
 
 def main() -> int:
@@ -175,14 +199,34 @@ def main() -> int:
         if args.mode in ("baseline", "both"):
             runners.append(("baseline", lambda n=name: run_baseline(n, args.real)))
         for mode, runner in runners:
-            texts, tasks, run = runner()
+            try:
+                texts, tasks, run = runner()
+            except Exception as error:  # noqa: BLE001 - 单条失败不拖垮整份报告
+                reason = f"{type(error).__name__}: {error}"
+                results.append(summarize(case, [], [], mode=mode, duration_s=0.0,
+                                         tokens=None, human_interventions=0,
+                                         errors=[reason]))
+                print(f"[{name}/{mode}] 失败：{reason}")
+                continue
             results.append(summarize(case, texts, tasks, mode=mode, **run))
             print(f"[{name}/{mode}] 覆盖 {results[-1]['requirements']['coverage_rate']:.0%}，"
                   f"任务 {len(tasks)}，无效依赖 {len(results[-1]['plan']['invalid_dependencies'])}")
 
-    report = {"cases": list({row["case"] for row in results}),
-              "real_baseline": args.real, "real_multi": bool(agent),
-              "results": results}
+    commit, dirty = git_revision()
+    model = ((getattr(agent, "model", "") if agent else "")
+             or (os.getenv("AI_MODEL") if args.real else "")
+             or "mock")
+    report = {
+        "model": model,
+        "commit": commit,
+        "dirty": dirty,
+        "generated_at": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+        "scoring_rules": RULES,
+        "cases": list({row["case"] for row in results}),
+        "real_baseline": args.real,
+        "real_multi": bool(agent),
+        "results": results,
+    }
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

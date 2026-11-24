@@ -2,6 +2,15 @@
 from __future__ import annotations
 
 
+RULES = {
+    "coverage": "必含项的关键词全部出现在需求、约束或待澄清文本中才算命中",
+    "severe": "must_have 中 severity=severe 且未命中，计入严重遗漏",
+    "invalid_dependency": "指向不存在的任务、自依赖、成环，任一即计一次",
+    "human_interventions": "快照待澄清项 + 升级产生的人工问题",
+    "tokens": "仅真实模型调用返回；Mock 与未接入路径记为 null",
+}
+
+
 def _corpus(texts: list[str]) -> str:
     return "\n".join(texts).lower()
 
@@ -61,12 +70,14 @@ def invalid_dependencies(tasks: list[dict]) -> list[str]:
 
 def summarize(case: dict, requirement_texts: list[str], tasks: list[dict],
               *, duration_s: float, tokens: int | None,
-              human_interventions: int, mode: str) -> dict:
+              human_interventions: int, mode: str,
+              errors: list[str] | None = None) -> dict:
     cov = coverage(requirement_texts, case.get("must_have") or [])
     deps = invalid_dependencies(tasks)
     return {
         "case": case["case"],
         "mode": mode,
+        "errors": list(errors or []),
         "run": {
             "duration_s": round(duration_s, 3),
             "tokens": tokens,
