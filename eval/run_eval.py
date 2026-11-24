@@ -66,7 +66,8 @@ def run_multi(case_name: str, agent=None) -> tuple[list[str], list[dict], dict]:
 
     started = time.perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
-        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent)
+        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent,
+                          discuss=agent is not None)
         spec = result.spec.to_json()
         calls = 0
         log = result.out_dir / "ai_calls.jsonl"
@@ -81,7 +82,7 @@ def run_multi(case_name: str, agent=None) -> tuple[list[str], list[dict], dict]:
     tasks = plan_from_spec(spec)["tasks"]
     human = len(result.snapshot.questions) + (1 if result.question else 0)
     return texts, tasks, {"duration_s": duration, "tokens": None,
-                          "human_interventions": human}
+                          "human_interventions": human, "ai_calls": calls}
 
 
 def chat_with_usage(system: str, user: str) -> tuple[str, int | None]:
@@ -144,7 +145,8 @@ def run_baseline(case_name: str, real: bool) -> tuple[list[str], list[dict], dic
     }
     tasks = plan_from_spec(spec)["tasks"] if spec["modules"] else []
     return texts, tasks, {"duration_s": duration, "tokens": tokens,
-                          "human_interventions": 0}
+                          "human_interventions": 0,
+                          "ai_calls": 1 if real else 0}
 
 
 def to_markdown(report: dict) -> str:
@@ -153,8 +155,8 @@ def to_markdown(report: dict) -> str:
               f" ｜ 生成时间：{report['generated_at']}\n\n")
     rules = "判定规则：\n" + "\n".join(f"- {key}：{text}"
                                    for key, text in report["scoring_rules"].items()) + "\n\n"
-    rows = ["| 案例 | 模式 | 覆盖率 | 严重遗漏 | 需求条数 | 任务数 | 无效依赖 | 人工介入 | 耗时(s) | tokens |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    rows = ["| 案例 | 模式 | 覆盖率 | 严重遗漏 | 需求条数 | 任务数 | 无效依赖 | 人工介入 | 调用数 | 耗时(s) | tokens |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in report["results"]:
         rows.append(
             f"| {row['case']} | {row['mode']} | {row['requirements']['coverage_rate']:.0%} "
@@ -162,6 +164,7 @@ def to_markdown(report: dict) -> str:
             f"| {row['requirements']['count']} | {row['plan']['tasks']} "
             f"| {len(row['plan']['invalid_dependencies'])} "
             f"| {row['run']['human_interventions']} "
+            f"| {row['run'].get('ai_calls', '-')} "
             f"| {row['run']['duration_s']} | {row['run']['tokens'] or '-'} |")
     failed = [row for row in report["results"] if row.get("errors")]
     notes = ""

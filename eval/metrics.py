@@ -71,6 +71,7 @@ def invalid_dependencies(tasks: list[dict]) -> list[str]:
 def summarize(case: dict, requirement_texts: list[str], tasks: list[dict],
               *, duration_s: float, tokens: int | None,
               human_interventions: int, mode: str,
+              ai_calls: int | None = None,
               errors: list[str] | None = None) -> dict:
     cov = coverage(requirement_texts, case.get("must_have") or [])
     deps = invalid_dependencies(tasks)
@@ -82,6 +83,7 @@ def summarize(case: dict, requirement_texts: list[str], tasks: list[dict],
             "duration_s": round(duration_s, 3),
             "tokens": tokens,
             "human_interventions": human_interventions,
+            "ai_calls": ai_calls,
         },
         "plan": {
             "tasks": len(tasks),
