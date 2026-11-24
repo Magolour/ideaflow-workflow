@@ -143,16 +143,6 @@ class SpecFlowTest(unittest.TestCase):
         second = run(load_case(TIGHT), out_dir=self.root, case_name=TIGHT)
         self.assertNotEqual(first.run_id, second.run_id)
 
-    @unittest.skip("待实现：讨论阶段接进规格流程（discuss=True 时先跑六角色讨论）")
-    def test_discussion_stages_run_before_spec(self) -> None:
-        """规格流程必须真的经过讨论，而不是直接切原文。"""
-        agent = RecordingAgent()
-        run(load_case("campus-books"), out_dir=self.root,
-            case_name="campus-books", agent=agent, discuss=True)
-        stages = set(agent.stages)
-        for stage in ("clarify", "diverge", "critique", "synthesize"):
-            self.assertIn(stage, stages, f"讨论阶段缺少 {stage}")
-
     def test_unknown_case_is_reported(self) -> None:
         with self.assertRaises(ContractError) as caught:
             load_case("not-exist")
