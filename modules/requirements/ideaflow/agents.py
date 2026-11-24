@@ -571,7 +571,7 @@ class LLMAgent:
             self._log(stage, role, attempt, "ok", started, usage=usage)
             return data
         raise ContractError("LLM_BAD_OUTPUT",
-                            f"模型输出未通过校验：{last_error}", stage)
+                            f"{stage} 阶段输出未通过校验：{last_error}", stage)
 
     # ---------- 请求与解析 ----------
 
@@ -642,11 +642,19 @@ class LLMAgent:
                      data: dict[str, Any]) -> dict[str, Any]:
         if stage == "synthesize":
             known = {row["id"] for row in context.get("claims", [])}
-            return validate_synthesis(data, known_claims=known)
+            return validate_synthesis(self._normalize_synthesis(data, known),
+                                      known_claims=known)
         if stage == "sign":
             known = {row["id"] for row in context.get("options", [])}
-            data["stances"] = [row for row in (data.get("stances") or [])
-                               if isinstance(row, dict) and row.get("option") in known]
+            rows = []
+            for row in (data.get("stances") or []):
+                if not isinstance(row, dict) or row.get("option") not in known:
+                    continue
+                row["option"] = str(row["option"])
+                row["reason"] = str(row.get("reason") or "").strip()
+                row["condition"] = str(row.get("condition") or "").strip()
+                rows.append(row)
+            data["stances"] = rows
             return validate_stances(data, role_id=role.id, known_options=known)
         if stage == "draft":
             return self._normalize_draft(data, context)
@@ -658,17 +666,39 @@ class LLMAgent:
         data["role"] = role.id
 
         # 模型常见的形状偏差先归一化，避免整条 run 因一个字段中止
-        data["claims"] = [row for row in data["claims"]
-                          if isinstance(row, dict) and str(row.get("text") or "").strip()]
+        claims = []
         for row in data["claims"]:
+            if not isinstance(row, dict):
+                continue
+            row["text"] = str(row.get("text") or "").strip()
+            if not row["text"]:
+                continue
+            row["reason"] = str(row.get("reason") or "").strip() or "模型未说明依据"
             row["assumes"] = []
             if row.get("evidence") not in ("fact", "rule", "value", "assumption"):
                 row["evidence"] = "rule"
-        data["assumptions"] = [row for row in data["assumptions"]
-                               if isinstance(row, dict) and str(row.get("text") or "").strip()]
+            claims.append(row)
+        data["claims"] = claims
+
+        assumptions = []
         for row in data["assumptions"]:
-            row.setdefault("verify_by", "待验证")
-        data["objections"] = [row for row in data["objections"] if isinstance(row, dict)]
+            if not isinstance(row, dict):
+                continue
+            row["text"] = str(row.get("text") or "").strip()
+            if not row["text"]:
+                continue
+            row["verify_by"] = str(row.get("verify_by") or "").strip() or "待验证"
+            assumptions.append(row)
+        data["assumptions"] = assumptions
+
+        objections = []
+        for row in data["objections"]:
+            if not isinstance(row, dict):
+                continue
+            row["text"] = str(row.get("text") or "").strip() or "未说明异议"
+            row["consequence"] = str(row.get("consequence") or "").strip() or "未说明后果"
+            objections.append(row)
+        data["objections"] = objections
         data["questions"] = [str(row).strip() for row in data["questions"] if str(row).strip()]
 
         if stage == "draft":
@@ -695,7 +725,9 @@ class LLMAgent:
                 row["severity"] = (row.get("severity")
                                    if row.get("severity") in ("blocking", "major", "minor")
                                    else "major")
-                row.setdefault("consequence", "未说明后果")
+                row["consequence"] = str(row.get("consequence") or "").strip() \
+                    or "未说明后果"
+                row["text"] = str(row.get("text") or "").strip() or "未说明异议"
                 kept.append(row)
             data["objections"] = kept
             if not kept and not data["claims"] and not data["questions"]:
@@ -709,7 +741,7 @@ class LLMAgent:
                     continue
                 if row.get("position") not in ("accept", "refute", "conditional"):
                     continue
-                row.setdefault("argument", "未提供理由")
+                row["argument"] = str(row.get("argument") or "").strip() or "未提供理由"
                 if row.get("evidence") not in ("fact", "rule", "value", "assumption"):
                     row["evidence"] = "rule"
                 kept.append(row)
@@ -726,13 +758,93 @@ class LLMAgent:
                     continue
                 if row.get("verdict") not in ("preserved", "deferred", "omitted", "distorted"):
                     continue
-                row.setdefault("note", "未说明")
+                row["note"] = str(row.get("note") or "").strip() or "未说明"
                 kept.append(row)
             data["reviews"] = kept
             if not kept:
                 raise ContractError("EMPTY_REVIEWS",
                                     "必须复核至少一条自己的论点，claim 用给定编号",
                                     "reviews")
+        return data
+
+    @staticmethod
+    def _normalize_synthesis(data: dict[str, Any], known: set[str]) -> dict[str, Any]:
+        def text(value: Any, default: str = "") -> str:
+            return str(value if value is not None else "").strip() or default
+
+        options = []
+        for index, row in enumerate(data.get("options") or []):
+            if not isinstance(row, dict):
+                continue
+            name = text(row.get("name"), f"方案{index + 1}")
+            scope = [text(item) for item in (row.get("scope") or []) if text(item)]
+            options.append({
+                "key": text(row.get("key"), chr(65 + index)),
+                "name": name,
+                "scope": scope or [name],
+                "cost_days": text(row.get("cost_days"), "待估算"),
+                "risk": text(row.get("risk"), "未说明"),
+                "tradeoffs": text(row.get("tradeoffs"), "未说明"),
+                "based_on": [str(item) for item in (row.get("based_on") or [])
+                             if str(item) in known],
+            })
+        data["options"] = options
+
+        decisions = []
+        for row in data.get("decisions") or []:
+            if not isinstance(row, dict):
+                continue
+            scope, choice = text(row.get("scope")), text(row.get("choice"))
+            if not scope or not choice:
+                continue
+            decisions.append({
+                "scope": scope, "choice": choice,
+                "reason": text(row.get("reason"), "未说明理由"),
+                "based_on": [str(item) for item in (row.get("based_on") or [])
+                             if str(item) in known],
+            })
+        data["decisions"] = decisions
+
+        data["not_adopted"] = [
+            {"claim": str(row["claim"]), "reason": text(row.get("reason"), "未说明理由")}
+            for row in (data.get("not_adopted") or [])
+            if isinstance(row, dict) and str(row.get("claim")) in known
+        ]
+        data["non_goals"] = [
+            {"item": text(row.get("item")), "reason": text(row.get("reason"), "未说明理由")}
+            for row in (data.get("non_goals") or [])
+            if isinstance(row, dict) and text(row.get("item"))
+        ]
+
+        narrative = data.get("narrative") if isinstance(data.get("narrative"), dict) else {}
+        data["narrative"] = {key: text(narrative.get(key), "未说明")
+                             for key in ("background", "users", "value",
+                                         "tech", "ops", "metrics")}
+
+        packages = []
+        for index, row in enumerate(data.get("work_packages") or []):
+            if not isinstance(row, dict):
+                continue
+            try:
+                optimistic = float(row.get("optimistic"))
+                likely = float(row.get("likely"))
+                pessimistic = float(row.get("pessimistic"))
+            except (TypeError, ValueError):
+                optimistic, likely, pessimistic = 1.0, 2.0, 4.0
+            if not (0 < optimistic <= likely <= pessimistic):
+                optimistic, likely, pessimistic = 1.0, 2.0, max(2.0, pessimistic)
+            packages.append({
+                "name": text(row.get("name"), f"工作包{index + 1}"),
+                "deliverable": text(row.get("deliverable"), "可运行版本"),
+                "optimistic": optimistic, "likely": likely, "pessimistic": pessimistic,
+            })
+        if not packages:
+            packages = [{"name": "交付", "deliverable": "可运行版本",
+                         "optimistic": 1.0, "likely": 2.0, "pessimistic": 4.0}]
+        data["work_packages"] = packages
+
+        data["open_questions"] = [text(item) for item in (data.get("open_questions") or [])
+                                  if text(item)]
         return data
 
     @staticmethod
