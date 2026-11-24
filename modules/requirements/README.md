@@ -421,7 +421,7 @@ python -m ideaflow.spec_cli escalate --dir runs/tight-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 144 项测试
+python -m unittest discover -s tests -v     # 187 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -449,7 +449,7 @@ ideaflow/
 ├── contracts.py    # 编号、依据类型、立场四态、结构校验
 ├── blackboard.py   # 黑板、事件流、共识基础判定
 ├── roles.py        # 8 张角色卡：关注点 / 必答问题 / 禁区
-├── agents.py       # Agent 接口 + 离线 MockAgent
+├── agents.py       # Agent 接口 + 离线 MockAgent + OpenAI 兼容 LLMAgent + OpenAI 兼容 LLMAgent
 ├── convergence.py  # 分歧分类、终止条件、关键意见、复核与伪共识
 ├── pipeline.py     # 七阶段编排与落盘
 ├── proposal.py     # 11 章 Proposal 渲染
@@ -477,9 +477,13 @@ ideaflow/
 tests/
 ├── test_artifacts.py
 ├── test_audit.py
+├── test_constraints.py
 ├── test_drafts.py
 ├── test_escalate.py
 ├── test_export.py
+├── test_llm_agent.py
+├── test_llm_drafts.py
+├── test_llm_isolation.py
 ├── test_pipeline.py
 ├── test_race.py
 ├── test_reviews.py
