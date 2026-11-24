@@ -145,6 +145,34 @@ class LLMAgentTest(unittest.TestCase):
         self.assertEqual([row["claim"] for row in data["reviews"]], ["CLM-001"])
         self.assertIn("EMPTY_REVIEWS", transport.calls[1]["messages"][-1]["content"])
 
+    def test_claim_reason_is_coerced(self) -> None:
+        reply = json.dumps({"role": "ba", "claims": [
+            {"text": "范围应收窄", "reason": ["依据一", "依据二"], "evidence": "rule"}]},
+            ensure_ascii=False)
+        agent, _ = agent_with([reply])
+        data = agent.respond("diverge", ROLE, {"idea": "x", "constraints": []})
+        self.assertIsInstance(data["claims"][0]["reason"], str)
+        self.assertIn("依据一", data["claims"][0]["reason"])
+
+    def test_synthesis_normalizes_missing_text(self) -> None:
+        reply = json.dumps({
+            "options": [
+                {"key": "A", "name": "交付优先", "cost_days": 5},
+                {"key": "B", "name": "体验优先"},
+            ],
+            "decisions": [{"scope": "范围", "choice": "收窄"}],
+            "narrative": {},
+            "work_packages": [{"name": "交付", "deliverable": "版本",
+                               "optimistic": "2", "likely": "3", "pessimistic": "4"}],
+        }, ensure_ascii=False)
+        agent, _ = agent_with([reply])
+        data = agent.respond("synthesize", ROLE,
+                             {"idea": "x", "claims": [{"id": "CLM-001"}]})
+        self.assertEqual(len(data["options"]), 2)
+        self.assertTrue(data["options"][0]["scope"])
+        self.assertEqual(data["work_packages"][0]["likely"], 3.0)
+        self.assertEqual(data["narrative"]["background"], "未说明")
+
     def test_synthesize_is_validated(self) -> None:
         bad = json.dumps({"options": [{"key": "A", "name": "唯一方案", "scope": ["x"],
                                       "cost_days": "1 天", "risk": "低",

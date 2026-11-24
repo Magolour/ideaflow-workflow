@@ -58,12 +58,13 @@ def real_agents() -> list[str]:
             and not getattr(value, "_is_protocol", False)]
 
 
-def check(case_name: str, agent=None) -> dict:
+def check(case_name: str, agent=None, discuss: bool = False) -> dict:
     from ideaflow.specflow import load_case, run as run_spec  # noqa: WPS433
 
     by_file = load_schemas()
     with tempfile.TemporaryDirectory() as tmp:
-        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent)
+        result = run_spec(load_case(case_name), out_dir=tmp, agent=agent,
+                          discuss=discuss)
         calls = 0
         log = result.out_dir / "ai_calls.jsonl"
         if log.exists():
@@ -119,14 +120,15 @@ def main() -> int:
             return 2
 
     try:
-        result = check(args.case, agent=agent)
+        result = check(args.case, agent=agent, discuss=args.require_real)
     except Exception as exc:  # 调用失败、案例不存在、契约异常
         print(f"运行失败：{type(exc).__name__}: {exc}")
         return 2
 
     print(f"案例 {result['case']}：快照 {result['requirements']} 项，"
           f"模块 {result['modules']} 个，规格状态 {result['status']}")
-    print(f"模型：{result['agent']} ｜ 真实调用 {result['ai_calls']} 次")
+    print(f"模型：{result['agent']} ｜ 真实调用 {result['ai_calls']} 次"
+          f" ｜ 讨论 {'开启' if args.require_real else '关闭'}")
 
     if result["errors"]:
         print("契约校验：失败")

@@ -408,10 +408,53 @@ class Snapshot:
         return snapshot
 
 
+def _discussion_items(board: Any) -> list[dict[str, Any]]:
+    """把讨论结论映射成快照条目，正文仍以原文切分为准。"""
+    items: list[dict[str, Any]] = []
+
+    def add(kind: str, text: str, priority: str, acceptance: list[str] | None = None) -> None:
+        clean = str(text).strip()
+        if not clean:
+            return
+        items.append({
+            "type": kind, "text": clean, "priority": priority,
+            "acceptance": acceptance or ([] if kind == "open" else _acceptance(clean)),
+            "source": {"section": "讨论补充", "start_line": 0, "end_line": 0,
+                       "excerpt": clean[:120]},
+        })
+
+    for row in getattr(board, "assumptions", []):
+        text = row.get("text") if isinstance(row, dict) else row
+        add("open", f"推断假设：{text}", "should")
+
+    for row in getattr(board, "open_questions", []):
+        if not isinstance(row, dict) or row.get("resolution"):
+            continue
+        add("open", row.get("text", ""), "must" if row.get("blocking") else "should")
+
+    blocking = getattr(board, "unresolved_blocking", None)
+    if callable(blocking):
+        for row in blocking():
+            text = row.get("text", "")
+            consequence = row.get("consequence", "")
+            add("open", f"未解决阻断：{text}（{consequence}）" if consequence
+                else f"未解决阻断：{text}", "must")
+
+    for row in getattr(board, "non_goals", []):
+        if not isinstance(row, dict):
+            continue
+        item = row.get("item", "")
+        reason = row.get("reason", "")
+        if item:
+            add("constraint", f"不做 {item}（{reason}）" if reason else f"不做 {item}",
+                "must", [f"确认首版不实现 {item}"])
+    return items
+
+
 def build(raw_text: str, *, constraints: Iterable[str] | None = None,
-          questions: Iterable[str] | None = None,
+          questions: Iterable[str] | None = None, board: Any | None = None,
           snapshot_id: str = "REQSET-001", actor: str = "parser") -> Snapshot:
-    """从原始输入构建 v1 快照。额外约束/问题来自命令行或表单。"""
+    """从原始输入构建 v1 快照。额外约束/问题来自命令行或表单；可选吸收讨论结论。"""
     if not raw_text or not raw_text.strip():
         raise ContractError("EMPTY_INPUT", "输入不能为空", "raw_text")
 
@@ -436,6 +479,9 @@ def build(raw_text: str, *, constraints: Iterable[str] | None = None,
             "source": {"section": "补充问题", "start_line": 0, "end_line": 0,
                        "excerpt": clean[:120]},
         })
+
+    if board is not None:
+        parsed.extend(_discussion_items(board))
 
     items = _dedupe(parsed)
     if not items:

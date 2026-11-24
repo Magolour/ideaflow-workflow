@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ideaflow.agents import MockAgent
 from ideaflow.contracts import ContractError
+from ideaflow.snapshot import build as build_snapshot
 from ideaflow.specflow import load_case, run
 
 
@@ -25,6 +26,38 @@ class RecordingAgent(MockAgent):
 TIGHT = "campus-books-tight"
 
 
+class RecordingAgent(MockAgent):
+    def __init__(self) -> None:
+        self.stages: list[str] = []
+
+    def respond(self, stage, role, context):
+        self.stages.append(stage)
+        return super().respond(stage, role, context)
+
+
+class DiscussionMappingTest(unittest.TestCase):
+    def test_board_maps_to_snapshot_items(self) -> None:
+        class Board:
+            assumptions = [{"text": "学生愿意线下交易"}]
+            open_questions = [{"text": "谁负责验收？", "blocking": True, "resolution": ""},
+                              {"text": "已答问题", "blocking": False, "resolution": "已答"}]
+            non_goals = [{"item": "在线支付", "reason": "资质不足"}]
+
+            @staticmethod
+            def unresolved_blocking():
+                return [{"text": "范围不清", "consequence": "无法验收"}]
+
+        snapshot = build_snapshot("做一个校园二手书小程序。", board=Board())
+        texts = [item["text"] for item in snapshot.items]
+        self.assertTrue(any(text.startswith("推断假设：") for text in texts))
+        self.assertTrue(any(text.startswith("未解决阻断：") for text in texts))
+        self.assertIn("谁负责验收？", texts)
+        self.assertNotIn("已答问题", texts)
+        self.assertTrue(any(text.startswith("不做 在线支付") for text in texts))
+        blocking = [item for item in snapshot.items if item["text"].startswith("未解决阻断：")]
+        self.assertEqual(blocking[0]["priority"], "must")
+
+
 class SpecFlowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -32,6 +65,28 @@ class SpecFlowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def test_discussion_stages_run_before_spec(self) -> None:
+        agent = RecordingAgent()
+        with tempfile.TemporaryDirectory() as folder:
+            result = run(load_case("campus-books"), out_dir=folder,
+                         agent=agent, discuss=True)
+            for stage in ("clarify", "diverge", "critique", "synthesize", "sign", "review"):
+                self.assertIn(stage, agent.stages)
+            self.assertTrue((result.out_dir / "discussion").exists())
+            self.assertTrue(list((result.out_dir / "discussion").glob("*/proposal.md")))
+            self.assertTrue(any(item["source"]["section"] == "讨论补充"
+                                and item["text"].startswith("推断假设：")
+                                for item in result.snapshot.items))
+
+    def test_discussion_is_off_by_default(self) -> None:
+        agent = RecordingAgent()
+        with tempfile.TemporaryDirectory() as folder:
+            result = run(load_case("campus-books"), out_dir=folder, agent=agent)
+            self.assertEqual(agent.stages, [])
+            self.assertFalse((result.out_dir / "discussion").exists())
+            self.assertFalse(any(item["source"]["section"] == "讨论补充"
+                                 for item in result.snapshot.items))
 
     def test_tight_case_revises_then_escalates(self) -> None:
         result = run(load_case(TIGHT), out_dir=self.root, case_name=TIGHT)
@@ -87,16 +142,6 @@ class SpecFlowTest(unittest.TestCase):
         first = run(load_case(TIGHT), out_dir=self.root, case_name=TIGHT)
         second = run(load_case(TIGHT), out_dir=self.root, case_name=TIGHT)
         self.assertNotEqual(first.run_id, second.run_id)
-
-    @unittest.skip("待实现：讨论阶段接进规格流程（discuss=True 时先跑六角色讨论）")
-    def test_discussion_stages_run_before_spec(self) -> None:
-        """规格流程必须真的经过讨论，而不是直接切原文。"""
-        agent = RecordingAgent()
-        run(load_case("campus-books"), out_dir=self.root,
-            case_name="campus-books", agent=agent, discuss=True)
-        stages = set(agent.stages)
-        for stage in ("clarify", "diverge", "critique", "synthesize"):
-            self.assertIn(stage, stages, f"讨论阶段缺少 {stage}")
 
     def test_unknown_case_is_reported(self) -> None:
         with self.assertRaises(ContractError) as caught:
