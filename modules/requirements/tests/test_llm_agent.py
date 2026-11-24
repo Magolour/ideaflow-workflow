@@ -292,8 +292,9 @@ class LLMAgentTest(unittest.TestCase):
         self.assertNotIn("response_format", captured)
 
     def test_missing_credentials(self) -> None:
-        with self.assertRaises(ContractError) as caught:
-            LLMAgent(api_key="", model="m")
+        with patch.dict(os.environ, {"AI_API_KEY": "", "DASHSCOPE_API_KEY": ""}):
+            with self.assertRaises(ContractError) as caught:
+                LLMAgent(api_key="", model="m")
         self.assertEqual(caught.exception.code, "LLM_NOT_CONFIGURED")
 
 

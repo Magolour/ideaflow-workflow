@@ -65,5 +65,36 @@ class GeneratedArtifactContractTest(unittest.TestCase):
             self.assertIn("write_paths", module)
 
 
+class DiscussionEnrichedContractTest(unittest.TestCase):
+    """带讨论产物的快照同样要过契约，防止"讨论补充"字段游离在 schema 之外。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from ideaflow.agents import MockAgent
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.result = run(load_case("campus-books"), out_dir=cls.tmp.name,
+                         agent=MockAgent(), discuss=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_snapshot_with_discussion_matches_contract(self):
+        errors = sorted(validator_for("snapshot.schema.json")
+                        .iter_errors(self.result.snapshot.to_json()), key=str)
+        self.assertEqual([], [f"{list(error.absolute_path)} {error.message}" for error in errors])
+
+    def test_discussion_items_are_traceable(self):
+        items = [item for item in self.result.snapshot.to_json()["items"]
+                 if item["source"]["section"] == "讨论补充"]
+        self.assertTrue(items, "讨论应当向快照补充条目")
+        for item in items:
+            self.assertIn(item["type"], {"requirement", "constraint", "open"})
+            self.assertTrue(item["text"].strip())
+        self.assertTrue(any(item["source"].get("actor") for item in items),
+                        "讨论条目应记录提出者")
+
+
 if __name__ == "__main__":
     unittest.main()

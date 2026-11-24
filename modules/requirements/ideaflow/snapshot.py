@@ -408,29 +408,58 @@ class Snapshot:
         return snapshot
 
 
-def _discussion_items(board: Any) -> list[dict[str, Any]]:
-    """把讨论结论映射成快照条目，正文仍以原文切分为准。"""
-    items: list[dict[str, Any]] = []
+def _normalize_text(text: Any) -> str:
+    """去重用的归一化：去掉空白与标点，统一小写。"""
+    return re.sub(r"[\s，。；、,.;:：!！?？（）()\[\]【】\"'“”‘’]+", "",
+                  str(text)).lower()
 
-    def add(kind: str, text: str, priority: str, acceptance: list[str] | None = None) -> None:
+
+def _discussion_items(board: Any, *, existing: Iterable[str] = (),
+                      limit: int | None = None) -> list[dict[str, Any]]:
+    """把讨论结论映射成快照条目，正文仍以原文切分为准。
+
+    - 与原文条目、彼此之间做归一化去重；
+    - 条目带上提出者与轮次（source.actor / source.round），便于追溯；
+    - limit 只约束可选项；must（阻断、非目标）一律保留，避免把关键结论截掉。
+    """
+    items: list[dict[str, Any]] = []
+    seen = {_normalize_text(text) for text in existing}
+
+    def add(kind: str, text: str, priority: str,
+            acceptance: list[str] | None = None,
+            actor: Any = None, round_no: Any = None,
+            key_text: Any = None) -> None:
         clean = str(text).strip()
-        if not clean:
+        key = _normalize_text(clean if key_text is None else key_text)
+        if not clean or key in seen:
             return
+        seen.add(key)
+        source: dict[str, Any] = {
+            "section": "讨论补充", "start_line": 0, "end_line": 0,
+            "excerpt": clean[:120],
+        }
+        if actor:
+            source["actor"] = str(actor)
+        if isinstance(round_no, int) and round_no >= 0:
+            source["round"] = round_no
         items.append({
             "type": kind, "text": clean, "priority": priority,
             "acceptance": acceptance or ([] if kind == "open" else _acceptance(clean)),
-            "source": {"section": "讨论补充", "start_line": 0, "end_line": 0,
-                       "excerpt": clean[:120]},
+            "source": source,
         })
 
     for row in getattr(board, "assumptions", []):
         text = row.get("text") if isinstance(row, dict) else row
-        add("open", f"推断假设：{text}", "should")
+        actor = row.get("role") if isinstance(row, dict) else None
+        round_no = row.get("round") if isinstance(row, dict) else None
+        add("open", f"推断假设：{text}", "should", actor=actor, round_no=round_no,
+            key_text=text)
 
     for row in getattr(board, "open_questions", []):
         if not isinstance(row, dict) or row.get("resolution"):
             continue
-        add("open", row.get("text", ""), "must" if row.get("blocking") else "should")
+        add("open", row.get("text", ""), "must" if row.get("blocking") else "should",
+            actor=row.get("source"), round_no=row.get("round"))
 
     blocking = getattr(board, "unresolved_blocking", None)
     if callable(blocking):
@@ -438,7 +467,8 @@ def _discussion_items(board: Any) -> list[dict[str, Any]]:
             text = row.get("text", "")
             consequence = row.get("consequence", "")
             add("open", f"未解决阻断：{text}（{consequence}）" if consequence
-                else f"未解决阻断：{text}", "must")
+                else f"未解决阻断：{text}", "must",
+                actor=row.get("role"), round_no=row.get("round"))
 
     for row in getattr(board, "non_goals", []):
         if not isinstance(row, dict):
@@ -446,8 +476,13 @@ def _discussion_items(board: Any) -> list[dict[str, Any]]:
         item = row.get("item", "")
         reason = row.get("reason", "")
         if item:
-            add("constraint", f"不做 {item}（{reason}）" if reason else f"不做 {item}",
-                "must", [f"确认首版不实现 {item}"])
+            add("constraint", f"不做 {item}", "must",
+                [f"确认首版不实现 {item}"])
+
+    if limit is not None:
+        must = [row for row in items if row["priority"] == "must"]
+        optional = [row for row in items if row["priority"] != "must"]
+        items = must + optional[:max(0, limit - len(must))]
     return items
 
 
@@ -481,7 +516,11 @@ def build(raw_text: str, *, constraints: Iterable[str] | None = None,
         })
 
     if board is not None:
-        parsed.extend(_discussion_items(board))
+        parsed.extend(_discussion_items(
+            board,
+            existing=[str(row.get("text") or "") for row in parsed],
+            limit=max(8, len(parsed) * 2),
+        ))
 
     items = _dedupe(parsed)
     if not items:

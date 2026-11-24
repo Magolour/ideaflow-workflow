@@ -103,6 +103,27 @@ python -m ideaflow.server --port 8000
 与「讨论提案」并行的第二条链路，按评审要求逐项实现：先把输入固化成快照，
 再让两组独立出方案、逐份评审、整合成规格，最后做覆盖／冲突／验收自审查。
 
+默认直接切原文；要体现多 Agent 协作，先跑讨论再增强快照：
+
+```python
+from ideaflow.agents import LLMAgent
+from ideaflow.specflow import load_case, run
+
+run(load_case("campus-books"), out_dir="runs/discuss",
+    discuss=True, discuss_rounds=2, agent=LLMAgent())
+```
+
+| 映射 | 说明 |
+| --- | --- |
+| 原文 R/C | 保持逐字切分与来源行号 |
+| 假设 | → `open`，前缀“推断假设：” |
+| 未解决待澄清 / 阻断异议 | → `open`；阻断项 `priority=must` |
+| 非目标 | → `constraint`（“不做 X”，不带讨论理由） |
+| 讨论补充上限 | 原文条数的 2 倍；`must` 不参与截断 |
+| 重复项 | 去空白与标点后比对，原文、假设、问题之间去重 |
+
+讨论产物在 `target/discussion/`，模型调用记录合并到规格运行目录的 `ai_calls.jsonl`。
+
 完整链路（紧凑版案例，约 1 秒跑完）：
 
 ```bash
@@ -400,7 +421,7 @@ python -m ideaflow.spec_cli escalate --dir runs/tight-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 144 项测试
+python -m unittest discover -s tests -v     # 187 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
@@ -428,7 +449,7 @@ ideaflow/
 ├── contracts.py    # 编号、依据类型、立场四态、结构校验
 ├── blackboard.py   # 黑板、事件流、共识基础判定
 ├── roles.py        # 8 张角色卡：关注点 / 必答问题 / 禁区
-├── agents.py       # Agent 接口 + 离线 MockAgent
+├── agents.py       # Agent 接口 + 离线 MockAgent + OpenAI 兼容 LLMAgent + OpenAI 兼容 LLMAgent
 ├── convergence.py  # 分歧分类、终止条件、关键意见、复核与伪共识
 ├── pipeline.py     # 七阶段编排与落盘
 ├── proposal.py     # 11 章 Proposal 渲染
@@ -456,9 +477,13 @@ ideaflow/
 tests/
 ├── test_artifacts.py
 ├── test_audit.py
+├── test_constraints.py
 ├── test_drafts.py
 ├── test_escalate.py
 ├── test_export.py
+├── test_llm_agent.py
+├── test_llm_drafts.py
+├── test_llm_isolation.py
 ├── test_pipeline.py
 ├── test_race.py
 ├── test_reviews.py

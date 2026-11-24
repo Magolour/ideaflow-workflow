@@ -61,12 +61,14 @@ def forbidden_subjects(text: str) -> list[str]:
 
 
 def shares_topic(left: str, right: str, *, window: int = 2) -> bool:
-    """粗略判断两段文字是否在说同一件事：共享至少两个连续汉字。
+    """粗略判断两段文字是否在说同一件事。
 
-    “在线支付”与“站内支付”共享“支付”，“支付资质”与“不做在线支付”共享“支付”，
-    足以用于冲突提示；最终是否算冲突仍由人工问题兜底。
+    长主题（≥6 字）要求 3 字连续重叠，避免“跨校区自提调度”与“自提点”
+    因共享“自提”被误判；短主题（如“在线支付”）仍用 2 字，保留“支付”这类判断。
+    最终是否算冲突仍由人工问题兜底。
     """
     if not left or not right:
         return False
-    grams = {left[index:index + window] for index in range(len(left) - window + 1)}
+    size = 3 if len(left) >= 6 else window
+    grams = {left[index:index + size] for index in range(len(left) - size + 1)}
     return any(gram in right for gram in grams if gram.strip())

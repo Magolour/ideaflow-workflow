@@ -33,7 +33,9 @@
 10. `artifact`、`delivery` 已纳入本版，字段按"最小闭环"定义，执行侧实现后可再收紧；
 11. `config` 未纳入本版，当前用 `--mock` 参数与 `.env` 代替；
 12. 交付记录的 `plan_id` 可选：任务清单入口（夹具）没有计划号时省略；
-13. `Progress.spec_version` 取值约定为 `v{spec.version}`（如 v1），跨模块对接口径。
+13. `Progress.spec_version` 取值约定为 `v{spec.version}`（如 v1），跨模块对接口径；
+14. `snapshot` 条目来源新增可选 `actor` / `round`，用于追溯讨论提出者与轮次；
+    讨论补充条目上限为原文条目 3 倍（must 优先保留），防止真实模型把快照撑爆。
 
 ## 校验
 
