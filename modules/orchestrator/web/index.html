@@ -3,216 +3,411 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>IdeaFlow 编排器 · 多 Agent 接力</title>
+<title>IdeaFlow 工作台 · 可视化与交互（成员5）</title>
+<!--
+  模块五：工作台与可视化
+  契约：contracts/v2/openapi.yaml 的 Progress / TaskState / Edge，decision.schema.json，delivery.schema.json
+  原则：前端不存业务数据、不推断状态；只渲染 /api/progress 的快照 + 事件增量；
+        契约里的字段还没透传时（decisions / delivery / *_refs / artifact_ids）自动降级并明确标注。
+  验收对应：
+    1) 计划号、规格版本徽标            → header .badges
+    2) 按 layers 并排依赖图             → renderGraph()
+    3) 任务详情（交付物/验收项/来源/产物）→ renderDetail()
+    4) 决策记录                         → renderDecisions()
+    5) 交付确认按钮                     → renderDelivery() / confirmDelivery()
+    额外（模块说明要求）：运行时间线（阶段/角色/实质意见/修订）、暂停原因+可执行操作、刷新后恢复。
+-->
 <style>
   :root {
     --deep: #153F3A; --teal: #28675B; --teal2: #4D8273; --mint: #DDEAE3;
     --paper: #F4F6F2; --ink: #18332F; --muted: #5E716B; --line: #CBD9D2;
     --gold: #D6A756; --danger: #A34D45; --ok: #2F8F6B; --skip: #6C7F86;
+    --violet: #6F5FA8; --blue: #3C7A9E;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--paper); color: var(--ink);
     font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: 13px;
+    display: grid; grid-template-rows: auto 1fr; overflow: hidden;
   }
-  header {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 12px 20px; background: var(--deep); color: #fff;
+
+  /* ---------- 顶栏 ---------- */
+  header.top {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 18px; background: var(--deep); color: #fff;
   }
-  header h1 { margin: 0; font-family: SimSun, serif; font-size: 17px; letter-spacing: 1px; }
-  header .tag {
-    padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.12);
-    font-size: 11px; letter-spacing: .5px;
+  header.top h1 { margin: 0; font-family: SimSun, serif; font-size: 16px; letter-spacing: 1.2px; }
+  header.top .sub { font-size: 11px; color: #B7CCC6; letter-spacing: .5px; }
+  .badges { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    display: inline-flex; align-items: baseline; gap: 5px;
+    padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.16); font-size: 11px; line-height: 1.5;
+    white-space: nowrap;
   }
+  .badge b { font-weight: 700; letter-spacing: .3px; }
+  .badge .k { color: #9FBDB6; font-size: 10px; letter-spacing: .5px; }
+  .badge.plan b { color: #F0D8A6; }
+  .badge.spec b { color: #BFE3D3; }
+  .badge.graph b { color: #CFE0F5; }
+  .badge.muted b { color: #C9D6D2; font-weight: 400; }
+  .badge.hide { display: none; }
   header .spacer { flex: 1; }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
-  .app { display: grid; grid-template-columns: 300px minmax(0,1fr) 320px; gap: 12px; padding: 12px; height: calc(100vh - 52px); }
-  .app > section { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px;
+    border-radius: 999px; font-size: 11.5px; font-weight: 600;
+    background: rgba(255,255,255,.14); color: #fff;
+  }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill[data-s="completed"] { background: rgba(47,143,107,.30); color: #CFF0E1; }
+  .pill[data-s="waiting_human"], .pill[data-s="delivery_pending"] { background: rgba(214,167,86,.26); color: #FBE9C4; }
+  .pill[data-s="blocked"], .pill[data-s="aborted"] { background: rgba(163,77,69,.34); color: #F6D8D4; }
+  .pill[data-s="running"] { background: rgba(60,122,158,.30); color: #D6E8F4; }
+  .health { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #B7CCC6; }
+  .health i { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+  .health[data-ok="1"] i { background: #7FD3A8; }
+  .health[data-ok="0"] i { background: var(--danger); }
+
+  /* ---------- 三栏 ---------- */
+  .app {
+    display: grid; grid-template-columns: 330px minmax(0, 1fr) 392px;
+    gap: 10px; padding: 10px; min-height: 0;
+  }
+  .col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  #leftCol { overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
+  #leftCol > .card { flex: 0 0 auto; }
+  #leftCol::-webkit-scrollbar { width: 8px; }
+  #leftCol::-webkit-scrollbar-thumb { background: #C3D3CB; border-radius: 4px; }
   .card {
-    background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px;
-    box-shadow: 0 1px 2px rgba(96,118,110,.08);
+    background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 11px;
+    box-shadow: 0 1px 2px rgba(96,118,110,.08); min-height: 0;
   }
+  .card.grow { flex: 1; display: flex; flex-direction: column; }
   .card h2 {
-    margin: 0 0 8px; font-size: 12px; letter-spacing: 1px; color: var(--teal);
-    text-transform: uppercase;
+    margin: 0 0 8px; font-size: 11.5px; letter-spacing: 1.2px; color: var(--teal);
+    text-transform: uppercase; display: flex; align-items: center; gap: 7px;
   }
+  .card h2 .tail { margin-left: auto; font-size: 10.5px; letter-spacing: 0; color: var(--muted); text-transform: none; font-weight: 400; }
+  .hint { color: var(--muted); font-size: 11.5px; line-height: 1.65; margin: 8px 0 0; }
+  .hint code { background: var(--mint); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+
   textarea, input, select {
     width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px;
     font-family: inherit; font-size: 12.5px; color: var(--ink); background: #FBFCFA; resize: vertical;
   }
-  textarea:focus, input:focus { outline: 2px solid var(--mint); border-color: var(--teal2); }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--mint); border-color: var(--teal2); }
   button {
     border: 1px solid var(--teal); background: var(--teal); color: #fff; cursor: pointer;
     padding: 7px 11px; border-radius: 7px; font-family: inherit; font-size: 12.5px;
+    transition: background .12s, border-color .12s;
   }
-  button:hover { background: var(--teal2); }
+  button:hover:not(:disabled) { background: var(--teal2); }
   button.ghost { background: #fff; color: var(--teal); }
-  button.ghost:hover { background: var(--mint); }
+  button.ghost:hover:not(:disabled) { background: var(--mint); }
   button.warn { background: var(--danger); border-color: var(--danger); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.warn:hover:not(:disabled) { background: #8E4039; }
+  button.gold { background: var(--gold); border-color: var(--gold); color: #40320F; }
+  button.gold:hover:not(:disabled) { background: #C79A47; }
+  button:disabled { opacity: .42; cursor: not-allowed; }
+  button.tiny { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; }
+  .row { display: flex; gap: 7px; flex-wrap: wrap; }
   .row > * { flex: 1 1 0; }
-  .hint { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .stat { background: var(--mint); border-radius: 8px; padding: 7px 8px; }
-  .stat b { display: block; font-size: 17px; font-family: SimSun, serif; }
-  .stat span { font-size: 10.5px; color: var(--muted); }
+  .row.tight > * { flex: 0 0 auto; }
+
+  /* 状态统计 */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .stat { background: var(--mint); border-radius: 8px; padding: 6px 8px; }
+  .stat b { display: block; font-size: 17px; font-family: SimSun, serif; line-height: 1.2; }
+  .stat span { font-size: 10px; color: var(--muted); }
   .bar { height: 6px; background: var(--mint); border-radius: 999px; overflow: hidden; margin-top: 9px; }
-  .bar > i { display: block; height: 100%; background: var(--teal); width: 0; transition: width .3s; }
-  .graph-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
-  #graph { display: block; min-width: 100%; }
-  .events { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-  .event { border-left: 3px solid var(--line); padding: 4px 0 4px 8px; font-size: 11.5px; line-height: 1.5; }
-  .event b { color: var(--teal); font-weight: 600; }
-  .event time { color: #93a29c; font-size: 10.5px; margin-right: 5px; }
-  .event[data-tone="ok"] { border-color: var(--ok); }
-  .event[data-tone="warn"] { border-color: var(--gold); }
-  .event[data-tone="bad"] { border-color: var(--danger); }
-  .alert { display: none; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
-  .alert.show { display: block; }
-  .alert.bad { background: #FBEAE7; color: #7E322B; border: 1px solid #E7C2BC; }
-  .alert.ok { background: #E7F3EC; color: #1F5F47; border: 1px solid #BFDCCB; }
+  .bar > i { display: block; height: 100%; background: var(--teal); width: 0; transition: width .35s; }
+  .analysis { margin-top: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.6; max-height: 72px; overflow: auto; }
+
+  /* 等待人工 / 交付 */
+  .gate { border: 1px solid #E4CD9B; background: #FDF7EA; border-radius: 9px; padding: 9px 10px; }
+  .gate .t { font-weight: 700; font-size: 12.5px; color: #7A5A16; display: flex; gap: 6px; align-items: center; }
+  .gate .m { font-size: 11.5px; color: #7A5A16; line-height: 1.6; margin-top: 4px; word-break: break-all; }
+  .gate .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .gate.idle { border-color: var(--line); background: #F7F9F7; }
+  .gate.idle .t { color: var(--muted); font-weight: 600; }
+  .gate.idle .m { color: var(--muted); }
+  .gate.done { border-color: #BFDCCB; background: #EFF8F2; }
+  .gate.done .t { color: #1F5F47; }
+  .gate.done .m { color: #2C6D52; }
+
+  .delivery-items { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow: auto; }
+  .ditem { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; line-height: 1.5;
+           border-bottom: 1px dashed #E7EFE9; padding-bottom: 4px; }
+  .ditem:last-child { border-bottom: none; }
+  .ditem .ok { color: var(--ok); font-weight: 700; }
+  .ditem .no { color: var(--danger); font-weight: 700; }
+  .ditem .mono { font-family: Consolas, monospace; font-size: 11px; }
+
+  /* 画布 */
+  .canvas-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .canvas-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .canvas-bar .spacer { flex: 1; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .legend .ln { width: 16px; height: 0; border-top-width: 2px; border-top-style: solid; border-radius: 0; }
+  .canvas-wrap {
+    flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 9px;
+    background:
+      radial-gradient(circle at 1px 1px, #E7EEE9 1px, transparent 0) 0 0 / 22px 22px,
+      linear-gradient(#FCFDFB, #F7FAF7);
+  }
+  #graph { display: block; }
+  .empty {
+    height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 24px; line-height: 1.8;
+  }
+  .empty strong { color: var(--teal); font-size: 13.5px; }
+
+  /* 右栏 tabs */
+  .tabs { display: flex; gap: 5px; margin-bottom: 9px; flex-wrap: wrap; }
+  .tabs button { background: #fff; color: var(--teal); border-color: var(--line); padding: 5px 9px; font-size: 12px; }
+  .tabs button.active { background: var(--teal); color: #fff; border-color: var(--teal); }
+  .tabs button .n { font-size: 10px; opacity: .75; margin-left: 3px; }
+  .pane { flex: 1; min-height: 0; overflow: auto; padding-right: 2px; }
+  .pane::-webkit-scrollbar { width: 8px; }
+  .pane::-webkit-scrollbar-thumb { background: #C3D3CB; border-radius: 4px; }
+
+  /* 任务详情 */
+  .kv { display: grid; grid-template-columns: 62px 1fr; gap: 4px 8px; font-size: 12px; line-height: 1.6; }
+  .kv .k { color: var(--muted); }
+  .kv .v { word-break: break-word; }
+  .sect { margin-top: 11px; }
+  .sect > .st { font-size: 10.5px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  ol.acc, ul.plain { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.65; }
+  ol.acc li, ul.plain li { margin-bottom: 2px; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .chip {
+    display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 11px;
+    background: var(--mint); color: #245C4B; border: 1px solid #C9DED3; cursor: pointer;
+    font-family: Consolas, monospace;
+  }
+  .chip.static { cursor: default; }
+  .chip.r { background: #EAF2FA; border-color: #C6DAEE; color: #2B5B7E; }
+  .chip.m { background: #F3EFFA; border-color: #D8CDEE; color: #55407F; }
+  .chip.a { background: #FFF6E3; border-color: #EAD9B0; color: #7A5A16; }
+  .chip.dead { background: #F2F4F3; border-color: var(--line); color: var(--muted); cursor: default; }
+  .none { color: var(--muted); font-size: 11.5px; }
+  .warnbox {
+    margin-top: 8px; padding: 7px 9px; border-radius: 7px; background: #FDF7EA;
+    border: 1px solid #E4CD9B; color: #7A5A16; font-size: 11.5px; line-height: 1.6;
+  }
+
+  /* 决策记录 */
+  table.dec { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.dec th, table.dec td { text-align: left; padding: 5px 4px; border-bottom: 1px solid #EDF2EF; vertical-align: top; }
+  table.dec th { color: var(--muted); font-weight: 600; font-size: 10.5px; letter-spacing: .5px; }
+  table.dec td.mono { font-family: Consolas, monospace; font-size: 11px; white-space: nowrap; }
+  .act { padding: 1px 6px; border-radius: 4px; font-size: 10.5px; white-space: nowrap; }
+  .act.approve { background: #E4F3EC; color: #1F6B4C; }
+  .act.reject { background: #FBE9E6; color: #8E3A31; }
+  .act.skip { background: #EEF0F1; color: #4A5A62; }
+  .act.return { background: #FDF1DC; color: #7A5A16; }
+  .drow { border: 1px solid #E7EFE9; border-radius: 8px; padding: 7px 9px; margin-bottom: 7px; background: #FCFDFC; }
+  .dhead { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; }
+  .dhead .spacer { flex: 1; }
+  .dbody { font-size: 11.5px; line-height: 1.6; color: #3F5450; margin-top: 4px; }
+  .dbody .who { font-size: 10px; padding: 0 5px; border-radius: 3px; background: #EEF3F0; color: #4C6259; margin-right: 5px; }
+
+  /* 事件 / 时间线 */
+  .filters { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+  .filters button { padding: 3px 8px; font-size: 11.5px; background: #fff; color: var(--teal); border-color: var(--line); }
+  .filters button.active { background: var(--mint); border-color: var(--teal2); color: #1F5F47; font-weight: 600; }
+  .events { display: flex; flex-direction: column; gap: 5px; }
+  .ev { border-left: 3px solid var(--line); padding: 3px 0 3px 8px; font-size: 11.5px; line-height: 1.55; }
+  .ev b { color: var(--teal); font-weight: 600; }
+  .ev time { color: #93A29C; font-size: 10.5px; margin-right: 5px; font-family: Consolas, monospace; }
+  .ev .who { font-size: 10px; padding: 0 5px; border-radius: 3px; background: #EEF3F0; color: #4C6259; margin-right: 4px; }
+  .ev[data-tone="ok"] { border-color: var(--ok); }
+  .ev[data-tone="warn"] { border-color: var(--gold); }
+  .ev[data-tone="bad"] { border-color: var(--danger); }
+  .ev[data-tone="human"] { border-color: var(--blue); }
+  .ev[data-tone="change"] { border-color: var(--violet); }
+  .tl { position: relative; padding-left: 14px; }
+  .tl::before { content: ""; position: absolute; left: 5px; top: 4px; bottom: 4px; width: 2px; background: #E6EDE9; }
+  .stage {
+    position: relative; margin: 10px 0 6px; font-size: 10.5px; letter-spacing: 1px;
+    color: var(--teal); font-weight: 700;
+  }
+  .stage::before {
+    content: ""; position: absolute; left: -14px; top: 4px; width: 9px; height: 9px;
+    border-radius: 50%; background: #fff; border: 2px solid var(--teal2);
+  }
+  .tl .ev { margin-bottom: 5px; }
+  .revlink {
+    margin-top: 6px; padding: 8px 9px; border-radius: 8px; background: #F6F3FC;
+    border: 1px solid #DCD3F0; font-size: 11.5px; line-height: 1.6; color: #4B3D73;
+  }
+  .revlink b { color: #4B3D73; }
+  .revlink .chip { margin-top: 4px; }
+
+  /* 弹窗 */
   .drawer {
     position: fixed; inset: 0; background: rgba(21,63,58,.42); display: none;
-    align-items: center; justify-content: center; padding: 24px; z-index: 20;
+    align-items: center; justify-content: center; padding: 24px; z-index: 30;
   }
   .drawer.open { display: flex; }
-  .drawer .panel { background: #fff; border-radius: 12px; width: min(720px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
-  .drawer .panel header { background: #fff; color: var(--ink); padding: 14px 16px; border-bottom: 1px solid var(--line); }
-  .drawer .panel .body { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
-  .drawer .panel footer { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
-  .tabs { display: flex; gap: 6px; }
-  .tabs button { background: #fff; color: var(--teal); }
-  .tabs button.active { background: var(--teal); color: #fff; }
-  code.json { font-family: Consolas, monospace; }
-  .mono { font-family: Consolas, monospace; font-size: 11.5px; }
+  .drawer .panel {
+    background: #fff; border-radius: 12px; width: min(720px, 100%); max-height: 86vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .drawer .panel > header { padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  .drawer .panel > header strong { font-size: 13.5px; }
+  .drawer .panel > .body { padding: 13px 16px; overflow: auto; display: flex; flex-direction: column; gap: 9px; }
+  .drawer .panel > footer { padding: 11px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(10px);
+    background: var(--deep); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 12px;
+    opacity: 0; transition: .22s; pointer-events: none; z-index: 40; max-width: 80vw;
+  }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.bad { background: var(--danger); }
+  .toast.ok { background: #1F6B4C; }
+  .mono { font-family: Consolas, monospace; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
-  .gate-node { animation: pulse 1.4s ease-in-out infinite; }
+  .pulse { animation: pulse 1.5s ease-in-out infinite; }
 </style>
 </head>
 <body>
-<header>
-  <h1>IdeaFlow 编排器</h1>
-  <span class="tag">多 Agent 接力</span>
-  <span class="tag mono" id="ver">未启动</span>
+
+<header class="top">
+  <h1>IdeaFlow 工作台</h1>
+  <span class="sub">可视化与交互</span>
+  <div class="badges">
+    <span class="badge plan" id="bPlan" title="计划号来自 plan.json 或 spec 入口"><span class="k">PLAN</span><b>—</b></span>
+    <span class="badge spec" id="bSpec" title="规格版本来自需求模块或 spec 入参"><span class="k">SPEC</span><b>—</b></span>
+    <span class="badge graph" id="bGraph" title="每次变更/重排递增"><span class="k">GRAPH</span><b>—</b></span>
+    <span class="badge muted" id="bList" title="任务清单版本"><span class="k">LIST</span><b>—</b></span>
+  </div>
   <span class="spacer"></span>
-  <span class="dot" id="health"></span>
-  <span class="tag" id="healthText">连接中</span>
+  <span class="pill" id="statusPill" data-s="created"><i></i>已创建</span>
+  <span class="health" id="health" data-ok="0"><i></i><span id="healthText">连接中</span></span>
 </header>
 
 <div class="app">
-  <section>
+
+  <!-- ================= 左栏 ================= -->
+  <div class="col" id="leftCol">
     <div class="card">
-      <h2>① 需求输入</h2>
-      <textarea id="req" rows="5" placeholder="用一句话描述项目，例如：做一个聊天小程序，包含登录、会话列表、消息收发和未读提醒；也可直接粘贴设计规格或任务 JSON"></textarea>
+      <h2>① 运行入口<span class="tail" id="entryTag">未输入</span></h2>
+      <textarea id="req" rows="5" placeholder="一句话想法，或直接粘贴计划 / 设计规格 / 任务清单 JSON。&#10;例：做一个校园二手书交易小程序，支持发布、搜索和线下交易"></textarea>
       <div class="row" style="margin-top:8px">
-        <button id="btnStart">生成任务并编排</button>
+        <button id="btnStart">开始编排</button>
+        <button id="btnSample" class="ghost" style="flex:0 0 auto">示例</button>
       </div>
-      <p class="hint" style="margin:8px 0 0">
-        提交后由大模型拆解为任务清单，再自动分析依赖并建图。也可直接粘贴设计规格 JSON（含 modules）或任务 JSON，跳过需求讨论直接编排。
+      <p class="hint">
+        识别四种入口：<code>requirement</code> 想法、<code>modules</code> 设计规格、<code>plan_id</code> 计划、<code>tasks</code> 任务清单。
+        粘贴 JSON 后按内容自动识别，入口标签会显示识别结果。
       </p>
     </div>
 
     <div class="card">
-      <h2>② 人工操作</h2>
-      <div class="row">
-        <button id="btnApprove">放行</button>
-        <button id="btnSkip" class="ghost">跳过</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnReject" class="warn">驳回</button>
-        <button id="btnChange" class="ghost">变更</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnReopen" class="ghost">恢复阻塞</button>
-      </div>
-      <p class="hint" style="margin:8px 0 0" id="gateHint">当前没有等待人工的节点。</p>
+      <h2>② 待人工处理<span class="tail" id="gateType">—</span></h2>
+      <div id="gateBox"></div>
     </div>
 
     <div class="card">
-      <h2>③ AI 回报</h2>
-      <div class="row">
-        <input id="aiTask" placeholder="task_id，如 T7" />
-        <select id="aiResult">
-          <option value="done">完成 done</option>
-          <option value="failed">失败 failed</option>
-        </select>
-      </div>
-      <input id="aiDetail" style="margin-top:8px" placeholder="执行说明，可留空" />
-      <div class="row" style="margin-top:8px">
-        <button id="btnAiReport">提交 AI 回报</button>
-      </div>
-      <p class="hint" style="margin:8px 0 0" id="aiHint">当前没有 running 的 AI 任务。</p>
+      <h2>③ 交付确认<span class="tail" id="deliveryTag">—</span></h2>
+      <div id="deliveryBox"></div>
     </div>
 
-    <div class="card" style="flex:1; display:flex; flex-direction:column">
-      <h2>状态</h2>
+    <div class="card grow" style="flex:0 0 auto">
+      <h2>④ 状态<span class="tail" id="instanceTag">—</span></h2>
       <div class="stats">
         <div class="stat"><b id="sTotal">0</b><span>总任务</span></div>
         <div class="stat"><b id="sDone">0</b><span>已完成</span></div>
         <div class="stat"><b id="sRunning">0</b><span>执行中</span></div>
         <div class="stat"><b id="sPending">0</b><span>待开始</span></div>
-        <div class="stat"><b id="sBlocked">0</b><span>阻塞</span></div>
+        <div class="stat"><b id="sBad">0</b><span>阻塞/失败</span></div>
         <div class="stat"><b id="sSkipped">0</b><span>跳过</span></div>
+        <div class="stat"><b id="sLayers">0</b><span>并行层</span></div>
+        <div class="stat"><b id="sDec">0</b><span>人工决策</span></div>
       </div>
-      <div class="bar"><i id="progressBar"></i></div>
-      <p class="hint" id="analysis" style="margin-top:8px"></p>
-      <div class="alert" id="alert"></div>
+      <div class="bar"><i id="bar"></i></div>
+      <div class="analysis" id="analysis"></div>
+      <div class="row tight" style="margin-top:8px">
+        <button id="btnExport" class="ghost tiny">导出计划</button>
+        <button id="btnExportMd" class="ghost tiny">导出 Markdown</button>
+        <button id="btnChange" class="ghost tiny">变更</button>
+        <button id="btnReopen" class="ghost tiny">恢复阻塞</button>
+      </div>
     </div>
-  </section>
 
-  <section>
-    <div class="graph-wrap">
-      <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="card">
+      <h2>⑤ 执行侧联调<span class="tail">AI 回报</span></h2>
+      <div class="row">
+        <input id="aiTask" placeholder="task_id" />
+        <select id="aiResult"><option value="done">完成</option><option value="failed">失败</option></select>
+      </div>
+      <input id="aiDetail" style="margin-top:7px" placeholder="执行说明（可留空）" />
+      <div class="row" style="margin-top:7px">
+        <button id="btnAiReport" class="ghost">提交回报</button>
+      </div>
+      <p class="hint" id="aiHint">当前没有 running 的 AI 任务。</p>
     </div>
-  </section>
+  </div>
 
-  <section>
-    <div class="card" style="flex:1; display:flex; flex-direction:column; min-height:0">
-      <h2>实时事件流</h2>
-      <div class="events" id="events"></div>
+  <!-- ================= 中栏：依赖图 ================= -->
+  <div class="col">
+    <div class="card canvas-card">
+      <h2>
+        依赖图 · 按 layers 并排
+        <span class="tail" id="graphTail">—</span>
+      </h2>
+      <div class="canvas-bar">
+        <div class="legend">
+          <span><i style="background:var(--skip)"></i>pending</span>
+          <span><i style="background:var(--blue)"></i>running</span>
+          <span><i style="background:var(--ok)"></i>done</span>
+          <span><i style="background:var(--danger)"></i>failed/blocked</span>
+          <span><i style="background:#B9A6D8"></i>review</span>
+          <span><i class="ln" style="border-color:#A9B7B1"></i>force 前置</span>
+          <span><i class="ln" style="border-top-style:dashed;border-color:#9B8BD6"></i>data 数据</span>
+          <span><i class="ln" style="border-top-style:dotted;border-color:#C6A15B"></i>resource 不阻塞</span>
+        </div>
+        <span class="spacer"></span>
+        <button class="ghost tiny" id="zoomOut">−</button>
+        <button class="ghost tiny" id="zoomFit">适应</button>
+        <button class="ghost tiny" id="zoomIn">+</button>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="empty" id="graphEmpty" style="display:none">
+          <strong>还没有工作流</strong>
+          <span>左侧输入一句话想法，或粘贴计划 / 设计规格 / 任务清单 JSON。<br>建图后这里按并行层并排显示任务与依赖。</span>
+        </div>
+      </div>
     </div>
-  </section>
-</div>
+  </div>
 
-<div class="drawer" id="drawer">
-  <div class="panel">
-    <header>
-      <strong>变更工作流</strong>
-      <div class="hint" style="margin-top:4px">变更基于当前工作流增量处理，不会重新读取上传原文。</div>
-    </header>
-    <div class="body">
+  <!-- ================= 右栏：详情 / 决策 / 时间线 ================= -->
+  <div class="col">
+    <div class="card grow">
       <div class="tabs">
-        <button id="tabText" class="active">自然语言变更</button>
-        <button id="tabJson">手动修改任务 / 依赖</button>
+        <button data-tab="detail" id="tabDetail">任务详情</button>
+        <button data-tab="decisions" id="tabDecisions">决策记录<span class="n" id="nDec">0</span></button>
+        <button data-tab="timeline" id="tabTimeline">运行时间线</button>
+        <button data-tab="events" id="tabEvents">事件流<span class="n" id="nEv">0</span></button>
       </div>
-      <div id="paneText">
-        <textarea id="changeText" rows="4" placeholder="例如：新增消息撤回能力，并补充联调测试"></textarea>
-      </div>
-      <div id="paneJson" style="display:none">
-        <p class="hint" style="margin:0 0 6px">
-          直接改下面 JSON 的 tasks / edges，提交后服务会校验依赖端点、自依赖和环，再重算并行组与执行顺序。
-          已终态任务不会被删除。
-        </p>
-        <textarea id="changeJson" class="json" rows="18" spellcheck="false"></textarea>
-      </div>
+      <div class="pane" id="pane-detail"></div>
+      <div class="pane" id="pane-decisions" style="display:none"></div>
+      <div class="pane" id="pane-timeline" style="display:none"></div>
+      <div class="pane" id="pane-events" style="display:none"></div>
     </div>
-    <footer>
-      <button class="ghost" id="btnCancel">取消</button>
-      <button id="btnSubmitChange">提交变更</button>
-    </footer>
   </div>
 </div>
 
+<!-- 理由弹窗 -->
 <div class="drawer" id="reasonBox">
-  <div class="panel" style="width:min(460px,100%)">
-    <header>
-      <strong id="reasonTitle">填写理由</strong>
-      <div class="hint" style="margin-top:4px" id="reasonHint">理由为必填项。</div>
-    </header>
-    <div class="body">
-      <textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea>
-    </div>
+  <div class="panel" style="width:min(480px,100%)">
+    <header><strong id="reasonTitle">填写理由</strong><div class="hint" id="reasonHint">理由为必填项。</div></header>
+    <div class="body"><textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea></div>
     <footer>
       <button class="ghost" id="reasonCancel">取消</button>
       <button id="reasonOk">确认</button>
@@ -220,25 +415,108 @@
   </div>
 </div>
 
+<!-- 变更弹窗 -->
+<div class="drawer" id="changeBox">
+  <div class="panel">
+    <header>
+      <strong>提交变更</strong>
+      <div class="hint" style="margin-top:4px">变更基于当前工作流增量处理；提交后服务会重算依赖、并行层，并追加修订事件。</div>
+    </header>
+    <div class="body">
+      <div class="row tight">
+        <button class="ghost tiny" id="ctabText" style="background:var(--mint)">自然语言变更</button>
+        <button class="ghost tiny" id="ctabJson">手动改任务与依赖</button>
+      </div>
+      <div id="cpaneText"><textarea id="changeText" rows="4" placeholder="例如：新增二手书线下交易地点筛选，并补充联调任务"></textarea></div>
+      <div id="cpaneJson" style="display:none">
+        <p class="hint" style="margin:0 0 6px">直接改 tasks / edges，提交后校验端点、自依赖与环；已终态任务不会被删除。</p>
+        <textarea id="changeJson" class="mono" rows="16" spellcheck="false" style="font-size:11.5px"></textarea>
+      </div>
+    </div>
+    <footer>
+      <button class="ghost" id="changeCancel">取消</button>
+      <button id="changeSubmit">提交变更</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <script>
-const STATUS_COLOR = {
-  done: "#2F8F6B", running: "#D6A756", pending: "#8FA39C",
-  blocked: "#A34D45", failed: "#A34D45", skipped: "#6C7F86"
-};
-// 直接双击打开本文件时（file://），请求指向本机服务；由服务托管时用同源相对路径
+"use strict";
+/* =========================================================================
+   0. 常量与状态
+   ========================================================================= */
 const API = location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
-let cursor = 0, state = null, busy = false;
+const LS = { sel: "if5.selected", tab: "if5.tab", filter: "if5.filter" };
+const POLL_MS = 1500;
+
+const STATUS_COLOR = {
+  pending: "#6C7F86", ready: "#4D8273", running: "#3C7A9E", review: "#B9A6D8",
+  done: "#2F8F6B", failed: "#A34D45", blocked: "#A34D45", skipped: "#8B9A94"
+};
+const STATUS_LABEL = {
+  pending: "待开始", ready: "就绪", running: "执行中", review: "待复核",
+  done: "已完成", failed: "失败", blocked: "阻塞", skipped: "已跳过"
+};
+const INSTANCE_LABEL = {
+  created: "已创建", running: "执行中", waiting_human: "等待人工",
+  delivery_pending: "待交付确认", completed: "已完成", blocked: "阻塞", aborted: "已终止"
+};
+const GATE_LABEL = {
+  task_execution: "人工节点执行", task_failed: "任务失败待接管", delivery_confirm: "交付确认"
+};
+const ROLE_LABEL = { ai: "AI", human: "人工", "ai+human": "AI+人工" };
+const ACTION_LABEL = {
+  created: "实例创建", requirement_parsed: "需求解析", dependency_confirmed: "依赖确认",
+  graph_built: "建图完成", task_dispatched: "派发任务", task_done: "任务完成",
+  task_retried: "自动重试", task_failed: "任务失败", human_gate_entered: "进入人工门",
+  human_gate_exited: "离开人工门", task_blocked: "级联阻塞", change_submitted: "变更提交",
+  change_confirmed: "变更确认", change_applied: "变更合并", baseline_refrozen: "基线升版",
+  replan_done: "重排完成", task_reopened: "恢复任务", decision_recorded: "决策记录",
+  artifact_created: "产物登记", delivery_created: "交付生成", delivery_confirmed: "交付确认",
+  delivery_rejected: "交付退回", task_review_entered: "进入复核", task_review_passed: "复核通过",
+  plan_validated: "计划校验", plan_confirmed: "计划确认", plan_returned: "计划退回",
+  spec_generated: "规格生成", spec_confirmed: "规格确认", spec_returned: "规格退回"
+};
+/* 事件 → 阶段（供运行时间线分组） */
+const STAGE = {
+  created: "建图", requirement_parsed: "建图", dependency_confirmed: "建图", graph_built: "建图",
+  spec_generated: "规格", spec_confirmed: "规格", spec_returned: "规格",
+  plan_validated: "计划", plan_confirmed: "计划", plan_returned: "计划",
+  task_dispatched: "执行", task_done: "执行", task_retried: "执行", task_failed: "执行",
+  task_review_entered: "执行", task_review_passed: "执行",
+  human_gate_entered: "人工介入", human_gate_exited: "人工介入", decision_recorded: "人工介入",
+  change_submitted: "变更与修订", change_confirmed: "变更与修订", change_applied: "变更与修订",
+  baseline_refrozen: "变更与修订", replan_done: "变更与修订", task_reopened: "变更与修订",
+  task_blocked: "变更与修订",
+  artifact_created: "交付", delivery_created: "交付", delivery_confirmed: "交付", delivery_rejected: "交付"
+};
+const TONE = {
+  task_failed: "bad", task_blocked: "bad", delivery_rejected: "bad", spec_returned: "bad", plan_returned: "bad",
+  task_retried: "warn", change_submitted: "change", change_confirmed: "change", change_applied: "change",
+  replan_done: "change", task_reopened: "change", baseline_refrozen: "change",
+  human_gate_entered: "human", human_gate_exited: "human", decision_recorded: "human",
+  task_done: "ok", graph_built: "ok", delivery_confirmed: "ok", plan_confirmed: "ok", spec_confirmed: "ok",
+  task_review_passed: "ok"
+};
+
+let state = null;         // 最近一次 Progress 快照
+let events = [];          // 累计事件（按 seq 去重）
+let cursor = 0;           // 事件游标
+let selected = null;      // 选中的 task_id
+let tab = localStorage.getItem(LS.tab) || "timeline";
+let filter = localStorage.getItem(LS.filter) || "all";
+let zoom = 0;   // 0 = 自动适应宽度
+let busy = false, booted = false;
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-function notify(message, ok) {
-  const box = $("alert");
-  box.textContent = message;
-  box.className = "alert show " + (ok ? "ok" : "bad");
-  clearTimeout(notify.timer);
-  notify.timer = setTimeout(() => box.classList.remove("show"), 6000);
-}
-
+/* =========================================================================
+   1. 通用：请求、提示、状态读取（对契约缺口做降级）
+   ========================================================================= */
 async function api(path, options) {
   const response = await fetch(API + path, options);
   const text = await response.text();
@@ -247,49 +525,753 @@ async function api(path, options) {
   if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
   return body;
 }
+const post = (path, data) => api(path, {
+  method: "POST", headers: { "Content-Type": "application/json; charset=utf-8" },
+  body: JSON.stringify(data)
+});
 
-function post(path, data) {
-  return api(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify(data)
+let toastTimer = null;
+function toast(message, kind) {
+  const box = $("toast");
+  box.textContent = message;
+  box.className = "toast on" + (kind ? " " + kind : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove("on"), 3200);
+}
+
+const tasks = () => (state && state.tasks) || [];
+const taskById = id => tasks().find(t => t.task_id === id);
+const edgesOf = () => (state && state.edges) || [];
+const decisions = () => (state && Array.isArray(state.decisions)) ? state.decisions : null;
+const delivery = () => (state && state.delivery) || null;
+const hasField = name => tasks().some(t => Array.isArray(t[name]) && t[name].length);
+
+/* 后端未透传 layers 时的兜底：按 edges 求最长路径分层（与后端 topo_layers 同口径） */
+function computeLayers(list, edgeList) {
+  const ids = list.map(t => t.task_id);
+  const indeg = Object.fromEntries(ids.map(id => [id, 0]));
+  const next = Object.fromEntries(ids.map(id => [id, []]));
+  edgeList.filter(e => e.type !== "resource").forEach(e => {
+    if (!(e.to in indeg) || !(e.from in indeg)) return;
+    next[e.from].push(e.to); indeg[e.to] += 1;
   });
+  const level = Object.fromEntries(ids.map(id => [id, 0]));
+  const queue = ids.filter(id => indeg[id] === 0);
+  const seen = new Set(queue);
+  while (queue.length) {
+    const id = queue.shift();
+    next[id].forEach(child => {
+      level[child] = Math.max(level[child], level[id] + 1);
+      indeg[child] -= 1;
+      if (indeg[child] === 0 && !seen.has(child)) { seen.add(child); queue.push(child); }
+    });
+  }
+  const max = Math.max(0, ...Object.values(level));
+  const layers = [];
+  for (let i = 0; i <= max; i++) layers.push(ids.filter(id => level[id] === i));
+  return layers;
+}
+function layers() {
+  const fromServer = state && Array.isArray(state.layers) ? state.layers.filter(l => Array.isArray(l)) : [];
+  const flat = fromServer.flat().length;
+  if (fromServer.length && flat === tasks().length) return fromServer;
+  return computeLayers(tasks(), edgesOf());
+}
+
+/* =========================================================================
+   2. 拉取与渲染主循环
+   ========================================================================= */
+async function pull(full) {
+  const since = full ? 0 : cursor;
+  const data = await api("/api/progress?since=" + since + "&limit=1000");
+  state = data;
+  if (data.event_log) {
+    const known = new Set(events.map(e => e.seq));
+    data.event_log.forEach(e => { if (!known.has(e.seq)) events.push(e); });
+    events.sort((a, b) => a.seq - b.seq);
+    if (events.length > 1200) events = events.slice(-1200);
+    cursor = data.next_since != null ? data.next_since : (events.length ? events[events.length - 1].seq : 0);
+  }
+  renderAll();
+}
+
+async function tick() {
+  try {
+    await pull(false);
+    $("health").dataset.ok = "1";
+    $("healthText").textContent = "已连接 · " + POLL_MS / 1000 + "s 轮询";
+  } catch (error) {
+    $("health").dataset.ok = "0";
+    $("healthText").textContent = "未连接";
+    if (!booted) { $("healthText").textContent = "等待服务"; }
+  }
+}
+
+function renderAll() {
+  renderHeader();
+  renderStats();
+  renderGate();
+  renderDelivery();
+  renderGraph();
+  renderDetail();
+  renderDecisions();
+  renderTimeline();
+  renderEvents();
+  renderTabs();
+}
+
+/* ---------- 顶栏：徽标 + 状态 ---------- */
+function renderHeader() {
+  const s = state || {};
+  const plan = $("bPlan").querySelector("b");
+  const hasPlan = s.plan_id && String(s.plan_id).trim();
+  plan.textContent = hasPlan ? s.plan_id : "无计划号";
+  $("bPlan").classList.toggle("plan", !!hasPlan);
+  $("bPlan").classList.toggle("muted", !hasPlan);
+  $("bPlan").title = hasPlan
+    ? "计划号 " + s.plan_id + "（来自 plan.json 或 spec 入口）"
+    : "任务清单入口没有计划号（契约允许 plan_id 为 null）";
+  $("bSpec").querySelector("b").textContent = s.spec_version || "—";
+  $("bGraph").querySelector("b").textContent = s.graph_id || "—";
+  $("bList").querySelector("b").textContent = s.list_version || "—";
+  $("instanceTag").textContent = s.instance_id || "—";
+
+  const pill = $("statusPill");
+  pill.dataset.s = s.status || "created";
+  pill.innerHTML = "<i></i>" + (INSTANCE_LABEL[s.status] || s.status || "已创建");
+}
+
+/* ---------- 状态统计 ---------- */
+function renderStats() {
+  const s = state || {};
+  $("sTotal").textContent = s.total || 0;
+  $("sDone").textContent = s.done || 0;
+  $("sRunning").textContent = s.running || 0;
+  $("sPending").textContent = s.pending || 0;
+  $("sBad").textContent = (s.blocked || 0) + (s.failed || 0);
+  $("sSkipped").textContent = s.skipped || 0;
+  $("sLayers").textContent = layers().length;
+  const dec = decisions();
+  $("sDec").textContent = dec ? dec.length : derivedDecisions().length;
+  $("bar").style.width = (s.percent || 0) + "%";
+  $("analysis").textContent = s.analysis || "";
+
+  const running = tasks().filter(t => t.status === "running");
+  $("btnAiReport").disabled = running.length === 0 || busy;
+  $("aiHint").textContent = running.length
+    ? "可回报：" + running.map(t => t.task_id).join("、")
+    : "当前没有 running 的 AI 任务。";
+  if (running.length && !running.some(t => t.task_id === $("aiTask").value.trim())) {
+    $("aiTask").value = running[0].task_id;
+  }
+  const bad = tasks().filter(t => t.status === "blocked" || t.status === "failed").length;
+  $("btnReopen").disabled = bad === 0;
+  $("btnReopen").textContent = bad ? "恢复阻塞 (" + bad + ")" : "恢复阻塞";
+  $("graphTail").textContent = (s.total || 0)
+    ? (s.total + " 个任务 · " + layers().length + " 个并行层 · " + (s.edges ? "" : "") + edgesOf().length + " 条依赖")
+    : "—";
+}
+
+/* ---------- ② 待人工处理：等待原因 + 可执行操作 ---------- */
+function renderGate() {
+  const s = state || {};
+  const gate = s.waiting_on;
+  const box = $("gateBox");
+  $("gateType").textContent = gate ? (GATE_LABEL[gate.gate_type] || gate.gate_type) : "—";
+
+  if (!s.total) {
+    box.innerHTML = '<div class="gate idle"><div class="t">尚未启动</div>'
+      + '<div class="m">提交想法或粘贴计划后，等待人工的节点会出现在这里，并给出可执行操作。</div></div>';
+    return;
+  }
+  if (!gate) {
+    const running = tasks().filter(t => t.status === "running").length;
+    box.innerHTML = '<div class="gate idle"><div class="t">当前没有等待人工的节点</div>'
+      + '<div class="m">' + (running
+        ? "有 " + running + " 个 AI 任务在执行；人工门打开时会在此提示原因与操作。"
+        : "工作流按依赖推进；被阻塞的任务可在“恢复阻塞”里处理。") + "</div></div>";
+    return;
+  }
+  const since = gate.since ? new Date(gate.since) : null;
+  const waited = since ? Math.max(0, Math.round((Date.now() - since.getTime()) / 1000)) : null;
+  const waitedText = waited == null ? "" : (waited < 60 ? waited + " 秒" : Math.round(waited / 60) + " 分钟");
+  if (gate.gate_type === "delivery_confirm") {
+    box.innerHTML = '<div class="gate">'
+      + '<div class="t">等待交付确认 · ' + esc(gate.object_id) + "</div>"
+      + '<div class="m">全部任务已终态，交付清单见下方「③ 交付确认」。'
+      + (waitedText ? "已等待 " + waitedText + "。" : "") + "</div>"
+      + '<div class="acts"><button class="gold tiny" id="btnDeliverOk2">确认交付</button>'
+      + '<button class="warn tiny" id="btnDeliverNo2">退回</button></div></div>';
+    $("gateType").textContent = "交付确认";
+    return;
+  }
+  box.innerHTML = '<div class="gate">'
+    + '<div class="t">' + esc(GATE_LABEL[gate.gate_type] || gate.gate_type) + " · " + esc(gate.object_id) + "</div>"
+    + '<div class="m">对象：' + esc(gate.object_id)
+    + (taskById(gate.object_id) ? "（" + esc(taskById(gate.object_id).name) + "）" : "")
+    + "<br>进入时间：" + esc((gate.since || "").slice(11, 19)) + (waitedText ? "，已等待 " + waitedText : "")
+    + "<br>原因：" + (gate.gate_type === "task_failed"
+        ? "AI 任务重试额度用尽，需要人工接管" : (gate.gate_type === "delivery_confirm"
+        ? "全部任务已终态，等待人工确认交付" : "该任务标记为人工节点，需要人工执行并放行")) + "</div>"
+    + '<div class="acts">'
+    + '<button class="gold tiny" data-op="approve">放行</button>'
+    + '<button class="ghost tiny" data-op="skip">跳过</button>'
+    + '<button class="warn tiny" data-op="reject">驳回</button>'
+    + "</div></div>";
+}
+
+/* ---------- ③ 交付确认 ---------- */
+function renderDelivery() {
+  const s = state || {}, box = $("deliveryBox"), dlv = delivery();
+  const status = s.status;
+  $("deliveryTag").textContent = status === "delivery_pending" ? "待确认"
+    : (status === "completed" ? "已交付" : (dlv ? (dlv.status || "") : "—"));
+
+  if (!s.total) {
+    box.innerHTML = '<div class="gate idle"><div class="t">未到交付阶段</div>'
+      + '<div class="m">全部任务进入终态后，实例转入 <span class="mono">delivery_pending</span>，这里出现交付清单与确认按钮。</div></div>';
+    return;
+  }
+  if (status === "completed") {
+    box.innerHTML = '<div class="gate done"><div class="t">交付已确认</div><div class="m">'
+      + (dlv ? ("交付号 " + esc(dlv.delivery_id) + "，确认人 " + esc(dlv.decided_by || "—")
+        + "，时间 " + esc((dlv.decided_at || "").slice(0, 19).replace("T", " ")) + "。")
+        : "实例已完成；本次未生成交付记录（契约 v2 要求先进入 <span class=\"mono\">delivery_pending</span> 再确认）。")
+      + "</div></div>";
+    return;
+  }
+  if (status !== "delivery_pending") {
+    const done = s.done || 0, total = s.total || 0;
+    box.innerHTML = '<div class="gate idle"><div class="t">尚未进入交付阶段</div><div class="m">'
+      + "已完成 " + done + "/" + total + "；全部终态后自动进入交付确认。</div></div>";
+    return;
+  }
+  // delivery_pending
+  let items = "";
+  if (dlv && Array.isArray(dlv.items)) {
+    items = '<div class="delivery-items">' + dlv.items.map(item => {
+      const okMark = item.acceptance === "passed" ? '<span class="ok">✓</span>'
+        : (item.acceptance === "failed" ? '<span class="no">✗</span>' : '<span class="mono">·</span>');
+      return '<div class="ditem">' + okMark + '<div><b class="mono">' + esc(item.task_id) + "</b> "
+        + esc(item.task_id && taskById(item.task_id) ? taskById(item.task_id).name : "")
+        + (item.artifact_ids && item.artifact_ids.length
+          ? '<br><span class="mono">' + item.artifact_ids.map(esc).join("、") + "</span>"
+          : '<br><span class="none">未登记产物</span>')
+        + (item.note ? "<br>" + esc(item.note) : "") + "</div></div>";
+    }).join("") + "</div>";
+  } else {
+    items = '<div class="warnbox">交付记录 <span class="mono">delivery</span> 尚未返回（契约 v2 已定义，等成员4 透传）。'
+      + "仍可确认交付：实例会带 <span class=\"mono\">human_op approve</span> 进入 <span class=\"mono\">completed</span>。</div>";
+  }
+  box.innerHTML = '<div class="gate">'
+    + '<div class="t">交付待确认' + (dlv ? " · " + esc(dlv.delivery_id) : "") + "</div>"
+    + '<div class="m">共 ' + (s.total || 0) + " 个任务，已完成 " + (s.done || 0) + "、跳过 " + (s.skipped || 0) + "。</div>"
+    + items
+    + '<div class="acts">'
+    + '<button class="gold tiny" id="btnDeliverOk">确认交付</button>'
+    + '<button class="warn tiny" id="btnDeliverNo">退回</button>'
+    + "</div></div>";
+}
+
+/* =========================================================================
+   3. 依赖图：按 layers 并排
+   ========================================================================= */
+const NW = 152, NH = 64, GX = 104, GY = 78, PAD = 30, HEAD = 30;
+
+function renderGraph() {
+  const svg = $("graph"), empty = $("graphEmpty");
+  const list = tasks();
+  if (!list.length) {
+    svg.style.display = "none"; empty.style.display = "flex";
+    svg.innerHTML = ""; return;
+  }
+  svg.style.display = "block"; empty.style.display = "none";
+
+  const L = layers();
+  const maxRows = Math.max(1, ...L.map(l => l.length));
+  const naturalW = PAD * 2 + Math.max(1, L.length) * NW + Math.max(0, L.length - 1) * GX;
+  const naturalH = HEAD + PAD * 2 + maxRows * NH + Math.max(0, maxRows - 1) * GY;
+
+  // 自适应：宽度不够时缩小到可看全；高度富余时整体垂直居中
+  const wrapW = Math.max(320, $("canvasWrap").clientWidth);
+  const wrapH = Math.max(240, $("canvasWrap").clientHeight);
+  const z = zoom === 0 ? Math.max(0.45, Math.min(1, (wrapW - 14) / naturalW)) : zoom;
+  const extraH = Math.max(0, wrapH / z - naturalH);
+  const offsetY = extraH / 2;
+  const vbH = naturalH + extraH * 0.98;
+
+  const pos = {};
+  L.forEach((layer, li) => {
+    const offset = (maxRows - layer.length) / 2;
+    layer.forEach((id, ri) => {
+      pos[id] = {
+        x: PAD + li * (NW + GX),
+        y: HEAD + PAD + (ri + offset) * (NH + GY)
+      };
+    });
+  });
+
+  svg.setAttribute("viewBox", "0 0 " + naturalW + " " + vbH);
+  svg.setAttribute("width", Math.round(naturalW * z));
+  svg.setAttribute("height", Math.round(vbH * z));
+  svg.innerHTML = "";
+
+  const ns = "http://www.w3.org/2000/svg";
+  const make = (tag, attrs) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => node.setAttribute(k, v));
+    return node;
+  };
+
+  const defs = make("defs");
+  [["arrowForce", "#A9B7B1"], ["arrowData", "#9B8BD6"], ["arrowRes", "#C6A15B"]].forEach(([id, color]) => {
+    const marker = make("marker", {
+      id, viewBox: "0 0 10 10", refX: "9", refY: "5",
+      markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse"
+    });
+    marker.appendChild(make("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+    defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
+
+  // 内容整体垂直居中：图层少时不会贴着顶部留一大片空白
+  const root = make("g", { transform: "translate(0," + offsetY + ")" });
+  svg.appendChild(root);
+
+  // 层头 + 分隔
+  L.forEach((layer, li) => {
+    const x = PAD + li * (NW + GX);
+    const label = make("text", {
+      x: x, y: 22, "font-size": 11, "letter-spacing": 1, fill: "#7C8F88", "font-weight": 600
+    });
+    label.textContent = "第 " + (li + 1) + " 层 · 并行 " + layer.length;
+    root.appendChild(label);
+    if (li) {
+      root.appendChild(make("line", {
+        x1: x - GX / 2, y1: HEAD, x2: x - GX / 2, y2: naturalH - PAD + 6,
+        stroke: "#E6EDE9", "stroke-width": 1, "stroke-dasharray": "3 5"
+      }));
+    }
+  });
+
+  // 边
+  edgesOf().forEach(edge => {
+    const from = pos[edge.from], to = pos[edge.to];
+    if (!from || !to) return;
+    const x1 = from.x + NW, y1 = from.y + NH / 2;
+    const x2 = to.x, y2 = to.y + NH / 2;
+    const mid = (x1 + x2) / 2;
+    const type = edge.type || "force";
+    const style = type === "data"
+      ? { stroke: "#9B8BD6", dash: "5 4", marker: "arrowData" }
+      : (type === "resource"
+        ? { stroke: "#C6A15B", dash: "1 5", marker: "arrowRes" }
+        : { stroke: "#A9B7B1", dash: "", marker: "arrowForce" });
+    const highlight = selected && (edge.from === selected || edge.to === selected);
+    root.appendChild(make("path", {
+      d: "M " + x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + x2 + " " + y2,
+      fill: "none", stroke: highlight ? "#28675B" : style.stroke,
+      "stroke-width": highlight ? 2.4 : 1.6,
+      "stroke-dasharray": style.dash,
+      "marker-end": "url(#" + style.marker + ")",
+      opacity: highlight ? 1 : .92
+    }));
+  });
+
+  // 节点
+  const byId = new Map(list.map(t => [t.task_id, t]));
+  L.forEach(layer => layer.forEach(id => {
+    const task = byId.get(id), point = pos[id];
+    if (!task || !point) return;
+    const color = STATUS_COLOR[task.status] || "#8FA39C";
+    const isGate = state.waiting_on && state.waiting_on.object_id === id;
+    const isSel = selected === id;
+    const g = make("g", { transform: "translate(" + point.x + "," + point.y + ")" });
+    if (isGate) g.setAttribute("class", "pulse");
+    g.style.cursor = "pointer";
+    g.addEventListener("click", () => selectTask(id));
+
+    g.appendChild(make("rect", {
+      width: NW, height: NH, rx: 9, fill: "#fff",
+      stroke: isSel ? "#28675B" : (isGate ? "#D6A756" : "#DCE6E0"),
+      "stroke-width": isSel ? 2.6 : (isGate ? 2.4 : 1.4)
+    }));
+    g.appendChild(make("rect", { width: 5, height: NH, rx: 2.5, fill: color }));
+
+    const idText = make("text", { x: 14, y: 21, "font-size": 12.5, "font-weight": 700, fill: "#18332F" });
+    idText.textContent = id;
+    g.appendChild(idText);
+
+    const nameText = make("text", { x: 14, y: 39, "font-size": 10.5, fill: "#5E716B" });
+    nameText.textContent = (task.name || "").slice(0, 14) + ((task.name || "").length > 14 ? "…" : "");
+    g.appendChild(nameText);
+
+    const foot = make("text", { x: 14, y: 55, "font-size": 9.5, fill: isGate ? "#B27C1E" : color });
+    foot.textContent = (isGate && task.status === "pending" ? "等待人工" : (STATUS_LABEL[task.status] || task.status))
+      + " · " + (ROLE_LABEL[task.suggested_role] || task.suggested_role || "ai")
+      + (task.attempts ? " · 第" + task.attempts + "次" : "");
+    g.appendChild(foot);
+
+    if (Array.isArray(task.artifact_ids) && task.artifact_ids.length) {
+      g.appendChild(make("circle", { cx: NW - 12, cy: 12, r: 5, fill: "#D6A756" }));
+    }
+    const title = make("title");
+    title.textContent = id + " " + (task.name || "") + "\n交付物：" + (task.deliverable || "未填写")
+      + "\n状态：" + (isGate && task.status === "pending" ? "等待人工"
+        : (STATUS_LABEL[task.status] || task.status));
+    g.appendChild(title);
+    root.appendChild(g);
+  }));
+}
+
+function selectTask(id) {
+  selected = id;
+  localStorage.setItem(LS.sel, id);
+  setTab("detail");
+  syncHash();
+  renderAll();
+}
+
+/* 深链：/#task=T4&tab=detail 可直接定位到一个任务的来源与验收，便于评审复现与截图 */
+function syncHash() {
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (selected) params.set("task", selected); else params.delete("task");
+  params.set("tab", tab);
+  const next = "#" + params.toString();
+  if (next !== location.hash) history.replaceState(null, "", next);
+}
+function readHash() {
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const task = params.get("task");
+  const nextTab = params.get("tab");
+  if (task) selected = task;
+  if (nextTab && ["detail", "decisions", "timeline", "events"].includes(nextTab)) tab = nextTab;
+}
+
+/* =========================================================================
+   4. 任务详情：交付物 / 验收项 / 来源 / 产物 / 依赖
+   ========================================================================= */
+function renderDetail() {
+  const pane = $("pane-detail");
+  if (!state || !state.total) {
+    pane.innerHTML = '<p class="hint">工作流启动后，点击图中任意任务查看它的交付物、验收项、规格来源与产物。</p>';
+    return;
+  }
+  if (!selected) {
+    pane.innerHTML = '<p class="hint">点击图中任务节点查看详情。<br>节点上的黄色圆点表示该任务已登记产物，橙色描边表示正在等待人工。</p>';
+    return;
+  }
+  const task = taskById(selected);
+  if (!task) {
+    pane.innerHTML = '<p class="hint">任务 ' + esc(selected) + " 已不在当前计划中（可能被变更删除）。</p>";
+    return;
+  }
+  const color = STATUS_COLOR[task.status] || "#8FA39C";
+  const upstream = edgesOf().filter(e => e.to === task.task_id).map(e => e.from);
+  const downstream = edgesOf().filter(e => e.from === task.task_id).map(e => e.to);
+  const deps = Array.isArray(task.depends_on) ? task.depends_on : upstream;
+  const refsOf = (arr, cls) => (Array.isArray(arr) && arr.length)
+    ? arr.map(v => '<span class="chip static ' + cls + '">' + esc(v) + "</span>").join(" ")
+    : '<span class="none">未提供</span>';
+
+  const related = events.filter(e => e.object_id === task.task_id).slice(-6).reverse();
+
+  let html = "";
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<span class="mono" style="font-size:15px;font-weight:700">' + esc(task.task_id) + "</span>"
+    + '<span class="chip static" style="background:' + color + '1A;border-color:' + color + '55;color:' + color + '">'
+    + esc(STATUS_LABEL[task.status] || task.status) + "</span>"
+    + '<span class="chip static">' + esc(ROLE_LABEL[task.suggested_role] || task.suggested_role || "ai") + "</span>"
+    + (task.priority ? '<span class="chip static">优先级 ' + esc(task.priority) + "</span>" : "")
+    + (task.review_required ? '<span class="chip static a">需复核</span>' : "")
+    + "</div>";
+  html += '<div style="font-size:13.5px;font-weight:700;margin:7px 0 9px">' + esc(task.name) + "</div>";
+
+  html += '<div class="kv">'
+    + '<span class="k">交付物</span><span class="v">' + (task.deliverable ? esc(task.deliverable) : '<span class="none">未填写</span>') + "</span>"
+    + '<span class="k">尝试次数</span><span class="v">' + (task.attempts || 0) + "</span>"
+    + (task.estimate_days ? '<span class="k">估算</span><span class="v">' + esc(task.estimate_days) + " 人天</span>" : "")
+    + (Array.isArray(task.write_paths) && task.write_paths.length
+      ? '<span class="k">可写路径</span><span class="v mono" style="font-size:11px">' + task.write_paths.map(esc).join("<br>") + "</span>" : "")
+    + "</div>";
+
+  html += '<div class="sect"><div class="st">验收项</div>'
+    + (Array.isArray(task.acceptance_items) && task.acceptance_items.length
+      ? '<ol class="acc">' + task.acceptance_items.map(v => "<li>" + esc(v) + "</li>").join("") + "</ol>"
+      : '<span class="none">计划未给出验收项</span>')
+    + "</div>";
+
+  html += '<div class="sect"><div class="st">规格来源（需求 → 设计）</div>'
+    + '<div class="kv"><span class="k">需求条款</span><span class="v">' + refsOf(task.requirement_refs, "r") + "</span>"
+    + '<span class="k">设计模块</span><span class="v">' + refsOf(task.design_refs, "m") + "</span></div>"
+    + (hasField("requirement_refs") || hasField("design_refs") ? ""
+      : '<div class="warnbox">当前 <span class="mono">Progress.TaskState</span> 还没带 <span class="mono">requirement_refs</span> / '
+        + '<span class="mono">design_refs</span>（契约 v2 已定义，等成员4 由 <span class="mono">plan_adapter</span> 透传）。</div>')
+    + "</div>";
+
+  html += '<div class="sect"><div class="st">产物</div>'
+    + (Array.isArray(task.artifact_ids) && task.artifact_ids.length
+      ? '<div class="chips">' + task.artifact_ids.map(v => '<span class="chip a static">' + esc(v) + "</span>").join("") + "</div>"
+      : '<span class="none">尚未登记产物（任务完成后登记 ART-xx）</span>')
+    + "</div>";
+
+  html += '<div class="sect"><div class="st">依赖</div><div class="kv">'
+    + '<span class="k">前置</span><span class="v">' + (deps.length
+      ? deps.map(id => '<span class="chip" data-task="' + esc(id) + '">' + esc(id) + "</span>").join(" ")
+      : '<span class="none">无（入口任务）</span>') + "</span>"
+    + '<span class="k">下游</span><span class="v">' + (downstream.length
+      ? downstream.map(id => '<span class="chip" data-task="' + esc(id) + '">' + esc(id) + "</span>").join(" ")
+      : '<span class="none">无</span>') + "</span>"
+    + "</div>";
+
+  html += '<div class="sect"><div class="st">该任务最近事件</div>'
+    + (related.length
+      ? '<div class="events">' + related.map(e => '<div class="ev" data-tone="' + (TONE[e.action] || "") + '">'
+        + '<time>' + esc((e.ts || "").slice(11, 19)) + "</time><b>" + esc(ACTION_LABEL[e.action] || e.action)
+        + "</b><br>" + esc(e.detail) + "</div>").join("") + "</div>"
+      : '<span class="none">暂无该任务的事件</span>')
+    + "</div>";
+
+  const gate = state.waiting_on && state.waiting_on.object_id === task.task_id;
+  html += '<div class="sect"><div class="st">操作</div><div class="row tight">';
+  if (gate) {
+    html += '<button class="gold tiny" data-op="approve">放行</button>'
+      + '<button class="ghost tiny" data-op="skip">跳过</button>'
+      + '<button class="warn tiny" data-op="reject">驳回</button>';
+  } else if (task.status === "running") {
+    html += '<button class="ghost tiny" data-ai="done">回报完成</button>'
+      + '<button class="ghost tiny" data-ai="failed">回报失败</button>';
+  } else {
+    html += '<button class="ghost tiny" disabled>当前状态无可用操作</button>';
+  }
+  html += "</div></div>";
+  pane.innerHTML = html;
+}
+
+/* =========================================================================
+   5. 决策记录（优先用后端 decisions，缺字段时用事件推导并标注）
+   ========================================================================= */
+function derivedDecisions() {
+  return events.filter(e => e.action === "human_gate_exited").map((e, i) => {
+    const parts = String(e.detail || "").split("：");
+    const head = parts[0].trim().split(" ");
+    return {
+      decision_id: "EV-" + e.seq,
+      target_type: "task",
+      target_id: head[1] || e.object_id,
+      target_version: null,
+      action: head[0] || "",
+      actor: e.actor || "human:web",
+      reason: parts.slice(1).join("：").trim(),
+      created_at: e.ts
+    };
+  }).reverse();
+}
+
+function renderDecisions() {
+  const pane = $("pane-decisions");
+  const real = decisions();
+  const rows = real && real.length ? real : derivedDecisions();
+  const derived = !(real && real.length);
+  $("nDec").textContent = rows.length;
+
+  if (!rows.length) {
+    pane.innerHTML = '<p class="hint">暂无人工决策。放行 / 跳过 / 驳回后，每次操作都会写入 '
+      + '<span class="mono">decisions.jsonl</span> 并在这里按时间列出（含对象、动作、操作者、理由）。</p>';
+    return;
+  }
+  let html = derived
+    ? '<div class="warnbox">后端 <span class="mono">Progress.decisions</span> 尚未返回（契约 v2 已定义，等成员4 透传）；'
+      + "下面按 <span class=\"mono\">human_gate_exited</span> 事件推导，字段与 <span class=\"mono\">decision.schema.json</span> 对齐。</div>"
+    : "";
+  rows.slice().reverse().forEach(row => {
+    const action = String(row.action || "");
+    const actor = String(row.actor || "").replace("human:", "");
+    html += '<div class="drow">'
+      + '<div class="dhead"><span class="mono" style="font-weight:700">' + esc(row.decision_id) + "</span>"
+      + '<span class="act ' + esc(action) + '">' + esc(actionLabel(action)) + "</span>"
+      + '<span class="mono" style="font-size:11px">' + esc(row.target_id)
+      + (row.target_version != null ? ' <span class="none">v' + esc(row.target_version) + "</span>" : "") + "</span>"
+      + '<span class="spacer"></span>'
+      + '<span class="mono" style="font-size:10.5px;color:#8b9a94">'
+      + esc((row.created_at || "").slice(5, 19).replace("T", " ")) + "</span></div>"
+      + '<div class="dbody">'
+      + (row.target_type ? '<span class="who">' + esc(row.target_type) + "</span>" : "")
+      + (row.return_to ? '<span class="who">退回至 ' + esc(row.return_to) + "</span>" : "")
+      + '<span class="who">' + esc(actor || "—") + "</span>"
+      + (row.reason ? esc(row.reason) : '<span class="none">未填理由</span>')
+      + (Array.isArray(row.affected_ids) && row.affected_ids.length
+        ? "<br>影响：" + row.affected_ids.map(v => '<span class="chip" data-task="' + esc(v) + '">' + esc(v) + "</span>").join(" ")
+        : "")
+      + "</div></div>";
+  });
+  pane.innerHTML = html;
+}
+
+function actionLabel(action) {
+  return { approve: "放行", reject: "驳回", skip: "跳过", return: "退回" }[action] || action;
+}
+
+/* =========================================================================
+   6. 运行时间线：阶段 / 角色 / 实质意见 / 修订结果
+   ========================================================================= */
+const KEY_ACTIONS = new Set([
+  "created", "requirement_parsed", "dependency_confirmed", "graph_built",
+  "task_failed", "task_retried", "task_blocked", "human_gate_entered", "human_gate_exited",
+  "decision_recorded", "change_submitted", "change_confirmed", "change_applied",
+  "replan_done", "task_reopened", "baseline_refrozen", "spec_confirmed", "spec_returned",
+  "plan_validated", "plan_confirmed", "plan_returned", "delivery_created",
+  "delivery_confirmed", "delivery_rejected", "artifact_created"
+]);
+const FILTERS = [
+  ["all", "全部"], ["key", "关键"], ["human", "人工"], ["change", "变更与修订"], ["fail", "失败"]
+];
+
+function filteredEvents() {
+  return events.filter(e => {
+    if (filter === "key") return KEY_ACTIONS.has(e.action);
+    if (filter === "human") return /human|decision/.test(e.action) || String(e.actor || "").startsWith("human");
+    if (filter === "change") return /change|replan|reopen|blocked|refrozen/.test(e.action);
+    if (filter === "fail") return /fail|blocked|retried|rejected|returned/.test(e.action);
+    return true;
+  });
+}
+
+function renderTimeline() {
+  const pane = $("pane-timeline");
+  const list = filteredEvents();
+  let html = '<div class="filters"' + '>' + FILTERS.map(([key, label]) =>
+    '<button data-filter="' + key + '"' + (filter === key ? ' class="active"' : "") + ">" + label + "</button>").join("")
+    + "</div>";
+  if (!list.length) {
+    pane.innerHTML = html + '<p class="hint">还没有可显示的事件。提交想法或计划后，阶段推进、人工介入与修订都会按时间出现在这里。</p>';
+    return;
+  }
+  // 修订链：以 change_submitted 为起点，向后收集同一轮的重排与任务重开
+  const chains = [];
+  events.forEach(e => {
+    if (e.action === "change_submitted") {
+      chains.push({
+        id: e.object_id || ("CR-" + e.seq),
+        summary: String(e.detail || "").replace(/^[^：]*：/, ""),
+        steps: [e]
+      });
+    } else if (chains.length && chains[chains.length - 1].steps.length < 9
+      && /change_confirmed|change_applied|replan_done|task_reopened|task_retried|baseline_refrozen/.test(e.action)) {
+      chains[chains.length - 1].steps.push(e);
+    }
+  });
+  const shown = chains.slice(-3).reverse();
+  if (shown.length && filter !== "human") {
+    html += '<div class="sect"><div class="st">修订链（评审意见 → 修订 → 受影响任务）</div>';
+    shown.forEach(chain => {
+      const applied = chain.steps.filter(e => /change_applied|replan_done|task_reopened|baseline_refrozen/.test(e.action));
+      const affected = [];
+      chain.steps.forEach(e => {
+        String(e.detail || "").replace(/T-?\d+/g, m => { if (!affected.includes(m)) affected.push(m); return m; });
+      });
+      html += '<div class="revlink"><b class="mono">' + esc(chain.id) + "</b>"
+        + "<div>意见 / 变更：" + esc(chain.summary || "（未记录摘要）") + "</div>"
+        + "<div>修订结果：" + (applied.length
+          ? applied.map(e => esc(ACTION_LABEL[e.action] || e.action)).join(" → ")
+          : '<span class="none">等待重排</span>') + "</div>"
+        + (affected.length
+          ? '<div style="margin-top:4px">受影响任务：' + affected.map(id =>
+              '<span class="chip" data-task="' + esc(id) + '">' + esc(id) + "</span>").join(" ") + "</div>"
+          : "")
+        + '<div style="margin-top:5px">' + chain.steps.map(e => '<span class="chip static">'
+          + esc((e.ts || "").slice(11, 19)) + " " + esc(ACTION_LABEL[e.action] || e.action) + "</span>").join(" ") + "</div>"
+        + "</div>";
+    });
+    html += "</div>";
+  }
+
+  html += '<div class="tl">';
+  let stage = "";
+  list.slice(-220).forEach(e => {
+    const st = STAGE[e.action] || "其他";
+    if (st !== stage) { stage = st; html += '<div class="stage">' + esc(st) + "</div>"; }
+    const actor = String(e.actor || "");
+    const who = actor === "system" ? "系统" : (actor.startsWith("human:") ? "人·" + actor.slice(6)
+      : (actor === "ai" ? "AI" : actor));
+    html += '<div class="ev" data-tone="' + (TONE[e.action] || "") + '">'
+      + "<time>" + esc((e.ts || "").slice(11, 19)) + "</time>"
+      + '<span class="who">' + esc(who) + "</span>"
+      + "<b>" + esc(ACTION_LABEL[e.action] || e.action) + "</b> "
+      + (e.object_type && e.object_type !== "instance"
+        ? '<span class="mono" style="font-size:10.5px;color:#8b9a94">' + esc(e.object_id) + "</span> " : "")
+      + "<br>" + esc(e.detail) + "</div>";
+  });
+  html += "</div>";
+  pane.innerHTML = html;
+}
+
+/* =========================================================================
+   7. 事件流（原始）
+   ========================================================================= */
+function renderEvents() {
+  const pane = $("pane-events");
+  $("nEv").textContent = events.length;
+  if (!events.length) {
+    pane.innerHTML = '<p class="hint">事件流为空。启动后每一条编排事件都会追加到这里，seq 与服务端 events.jsonl 一一对应。</p>';
+    return;
+  }
+  const list = events.slice(-300).reverse();
+  pane.innerHTML = '<div class="events">' + list.map(e => {
+    const actor = String(e.actor || "");
+    const who = actor === "system" ? "系统" : (actor.startsWith("human:") ? "人·" + actor.slice(6)
+      : (actor === "ai" ? "AI" : actor));
+    return '<div class="ev" data-tone="' + (TONE[e.action] || "") + '">'
+      + "<time>#" + e.seq + " " + esc((e.ts || "").slice(11, 19)) + "</time>"
+      + '<span class="who">' + esc(who) + "</span><b>" + esc(ACTION_LABEL[e.action] || e.action) + "</b>"
+      + (e.object_id ? ' <span class="mono" style="font-size:10.5px;color:#8b9a94">' + esc(e.object_id) + "</span>" : "")
+      + "<br>" + esc(e.detail) + "</div>";
+  }).join("") + "</div>";
+}
+
+/* =========================================================================
+   8. 交互：入口识别、人工操作、交付、变更、导出
+   ========================================================================= */
+function detectEntry(text) {
+  const value = String(text || "").trim();
+  if (!value) return { kind: "empty", label: "未输入" };
+  if (!(value.startsWith("{") || value.startsWith("["))) return { kind: "idea", label: "想法入口" };
+  let data;
+  try { data = JSON.parse(value); } catch { return { kind: "bad", label: "JSON 不合法" }; }
+  if (Array.isArray(data)) return { kind: "tasks", label: "任务清单（数组）" };
+  if (data.modules) return { kind: "spec", label: "设计规格 spec" };
+  if (data.plan_id && data.tasks) return { kind: "plan", label: "计划 plan" };
+  if (data.tasks) return { kind: "tasks", label: "任务清单" };
+  if (data.requirement) return { kind: "idea", label: "想法入口" };
+  return { kind: "unknown", label: "未识别的 JSON" };
+}
+
+function refreshEntryTag() {
+  const info = detectEntry($("req").value);
+  $("entryTag").textContent = info.label;
+  $("btnStart").disabled = busy || info.kind === "empty" || info.kind === "bad";
 }
 
 async function startRun() {
   const text = $("req").value.trim();
-  if (!text) return notify("请先输入需求");
-  if (busy) return;
-  busy = true;
+  if (!text) return toast("请先输入想法或粘贴 JSON", "bad");
+  const info = detectEntry(text);
+  if (info.kind === "bad") return toast("粘贴的内容不是合法 JSON", "bad");
+  busy = true; refreshEntryTag();
   try {
     let payload;
-    try {
-      payload = text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : { requirement: text };
-    } catch {
-      throw new Error("粘贴的内容不是合法 JSON");
-    }
+    if (info.kind === "idea") payload = { requirement: text };
+    else payload = JSON.parse(text);
     const result = await post("/api/start", payload);
-    cursor = 0;
-    $("events").innerHTML = "";
-    notify("已接受，共 " + result.progress.total + " 个任务，开始编排", true);
-    await tick();
+    events = []; cursor = 0; selected = null;
+    localStorage.removeItem(LS.sel);
+    await pull(true);
+    toast("已接受：" + (result.progress.total || 0) + " 个任务"
+      + (result.progress.plan_id ? "，计划 " + result.progress.plan_id : ""), "ok");
   } catch (error) {
-    notify(error.message);
+    toast(error.message, "bad");
   } finally {
-    busy = false;
-  }
-}
-
-async function sendEvent(packet) {
-  if (busy) return;
-  busy = true;
-  try {
-    await post("/api/events", packet);
-    await tick();
-  } catch (error) {
-    notify(error.message);
-  } finally {
-    busy = false;
+    busy = false; refreshEntryTag();
   }
 }
 
@@ -299,296 +1281,310 @@ function humanOp(action, reason) {
   return sendEvent(packet);
 }
 
-function eventTone(action) {
-  if (/fail|block|reject|retried/.test(action)) return "bad";
-  if (/gate|dispatched|change|replan|requirement/.test(action)) return "warn";
-  if (/done|built|confirmed|applied/.test(action)) return "ok";
-  return "";
-}
-
-function appendEvents(events) {
-  const list = $("events");
-  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-  events.forEach(event => {
-    const node = document.createElement("div");
-    node.className = "event";
-    node.dataset.tone = eventTone(event.action);
-    node.innerHTML = '<time>' + event.ts.slice(11) + '</time><b>' + event.action +
-      "</b><br>" + event.detail;
-    list.appendChild(node);
-  });
-  if (atBottom) list.scrollTop = list.scrollHeight;
-}
-
-function renderStats() {
-  $("sTotal").textContent = state.total;
-  $("sDone").textContent = state.done;
-  $("sRunning").textContent = state.running;
-  $("sPending").textContent = state.pending;
-  $("sBlocked").textContent = state.blocked + state.failed;
-  $("sSkipped").textContent = state.skipped;
-  $("progressBar").style.width = state.percent + "%";
-  $("ver").textContent = state.graph_id + " · " + state.status;
-  $("analysis").textContent = state.analysis || "";
-  const gate = state.waiting_on;
-  $("gateHint").textContent = gate
-    ? "等待人工：" + gate.object_id + "（" + gate.since.slice(11) + " 进入）"
-    : "当前没有等待人工的节点。";
-  ["btnApprove", "btnSkip", "btnReject"].forEach(id => { $(id).disabled = !gate; });
-
-  const blockedIds = (state.tasks || [])
-    .filter(task => task.status === "blocked" || task.status === "failed")
-    .map(task => task.task_id);
-  $("btnReopen").disabled = blockedIds.length === 0;
-  $("btnReopen").textContent = blockedIds.length
-    ? "恢复阻塞 (" + blockedIds.length + ")" : "恢复阻塞";
-
-  const running = (state.tasks || []).filter(task => task.status === "running");
-  $("btnAiReport").disabled = running.length === 0;
-  $("aiHint").textContent = running.length
-    ? "可回报：" + running.map(task => task.task_id + " " + task.name).join("、")
-    : "当前没有 running 的 AI 任务。";
-  if (running.length && !running.some(task => task.task_id === $("aiTask").value.trim())) {
-    $("aiTask").value = running[0].task_id;
-  }
-}
-
-function layout() {
-  const layers = state.layers || [];
-  const widest = Math.max(1, ...layers.map(layer => layer.length));
-  const positions = {};
-  layers.forEach((layer, li) => layer.forEach((taskId, ri) => {
-    const offset = (widest - layer.length) / 2;
-    positions[taskId] = { x: 36 + li * 214, y: 36 + (ri + offset) * 92 };
-  }));
-  return { positions, widest };
-}
-
-function renderGraph() {
-  const svg = $("graph");
-  const tasks = new Map((state.tasks || []).map(task => [task.task_id, task]));
-  const { positions, widest } = layout();
-  const width = 72 + Math.max(1, (state.layers || []).length) * 214;
-  const height = 72 + widest * 92;
-  svg.setAttribute("viewBox", "0 0 " + width + " " + height);
-  svg.setAttribute("width", width);
-  svg.setAttribute("height", height);
-  svg.innerHTML = "";
-
-  const ns = "http://www.w3.org/2000/svg";
-  const make = (tag, attrs) => {
-    const node = document.createElementNS(ns, tag);
-    Object.entries(attrs || {}).forEach(([key, value]) => node.setAttribute(key, value));
-    return node;
-  };
-
-  const defs = make("defs");
-  const marker = make("marker", {
-    id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5",
-    markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse"
-  });
-  marker.appendChild(make("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#A9B7B1" }));
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  (state.edges || []).forEach(edge => {
-    const from = positions[edge.from], to = positions[edge.to];
-    if (!from || !to) return;
-    const x1 = from.x + 132, y1 = from.y + 29, x2 = to.x, y2 = to.y + 29;
-    const mid = (x1 + x2) / 2;
-    svg.appendChild(make("path", {
-      d: "M " + x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + x2 + " " + y2,
-      fill: "none", stroke: edge.type === "data" ? "#9B8BD6" : "#A9B7B1",
-      "stroke-width": 1.6, "stroke-dasharray": edge.type === "data" ? "5 4" : "",
-      "marker-end": "url(#arrow)"
-    }));
-  });
-
-  (state.layers || []).forEach((layer, li) => {
-    const label = make("text", {
-      x: 36 + li * 214, y: 20, "font-size": 11, fill: "#8b9a94", "letter-spacing": 1
-    });
-    label.textContent = "第 " + (li + 1) + " 层";
-    svg.appendChild(label);
-  });
-
-  Object.entries(positions).forEach(([taskId, point]) => {
-    const task = tasks.get(taskId);
-    if (!task) return;
-    const color = STATUS_COLOR[task.status] || "#8FA39C";
-    const isGate = state.waiting_on && state.waiting_on.object_id === taskId;
-    const group = make("g", { transform: "translate(" + point.x + "," + point.y + ")" });
-    if (isGate) group.setAttribute("class", "gate-node");
-
-    group.appendChild(make("rect", {
-      width: 132, height: 58, rx: 9, fill: "#fff",
-      stroke: isGate ? "#D6A756" : color, "stroke-width": isGate ? 2.6 : 1.6
-    }));
-    group.appendChild(make("rect", { width: 5, height: 58, rx: 2.5, fill: color }));
-    const id = make("text", { x: 14, y: 20, "font-size": 12, "font-weight": 700, fill: "#18332F" });
-    id.textContent = taskId;
-    group.appendChild(id);
-    const name = make("text", { x: 14, y: 36, "font-size": 10.5, fill: "#5E716B" });
-    name.textContent = (task.name || "").slice(0, 12);
-    group.appendChild(name);
-    const tag = make("text", { x: 14, y: 50, "font-size": 9.5, fill: color });
-    tag.textContent = task.status + " · " + task.suggested_role;
-    group.appendChild(tag);
-    group.appendChild(make("title", {})).textContent =
-      taskId + " " + task.name + "\n交付物：" + (task.deliverable || "未填写");
-    svg.appendChild(group);
-  });
-}
-
-async function tick() {
+async function sendEvent(packet) {
+  if (busy) return;
+  busy = true;
   try {
-    const data = await api("/api/progress?since=" + cursor + "&limit=200");
-    state = data;
-    if (data.event_log) {
-      appendEvents(data.event_log);
-      cursor = data.next_since;
-    }
-    renderStats();
-    renderGraph();
-    $("healthText").textContent = data.status;
-    if (data.last_error) notify("服务处理失败：" + data.last_error);
+    await post("/api/events", packet);
+    await pulled();
+    toast("已提交：" + (ACTION_LABEL[packet.action] || packet.type || ""), "ok");
   } catch (error) {
-    $("healthText").textContent = "未连接";
+    toast(error.message, "bad");
+  } finally {
+    busy = false;
+    refreshEntryTag();
   }
 }
 
-function graphJson() {
-  return JSON.stringify({
-    tasks: (state.tasks || []).map(task => ({
-      task_id: task.task_id, name: task.name, deliverable: task.deliverable,
-      acceptance_items: task.acceptance_items,
-      suggested_role: task.suggested_role, priority: task.priority
-    })),
-    edges: (state.edges || []).map(edge => ({
-      from: edge.from, to: edge.to, type: edge.type, reason: edge.reason || ""
-    }))
-  }, null, 2);
+async function pulled() {
+  try { await pull(false); } catch (error) { toast(error.message, "bad"); }
 }
 
-let mode = "text";
-function setMode(next) {
-  mode = next;
-  $("tabText").classList.toggle("active", next === "text");
-  $("tabJson").classList.toggle("active", next === "json");
-  $("paneText").style.display = next === "text" ? "" : "none";
-  $("paneJson").style.display = next === "json" ? "" : "none";
-  if (next === "json") $("changeJson").value = graphJson();
+function confirmDelivery(ok) {
+  if (ok) {
+    sendEvent({ type: "human_op", action: "approve", operator: "web", priority: "high" });
+  } else {
+    openReason("退回交付", "退回必须写明原因，实例会停留在待交付并记录决策。", value => {
+      sendEvent({ type: "human_op", action: "reject", reason: value, operator: "web", priority: "high" });
+    });
+  }
 }
 
+let reasonCallback = null;
+function openReason(title, hint, callback) {
+  $("reasonTitle").textContent = title;
+  $("reasonHint").textContent = hint;
+  $("reasonText").value = "";
+  reasonCallback = callback;
+  $("reasonBox").classList.add("open");
+  $("reasonText").focus();
+}
+
+function gateAction(action) {
+  if (!state || !state.waiting_on) return toast("当前没有等待人工的节点", "bad");
+  if (action === "approve") return humanOp("approve");
+  openReason(action === "skip" ? "跳过当前节点" : "驳回当前节点",
+    action === "skip"
+      ? "跳过会结束该任务，依赖它的下游不再推进；请说明原因。"
+      : "驳回会把该任务及其下游未开始任务置为 blocked；请说明原因。",
+    value => humanOp(action, value));
+}
+
+function exportPlan() {
+  if (!state || !state.total) return toast("还没有可导出的计划", "bad");
+  const payload = {
+    exported_at: new Date().toISOString(),
+    instance_id: state.instance_id, plan_id: state.plan_id, spec_version: state.spec_version,
+    graph_id: state.graph_id, status: state.status,
+    tasks: tasks(), edges: edgesOf(), layers: layers(),
+    execution_order: state.execution_order || [],
+    decisions: decisions() || derivedDecisions(),
+    delivery: delivery(), waiting_on: state.waiting_on
+  };
+  download("ideaflow-plan-" + (state.plan_id || state.instance_id) + ".json",
+    JSON.stringify(payload, null, 2), "application/json");
+}
+
+function exportMarkdown() {
+  if (!state || !state.total) return toast("还没有可导出的计划", "bad");
+  const lines = [];
+  lines.push("# IdeaFlow 开发计划", "");
+  lines.push("- 实例：" + state.instance_id);
+  lines.push("- 计划号：" + (state.plan_id || "（任务清单入口无计划号）"));
+  lines.push("- 规格版本：" + state.spec_version + "　图形版本：" + state.graph_id);
+  lines.push("- 状态：" + (INSTANCE_LABEL[state.status] || state.status)
+    + "　进度：" + (state.done || 0) + "/" + (state.total || 0) + "（" + (state.percent || 0) + "%）");
+  lines.push("- 导出时间：" + new Date().toLocaleString());
+  lines.push("", "## 并行层", "");
+  layers().forEach((layer, i) => lines.push((i + 1) + ". 第 " + (i + 1) + " 层：" + layer.join("、")));
+  lines.push("", "## 任务", "");
+  lines.push("| 任务 | 名称 | 状态 | 角色 | 交付物 | 验收项 | 需求来源 | 设计来源 | 产物 |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  tasks().forEach(t => lines.push("| " + [
+    t.task_id, t.name, STATUS_LABEL[t.status] || t.status,
+    ROLE_LABEL[t.suggested_role] || t.suggested_role || "ai",
+    t.deliverable || "", (t.acceptance_items || []).join("；"),
+    (t.requirement_refs || []).join("、") || "—", (t.design_refs || []).join("、") || "—",
+    (t.artifact_ids || []).join("、") || "—"
+  ].join(" | ") + " |"));
+  lines.push("", "## 依赖", "");
+  edgesOf().forEach(e => lines.push("- " + e.from + " → " + e.to + "（" + (e.type || "force")
+    + (e.reason ? "：" + e.reason : "") + "）"));
+  const dec = decisions() || derivedDecisions();
+  lines.push("", "## 人工决策", "");
+  if (!dec.length) lines.push("（无）");
+  dec.forEach(d => lines.push("- " + (d.decision_id || "") + " " + (ACTION_LABEL[d.action] || d.action)
+    + " " + (d.target_id || "") + " 由 " + String(d.actor || "").replace("human:", "")
+    + (d.reason ? "：" + d.reason : "") + "（" + String(d.created_at || "").slice(0, 19) + "）"));
+  const dlv = delivery();
+  lines.push("", "## 交付", "");
+  if (dlv) {
+    lines.push("- 交付号：" + dlv.delivery_id + "　状态：" + dlv.status
+      + (dlv.decided_by ? "　确认人：" + dlv.decided_by : ""));
+    (dlv.items || []).forEach(item => lines.push("  - " + item.task_id + "："
+      + (item.artifact_ids || []).join("、") + "　验收：" + (item.acceptance || "")));
+  } else {
+    lines.push("- 尚未生成交付记录（实例状态：" + state.status + "）");
+  }
+  download("ideaflow-plan-" + (state.plan_id || state.instance_id) + ".md",
+    lines.join("\n"), "text/markdown");
+}
+
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime + ";charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 0);
+  toast("已导出 " + name, "ok");
+}
+
+/* 变更弹窗 */
+let changeMode = "text";
+function openChange() {
+  if (!state || !state.total) return toast("请先完成一次编排", "bad");
+  $("changeText").value = "";
+  setChangeMode("text");
+  $("changeBox").classList.add("open");
+}
+function setChangeMode(mode) {
+  changeMode = mode;
+  $("ctabText").style.background = mode === "text" ? "var(--mint)" : "#fff";
+  $("ctabJson").style.background = mode === "json" ? "var(--mint)" : "#fff";
+  $("cpaneText").style.display = mode === "text" ? "" : "none";
+  $("cpaneJson").style.display = mode === "json" ? "" : "none";
+  if (mode === "json") {
+    $("changeJson").value = JSON.stringify({
+      tasks: tasks().map(t => ({
+        task_id: t.task_id, name: t.name, deliverable: t.deliverable,
+        acceptance_items: t.acceptance_items, suggested_role: t.suggested_role,
+        priority: t.priority, requirement_refs: t.requirement_refs,
+        design_refs: t.design_refs, depends_on: t.depends_on
+      })),
+      edges: edgesOf()
+    }, null, 2);
+  }
+}
 async function submitChange() {
-  if (!state || !state.total) return notify("请先完成一次编排");
+  if (!state || !state.total) return toast("请先完成一次编排", "bad");
   const changeId = "CR-" + Date.now();
   try {
-    if (mode === "text") {
+    if (changeMode === "text") {
       const summary = $("changeText").value.trim();
-      if (!summary) return notify("请填写变更说明");
-      await post("/api/events", {
-        type: "change", change_id: changeId, change_type: "task",
-        summary, priority: "high"
-      });
+      if (!summary) return toast("请填写变更说明", "bad");
+      await post("/api/events", { type: "change", change_id: changeId, change_type: "task", summary, priority: "high" });
     } else {
       const graph = JSON.parse($("changeJson").value);
-      if (!Array.isArray(graph.tasks) || !Array.isArray(graph.edges)) {
-        throw new Error("JSON 必须包含 tasks 和 edges 数组");
-      }
+      if (!Array.isArray(graph.tasks) || !Array.isArray(graph.edges)) throw new Error("JSON 需包含 tasks 与 edges 数组");
       await post("/api/events", {
         type: "change", change_id: changeId, change_type: "task",
         summary: $("changeText").value.trim() || "人工调整任务与依赖",
         tasks: graph.tasks, edges: graph.edges, priority: "high"
       });
     }
-    $("drawer").classList.remove("open");
-    notify("变更已提交，等待后台重算", true);
-    await tick();
+    $("changeBox").classList.remove("open");
+    toast("变更已提交，等待重排", "ok");
+    await pulled();
   } catch (error) {
-    notify(error.message);
+    toast(error.message, "bad");
   }
 }
 
+/* =========================================================================
+   9. Tab 与全局事件绑定
+   ========================================================================= */
+function setTab(next) {
+  tab = next;
+  localStorage.setItem(LS.tab, next);
+  syncHash();
+  renderTabs();
+}
+function renderTabs() {
+  document.querySelectorAll(".tabs button").forEach(button => {
+    button.classList.toggle("active", button.dataset.tab === tab);
+  });
+  document.querySelectorAll(".pane").forEach(p => { p.style.display = "none"; });
+  const pane = $("pane-" + tab);
+  if (pane) pane.style.display = "";
+}
+
+document.addEventListener("click", ev => {
+  const opButton = ev.target.closest("[data-op]");
+  if (opButton) { gateAction(opButton.dataset.op || "approve"); return; }
+  const aiButton = ev.target.closest("[data-ai]");
+  if (aiButton) {
+    const id = (selected || (tasks().find(t => t.status === "running") || {}).task_id);
+    if (!id) return toast("没有可回报的任务", "bad");
+    sendEvent({ type: "ai_report", task_id: id, result: aiButton.dataset.ai,
+      detail: aiButton.dataset.ai === "done" ? "执行完成" : "执行失败", priority: "high" });
+    return;
+  }
+  const chip = ev.target.closest("[data-task]");
+  if (chip) { selectTask(chip.dataset.task); return; }
+  const tabButton = ev.target.closest(".tabs button");
+  if (tabButton) { setTab(tabButton.dataset.tab); return; }
+  const filterButton = ev.target.closest("[data-filter]");
+  if (filterButton) {
+    filter = filterButton.dataset.filter;
+    localStorage.setItem(LS.filter, filter);
+    renderTimeline();
+    return;
+  }
+  if (ev.target.id === "btnDeliverOk") confirmDelivery(true);
+  if (ev.target.id === "btnDeliverNo") confirmDelivery(false);
+  if (ev.target.id === "btnDeliverOk2") confirmDelivery(true);
+  if (ev.target.id === "btnDeliverNo2") confirmDelivery(false);
+});
+
+$("req").addEventListener("input", refreshEntryTag);
 $("btnStart").addEventListener("click", startRun);
-$("btnAiReport").addEventListener("click", async () => {
-  const taskId = $("aiTask").value.trim();
-  if (!taskId) return notify("请填写 task_id");
-  await sendEvent({
-    type: "ai_report", task_id: taskId, result: $("aiResult").value,
+$("btnSample").addEventListener("click", () => {
+  $("req").value = JSON.stringify({
+    tasks: [
+      { task_id: "T1", name: "确认二手书交易范围", deliverable: "范围说明", acceptance_items: ["范围评审通过"], suggested_role: "human", priority: "high" },
+      { task_id: "T2", name: "书籍发布与搜索", deliverable: "发布/搜索页面", acceptance_items: ["可发布", "可搜索"], suggested_role: "ai", priority: "high" },
+      { task_id: "T3", name: "线下交易地点", deliverable: "地点模块", acceptance_items: ["可选地点"], suggested_role: "ai", priority: "medium" },
+      { task_id: "T4", name: "联调与验收", deliverable: "联调记录", acceptance_items: ["主流程走通"], suggested_role: "ai", priority: "high" }
+    ],
+    edges: [
+      { from: "T1", to: "T2", type: "force" },
+      { from: "T1", to: "T3", type: "force" },
+      { from: "T2", to: "T4", type: "force" },
+      { from: "T3", to: "T4", type: "force" }
+    ]
+  }, null, 2);
+  refreshEntryTag();
+});
+$("btnAiReport").addEventListener("click", () => {
+  const id = $("aiTask").value.trim();
+  if (!id) return toast("请填写 task_id", "bad");
+  sendEvent({
+    type: "ai_report", task_id: id, result: $("aiResult").value,
     detail: $("aiDetail").value.trim() || "执行完成", priority: "high"
   });
-  notify("AI 回报已提交：" + taskId, true);
 });
-$("btnApprove").addEventListener("click", () => humanOp("approve"));
-$("btnSkip").addEventListener("click", () => askReason("skip"));
-$("btnReject").addEventListener("click", () => askReason("reject"));
-$("btnChange").addEventListener("click", () => {
-  if (!state || !state.total) return notify("请先完成一次编排");
-  setMode("text");
-  $("changeText").value = "";
-  $("drawer").classList.add("open");
-});
-$("btnCancel").addEventListener("click", () => $("drawer").classList.remove("open"));
-$("btnSubmitChange").addEventListener("click", submitChange);
-$("tabText").addEventListener("click", () => setMode("text"));
-$("tabJson").addEventListener("click", () => setMode("json"));
-
-let dialogCallback = null, dialogNeedsReason = false;
-function openDialog(title, hint, needReason, callback) {
-  dialogNeedsReason = needReason;
-  dialogCallback = callback;
-  $("reasonTitle").textContent = title;
-  $("reasonHint").textContent = hint;
-  $("reasonText").style.display = needReason ? "" : "none";
-  $("reasonText").value = "";
-  $("reasonBox").classList.add("open");
-  if (needReason) $("reasonText").focus();
-}
-
-function askReason(action) {
-  if (!state || !state.waiting_on) return notify("当前没有等待人工的节点");
-  openDialog(
-    action === "skip" ? "跳过当前节点" : "驳回当前节点",
-    action === "skip"
-      ? "跳过会结束该任务，后续依赖它的任务将不再推进。"
-      : "驳回会把该任务及其下游未开始任务一并置为 blocked。",
-    true,
-    value => humanOp(action, value)
-  );
-}
-
+$("btnExport").addEventListener("click", exportPlan);
+$("btnExportMd").addEventListener("click", exportMarkdown);
+$("btnChange").addEventListener("click", openChange);
 $("btnReopen").addEventListener("click", () => {
-  const ids = (state.tasks || [])
-    .filter(task => task.status === "blocked" || task.status === "failed")
-    .map(task => task.task_id);
-  if (!ids.length) return notify("没有可恢复的任务");
-  openDialog(
-    "恢复被阻塞任务",
-    "将 " + ids.join("、") + " 重置为 pending 并重新调度；已完成任务不受影响。",
-    false,
-    async () => {
-      await sendEvent({
-        type: "change", change_id: "CR-REOPEN-" + Date.now(), change_type: "task",
-        reopen: ids, summary: "人工恢复被阻塞任务", priority: "high"
-      });
-      notify("恢复已提交，共 " + ids.length + " 个任务", true);
-    }
-  );
+  const ids = tasks().filter(t => t.status === "blocked" || t.status === "failed").map(t => t.task_id);
+  if (!ids.length) return toast("没有可恢复的任务", "bad");
+  openReason("恢复被阻塞任务", "将 " + ids.join("、") + " 重置为 pending 并重新调度；已完成任务不受影响。",
+    () => sendEvent({
+      type: "change", change_id: "CR-REOPEN-" + Date.now(), change_type: "task",
+      reopen: ids, summary: "人工恢复被阻塞任务", priority: "high"
+    }));
 });
-
+$("zoomIn").addEventListener("click", () => { zoom = Math.min(1.6, zoom + 0.1); renderGraph(); });
+$("zoomOut").addEventListener("click", () => { zoom = Math.max(0.4, zoom - 0.1); renderGraph(); });
+$("zoomFit").addEventListener("click", () => { zoom = 0; renderGraph(); });
 $("reasonCancel").addEventListener("click", () => $("reasonBox").classList.remove("open"));
 $("reasonOk").addEventListener("click", () => {
   const value = $("reasonText").value.trim();
-  if (dialogNeedsReason && !value) return notify("理由不能为空");
-  const callback = dialogCallback;
+  if (!value) return toast("理由不能为空", "bad");
+  const callback = reasonCallback;
   $("reasonBox").classList.remove("open");
-  dialogCallback = null;
+  reasonCallback = null;
   if (callback) callback(value);
 });
+$("changeCancel").addEventListener("click", () => $("changeBox").classList.remove("open"));
+$("changeSubmit").addEventListener("click", submitChange);
+$("ctabText").addEventListener("click", () => setChangeMode("text"));
+$("ctabJson").addEventListener("click", () => setChangeMode("json"));
 
-tick();
-setInterval(tick, 1500);
+/* =========================================================================
+   10. 启动：先全量拉一次（刷新后恢复），再增量轮询
+   ========================================================================= */
+async function boot() {
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state && state.total) renderGraph(); }, 160);
+  });
+  try {
+    const health = await api("/api/health");
+    $("health").dataset.ok = "1";
+    $("healthText").textContent = health.started ? "已启动" : "服务就绪";
+  } catch {
+    $("health").dataset.ok = "0";
+    $("healthText").textContent = "未连接";
+  }
+  try {
+    await pull(true);
+    booted = true;
+    readHash();
+    const saved = localStorage.getItem(LS.sel);
+    if (!selected && saved && taskById(saved)) { selected = saved; }
+    if (events.length) toast("已恢复当前运行记录：事件 " + events.length + " 条", "ok");
+  } catch { /* 服务未起时静默，轮询会重试 */ }
+  refreshEntryTag();
+  renderAll();
+  setInterval(tick, POLL_MS);
+}
+
+boot();
 </script>
 </body>
 </html>
