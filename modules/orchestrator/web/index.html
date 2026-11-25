@@ -464,6 +464,7 @@ const INSTANCE_LABEL = {
   delivery_pending: "待交付确认", completed: "已完成", blocked: "阻塞", aborted: "已终止"
 };
 const GATE_LABEL = {
+  plan_approval: "计划审批",
   task_execution: "人工节点执行", task_failed: "任务失败待接管", delivery_confirm: "交付确认"
 };
 const ROLE_LABEL = { ai: "AI", human: "人工", "ai+human": "AI+人工" };
@@ -625,12 +626,16 @@ function renderHeader() {
   const s = state || {};
   const plan = $("bPlan").querySelector("b");
   const hasPlan = s.plan_id && String(s.plan_id).trim();
-  plan.textContent = hasPlan ? s.plan_id : "无计划号";
+  const pending = s.waiting_on?.gate_type === "plan_approval";
+  const approved = (decisions() || []).some(row => row.target_type === "plan"
+    && row.target_id === s.plan_id && row.target_version === s.plan_version && row.action === "approve");
+  const planStatus = pending ? "待批准 v" + s.plan_version : approved ? "已批准 v" + s.plan_version : "";
+  plan.textContent = hasPlan ? s.plan_id + (planStatus ? " · " + planStatus : "") : "无计划号";
   $("bPlan").classList.toggle("plan", !!hasPlan);
   $("bPlan").classList.toggle("muted", !hasPlan);
   $("bPlan").title = hasPlan
-    ? "计划号 " + s.plan_id + "（来自 plan.json 或 spec 入口）"
-    : "任务清单入口没有计划号（契约允许 plan_id 为 null）";
+    ? "计划号 " + s.plan_id
+    : "尚未生成计划";
   $("bSpec").querySelector("b").textContent = s.spec_version || "—";
   $("bGraph").querySelector("b").textContent = s.graph_id || "—";
   $("bList").querySelector("b").textContent = s.list_version || "—";
@@ -695,6 +700,16 @@ function renderGate() {
   const since = gate.since ? new Date(gate.since) : null;
   const waited = since ? Math.max(0, Math.round((Date.now() - since.getTime()) / 1000)) : null;
   const waitedText = waited == null ? "" : (waited < 60 ? waited + " 秒" : Math.round(waited / 60) + " 分钟");
+  if (gate.gate_type === "plan_approval") {
+    box.innerHTML = '<div class="gate"><div class="t">待批准 · '
+      + esc(s.plan_id) + ' v' + esc(s.plan_version) + '</div>'
+      + '<div class="m">批准当前版本后开始派发任务。</div><div class="acts">'
+      + '<button class="gold tiny" data-plan-op="approve">批准计划</button>'
+      + '<button class="warn tiny" data-plan-op="plan">退回计划</button>'
+      + (s.can_return_spec ? '<button class="warn tiny" data-plan-op="spec">退回规格</button>' : '')
+      + '</div></div>';
+    return;
+  }
   if (gate.gate_type === "delivery_confirm") {
     box.innerHTML = '<div class="gate">'
       + '<div class="t">等待交付确认 · ' + esc(gate.object_id) + "</div>"
@@ -730,6 +745,14 @@ function renderDelivery() {
   if (!s.total) {
     box.innerHTML = '<div class="gate idle"><div class="t">未到交付阶段</div>'
       + '<div class="m">全部任务进入终态后，实例转入 <span class="mono">delivery_pending</span>，这里出现交付清单与确认按钮。</div></div>';
+    return;
+  }
+  if (dlv?.status === "rejected") {
+    const decision = (decisions() || []).find(row => row.decision_id === dlv.decision_id);
+    $("deliveryTag").textContent = "已驳回";
+    box.innerHTML = '<div class="gate"><div class="t">交付已驳回 · '
+      + esc(dlv.delivery_id) + '</div><div class="m">'
+      + esc(decision?.reason || "原因见决策记录") + '</div></div>';
     return;
   }
   if (status === "completed") {
@@ -1304,7 +1327,7 @@ function confirmDelivery(ok) {
   if (ok) {
     sendEvent({ type: "human_op", action: "approve", operator: "web", priority: "high" });
   } else {
-    openReason("退回交付", "退回必须写明原因，实例会停留在待交付并记录决策。", value => {
+    openReason("退回交付", "写明原因后，实例进入阻塞并记录决策。", value => {
       sendEvent({ type: "human_op", action: "reject", reason: value, operator: "web", priority: "high" });
     });
   }
@@ -1328,6 +1351,18 @@ function gateAction(action) {
       ? "跳过会结束该任务，依赖它的下游不再推进；请说明原因。"
       : "驳回会把该任务及其下游未开始任务置为 blocked；请说明原因。",
     value => humanOp(action, value));
+}
+
+function planAction(action) {
+  const s = state;
+  if (!s || s.waiting_on?.gate_type !== "plan_approval") return;
+  const packet = {type: "human_op", plan_id: s.plan_id, plan_version: s.plan_version,
+    operator: "web", priority: "high"};
+  if (action === "approve") return sendEvent({...packet, action});
+  const target = action === "spec" ? "规格" : "计划";
+  openReason("退回" + target, "写明理由后将生成新版计划，并重新等待批准。", reason => {
+    sendEvent({...packet, action: "return", return_to: action, reason});
+  });
 }
 
 function exportPlan() {
@@ -1471,6 +1506,8 @@ function renderTabs() {
 }
 
 document.addEventListener("click", ev => {
+  const planButton = ev.target.closest("[data-plan-op]");
+  if (planButton) { planAction(planButton.dataset.planOp); return; }
   const opButton = ev.target.closest("[data-op]");
   if (opButton) { gateAction(opButton.dataset.op || "approve"); return; }
   const aiButton = ev.target.closest("[data-ai]");

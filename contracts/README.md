@@ -33,7 +33,7 @@
 9. 枚举以代码为准：快照条目类型为 `requirement/constraint/open`，规格状态含 `awaiting_human`；
 10. `artifact`、`delivery` 已纳入本版，字段按"最小闭环"定义，执行侧实现后可再收紧；
 11. `config` 未纳入本版，当前用 `--mock` 参数与 `.env` 代替；
-12. 交付记录的 `plan_id` 可选：任务清单入口（夹具）没有计划号时省略；
+12. 交付记录的 `plan_id` 可选，兼容旧版任务清单入口的交付记录；
 13. `Progress.spec_version` 取值约定为 `v{spec.version}`（如 v1），跨模块对接口径；
 14. `snapshot` 条目来源新增可选 `actor` / `round`，用于追溯讨论提出者与轮次；
     讨论补充条目上限为原文条目 3 倍（must 优先保留），防止真实模型把快照撑爆。
@@ -48,33 +48,36 @@ python -m unittest discover -s tests -v
 `tests/test_decision.py` 校验人工决策记录；
 `tests/test_integration.py` 校验 spec → plan → 编排器；
 `tests/test_generated_artifacts.py` 用需求模块的离线产物校验 snapshot/spec 契约；
-`tests/test_api_gaps.py` 校验 openapi 结构，并挂着四条待实现的接口断言（`skip`）；
-`tests/test_scheduling.py` 挂着两条 resource 边不阻塞的调度断言（`skip`）；
+`tests/test_api_gaps.py` 校验 OpenAPI 结构、启动接口、计划审批、定向退回和交付；
+`tests/test_scheduling.py` 校验 resource 边不阻塞调度；
 `tests/test_eval_metrics.py` 校验评测指标计算；
 `tests/test_failure.py` 覆盖重试转人工、重复启动、变更包非法（重复编号/成环/悬空边）；
 `tests/test_graph.py` 覆盖拓扑分层、环检测与依赖边校验；
 `tests/test_feature_synthesis.py` 覆盖功能清单契约、命名、来源与模块对应。
 
-## 待实现（断言已就位，实现后去掉 skip）
+## 编排回归范围
 
-| 缺口 | 契约位置 | 实现方 |
+| 行为 | 契约位置 | 实现方 |
 | --- | --- | --- |
 | 任务完成登记产物 | `artifact.schema.json` | 执行侧（成员 1/4） |
 | 全部终态后进入 `delivery_pending` 并生成交付记录 | `delivery.schema.json` | 执行侧（成员 1/4） |
 | 交付确认后实例 `completed` | `Progress.delivery` | 执行侧（成员 1/4） |
 | `resource` 边不阻塞调度与分层 | `openapi.yaml` 的 `Edge.type` | 编排器（成员 4） |
-| 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
+| 任务失败开门后实例保持 `waiting_human` | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 | 一句话到交付的完整链路（桥 + spec 入口 + 执行闭环） | `openapi.yaml` 的 `/api/start` | 成员 1/4 |
 | 计划评审：模块覆盖、任务粒度、依赖合法性与成环 | 新增 `plan_review.review_plan(spec, plan)` | 编排器（成员 4） |
-
-共 12 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`tests/test_plan_review.py` 5 条。
 
 已解除挂起（断言现在生效，改坏了会红）：
 想法入口经规格、`/api/start` 接受 `spec.json`、`/api/progress` 返回 `decisions`、
 计划来源透传、计划自带 `depends_on` 时不再调模型、讨论阶段接入规格、
 需求归纳（功能清单生成、命名、来源、模块与功能对应）。
 
-退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
+## 计划审批与定向退回
+
+- 四种入口生成或载入计划后统一进入 `status=waiting_human` 和 `waiting_on.gate_type=plan_approval`。任务清单入口也分配计划号，计划的 `spec_ref` 为 `null`。
+- 页面用 `Progress.plan_id` 和 `plan_version` 展示当前待批计划，通过 `/api/events` 提交 `human_op`、`action=approve` 及这两个字段。兼容命令行的简写批准会在入队时绑定当前待批版本。批准写入 `target_type=plan` 的决策后开始派发。
+- 退回使用 `action=return`，必须传当前计划引用、`return_to=plan|spec` 和非空 `reason`。退回计划沿用当前规格，计划版本递增。退回规格需要当前运行有规格正文，规格与计划版本均递增。调用方可附同一规格 ID 的 `spec` 修订稿，否则沿用现有正文。旧版文件和退回原因保留，新计划重新等待批准。
+- `Progress.can_return_spec` 告知页面当前是否有可退回的规格正文。计划批准、定向退回和交付确认的结果从 `decisions` 读取。
 
 ## 入口约定
 
@@ -84,7 +87,7 @@ python -m unittest discover -s tests -v
 | --- | --- | --- |
 | 想法 | `requirement` | 全流程入口，必须经需求模块生成规格后再分解，**不允许绕开规格** |
 | 任务清单 | `tasks` | 夹具、前端联调、回归测试，**长期保留** |
-| 计划 | `plan_id` + `tasks` | 编排器直接执行既定计划 |
+| 计划 | `plan_id` + `tasks` | 载入既定计划，批准后派发 |
 | 设计规格 | `modules` | 课堂作业 2 的规定入口，由 `plan_adapter.py` 转计划 |
 
 任务清单入口不因规格入口上线而删除：它不依赖上游模型，是前端和测试唯一能稳定复现的输入。
@@ -92,7 +95,7 @@ python -m unittest discover -s tests -v
 只有一条主链路：想法 → 讨论 → 规格 → 计划 → 编排。编排器不再接受"一句话直接拆任务"，
 旧的 `pm_breakdown()` 捷径废弃；规格入口与想法入口最终都落在同一份 spec 上。
 
-作业 2 的演示走**网页粘贴 spec**。页面 `startRun()` 已会把以 `{` 开头的输入按 JSON 解析后直发 `/api/start`，因此前端无需改造；缺的只是后端识别 `modules` 字段（当前会落到 `normalize_tasks` 报「任务清单为空」）。
+作业 2 的演示可在网页粘贴规格 JSON，启动后在计划审批面板批准当前版本。
 
 ## 变更规则
 

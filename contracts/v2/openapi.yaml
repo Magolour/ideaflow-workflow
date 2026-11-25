@@ -39,6 +39,11 @@ paths:
   /api/events:
     post:
       summary: AI 回报、人工操作、变更、恢复
+      description: >-
+        计划门使用 human_op。页面提交 approve 或 return 时应带上当前 plan_id、plan_version。
+        为兼容命令行，当前计划门接受不带版本的 approve，并在入队时绑定当前版本。
+        return 需要计划引用、return_to（spec 或 plan）及非空 reason。退回 spec 可带同 ID 的修订稿 spec。
+        事件入队不表示动作已生效，通过 Progress.decisions 和 last_error 查询结果。
       responses:
         "202":
           description: 已入队
@@ -128,7 +133,14 @@ components:
           $ref: "enums.schema.json#/$defs/instanceStatus"
         plan_id:
           type: [string, "null"]
-          description: 由 plan.json 或 spec.json 生成后回填；需求/任务入口可为 null
+          description: 启动后是当前计划号；任务清单入口会分配计划号
+        plan_version:
+          type: [integer, "null"]
+          minimum: 1
+          description: 当前可审批的计划版本，未启动时为空
+        can_return_spec:
+          type: boolean
+          description: 当前待批计划有可退回的规格正文
         spec_version: { type: string }
         list_version: { type: string }
         graph_id: { type: string }
