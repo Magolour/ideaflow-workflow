@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .contracts import ContractError, validate_stances, validate_synthesis
+from .features import normalize_features
 from .roles import DISCUSSION_ROLES, Role
 
 
@@ -54,6 +55,8 @@ class MockAgent:
     def respond(self, stage: str, role: Role, context: dict[str, Any]) -> dict[str, Any]:
         if stage == "clarify":
             return self._clarify(role)
+        if stage == "features":
+            return self._features(context)
         if stage == "respond":
             return self._respond(role, context)
         if stage == "review":
@@ -71,6 +74,28 @@ class MockAgent:
         raise ValueError(f"MockAgent 不支持阶段：{stage}")
 
     # ---------- 首轮澄清 ----------
+
+    @staticmethod
+    def _features(context: dict[str, Any]) -> dict[str, Any]:
+        idea = str(context.get("idea") or "")
+        if "微信" in idea:
+            names = ["聊天会话", "好友通讯录", "消息通知", "群聊", "朋友圈", "登录注册"]
+        else:
+            names = ["需求录入", "列表与检索", "详情查看", "提交与审批", "通知提醒", "统计导出"]
+        items = context.get("snapshot", {}).get("items", [])
+        refs = [item["id"] for item in items
+                if item.get("type") == "requirement"] or [
+                    item["id"] for item in context.get("claims", [])] or [
+                    item["id"] for item in context.get("options", [])]
+        ref = refs[0] if refs else ""
+        return {
+            "features": [
+                {"name": name, "description": f"提供{name}能力",
+                 "source_refs": [ref] if ref else [], "inferred": True,
+                 "priority": "high"}
+                for name in names
+            ],
+        }
 
     @staticmethod
     def _clarify(role: Role) -> dict[str, Any]:
@@ -459,6 +484,8 @@ STAGE_HINTS: dict[str, str] = {
     "review": '{"role":"<role id>","reviews":[{"claim":"CLM-001",'
               '"verdict":"preserved|deferred|omitted|distorted","note":"说明"}],'
               '"claims":[],"assumptions":[],"objections":[],"questions":[]}',
+    "features": '{"features":[{"name":"聊天会话","description":"一对一聊天能力",'
+                '"source_refs":["CLM-001"],"inferred":true,"priority":"high"}]}',
     "draft": '{"decisions":[{"requirement_ids":["R-01"],"choice":"方案",'
              '"reason":"理由","cost_days":2.0,"satisfies":"full|partial|declined",'
              '"risk":"风险"}],"claims":[{"text":"主张","requirement_ids":["R-01"],'
@@ -476,6 +503,8 @@ STAGE_RULES = {
     "sign": "对每个候选方案给出四态立场之一；有条件必须写条件，反对必须写理由。",
     "counterexample": "提出一个能推翻当前共识的具体反例。",
     "review": "至少复核 1 条给定主张；claim 只能用给定编号，结论四选一。",
+    "features": "归纳 5~10 条功能；名称 2~24 字，写能力不写过程约束；"
+                "每条 source_refs 至少一条且只能用给定编号；推断项标 inferred=true。",
     "draft": "覆盖快照里的每一条明确要求；只能引用给定编号；成本必须大于 0。",
 }
 
@@ -640,6 +669,8 @@ class LLMAgent:
 
     def _postprocess(self, stage: str, role: Role, context: dict[str, Any],
                      data: dict[str, Any]) -> dict[str, Any]:
+        if stage == "features":
+            return self._normalize_features(data, context)
         if stage == "synthesize":
             known = {row["id"] for row in context.get("claims", [])}
             return validate_synthesis(self._normalize_synthesis(data, known),
@@ -766,6 +797,10 @@ class LLMAgent:
                                     "必须复核至少一条自己的论点，claim 用给定编号",
                                     "reviews")
         return data
+
+    @staticmethod
+    def _normalize_features(data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return normalize_features(data, context)
 
     @staticmethod
     def _normalize_synthesis(data: dict[str, Any], known: set[str]) -> dict[str, Any]:

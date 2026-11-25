@@ -10,6 +10,8 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "contracts" / "v2"
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
@@ -57,12 +59,12 @@ def post_json(url: str, payload) -> dict:
     request = urllib.request.Request(
         url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with _OPENER.open(request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=10) as response:
+    with _OPENER.open(url, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

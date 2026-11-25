@@ -186,6 +186,8 @@ def scope_revision(spec: Spec, snapshot: Snapshot,
         current = float(module["estimate_days"])
         if current <= 0.6:
             continue
+        if not module.get("requirement_ids"):
+            continue
         new_cost = max(0.5, round(current * 0.5, 1))
         saving = current - new_cost
         requirement_id = module["requirement_ids"][0]

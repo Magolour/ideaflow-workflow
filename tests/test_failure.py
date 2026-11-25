@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
@@ -38,7 +40,7 @@ def post_json(url: str, payload):
     request = urllib.request.Request(
         url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with _OPENER.open(request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -187,7 +189,7 @@ class HttpStatusTest(AgentCase):
         with running_server(self.out) as base:
             post_json(f"{base}/api/start", TASKS)
             with self.assertRaises(urllib.error.HTTPError) as ctx:
-                urllib.request.urlopen(f"{base}/api/progress?since=-1", timeout=10)
+                _OPENER.open(f"{base}/api/progress?since=-1", timeout=10)
             self.assertEqual(ctx.exception.code, 400)
 
 
