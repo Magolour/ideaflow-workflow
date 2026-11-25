@@ -30,6 +30,7 @@
         "draft",
         "awaiting_human",
         "confirmed",
+        "blocked",
         "superseded"
       ]
     },
