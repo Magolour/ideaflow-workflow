@@ -76,7 +76,7 @@ class RuntimeProgressContractTest(unittest.TestCase):
             import yaml
         except ImportError:  # pragma: no cover
             self.skipTest("未安装 pyyaml")
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.out = Path(self.tmp.name)
         openapi = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
         schemas = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
@@ -104,7 +104,7 @@ class ApiGapTest(unittest.TestCase):
     """成员 4 实现后去掉 skip，绿了即验收。"""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.out = Path(self.tmp.name)
 
     def tearDown(self):
