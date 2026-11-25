@@ -407,7 +407,11 @@
 <div class="drawer" id="reasonBox">
   <div class="panel" style="width:min(480px,100%)">
     <header><strong id="reasonTitle">填写理由</strong><div class="hint" id="reasonHint">理由为必填项。</div></header>
-    <div class="body"><textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea></div>
+    <div class="body">
+      <textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea>
+      <textarea id="reviewedSpec" rows="6" hidden aria-label="已复审规格 JSON"
+        placeholder="粘贴已复审通过的下一版规格 JSON"></textarea>
+    </div>
     <footer>
       <button class="ghost" id="reasonCancel">取消</button>
       <button id="reasonOk">确认</button>
@@ -523,7 +527,11 @@ async function api(path, options) {
   const text = await response.text();
   let body;
   try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text }; }
-  if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
+  if (!response.ok) {
+    const question = body.details?.question?.question;
+    throw new Error([body.message || body.error || ("HTTP " + response.status), question]
+      .filter(Boolean).join("。"));
+  }
   return body;
 }
 const post = (path, data) => api(path, {
@@ -1334,10 +1342,12 @@ function confirmDelivery(ok) {
 }
 
 let reasonCallback = null;
-function openReason(title, hint, callback) {
+function openReason(title, hint, callback, needsReviewedSpec = false) {
   $("reasonTitle").textContent = title;
   $("reasonHint").textContent = hint;
   $("reasonText").value = "";
+  $("reviewedSpec").value = "";
+  $("reviewedSpec").hidden = !needsReviewedSpec;
   reasonCallback = callback;
   $("reasonBox").classList.add("open");
   $("reasonText").focus();
@@ -1360,9 +1370,13 @@ function planAction(action) {
     operator: "web", priority: "high"};
   if (action === "approve") return sendEvent({...packet, action});
   const target = action === "spec" ? "规格" : "计划";
-  openReason("退回" + target, "写明理由后将生成新版计划，并重新等待批准。", reason => {
-    sendEvent({...packet, action: "return", return_to: action, reason});
-  });
+  const needsReviewedSpec = action === "spec";
+  const hint = needsReviewedSpec ? "填写理由并粘贴已复审通过的下一版规格。" : "填写理由后重新生成待批准计划。";
+  openReason("退回" + target, hint, (reason, spec) => {
+    const command = {...packet, action: "return", return_to: action, reason};
+    if (needsReviewedSpec) command.spec = spec;
+    sendEvent(command);
+  }, needsReviewedSpec);
 }
 
 function exportPlan() {
@@ -1581,10 +1595,19 @@ $("reasonCancel").addEventListener("click", () => $("reasonBox").classList.remov
 $("reasonOk").addEventListener("click", () => {
   const value = $("reasonText").value.trim();
   if (!value) return toast("理由不能为空", "bad");
+  let spec;
+  if (!$("reviewedSpec").hidden) {
+    try {
+      spec = JSON.parse($("reviewedSpec").value);
+      if (!spec?.spec_id || !Array.isArray(spec.modules)) throw new Error();
+    } catch {
+      return toast("请粘贴有效的已复审规格 JSON", "bad");
+    }
+  }
   const callback = reasonCallback;
   $("reasonBox").classList.remove("open");
   reasonCallback = null;
-  if (callback) callback(value);
+  if (callback) callback(value, spec);
 });
 $("changeCancel").addEventListener("click", () => $("changeBox").classList.remove("open"));
 $("changeSubmit").addEventListener("click", submitChange);

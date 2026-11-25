@@ -23,9 +23,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-from entry import RequirementsUnavailable, normalize_tasks, parse_start, revise_spec
+from entry import RequirementsUnavailable, normalize_tasks, parse_start, reviewed_replacement
 from plan_adapter import plan_from_spec
 from plan_review import review_plan
+from spec_gate import SpecGateError
 
 PYTHON_DIR = Path(__file__).resolve().parent
 ROOT = PYTHON_DIR.parent
@@ -586,7 +587,7 @@ class RealtimeAgent:
         if target == "spec":
             if old_spec is None:
                 raise ValueError("本次运行没有可退回的规格正文")
-            spec = revise_spec(old_spec, packet.get("spec"))
+            spec = reviewed_replacement(old_spec, packet.get("spec"))
 
         plan = (plan_from_spec(spec, plan_id=self.plan_id,
                                max_parallel=old_plan.get("max_parallel", 2))
@@ -1209,6 +1210,8 @@ class AgentHandler(BaseHTTPRequestHandler):
                                  "progress": self.agent.snapshot()})
             else:
                 self._send(404, {"error": "not found"})
+        except SpecGateError as exc:
+            self._send(exc.status, {"error": exc.code, "message": str(exc), "details": exc.details})
         except RequirementsUnavailable as exc:
             self._send(503, {"error": str(exc)})
         except RuntimeError as exc:

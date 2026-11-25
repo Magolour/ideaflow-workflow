@@ -1,6 +1,5 @@
 """解析编排的四种启动输入，并调用需求模块或规格适配器。"""
 
-import hashlib
 import json
 import os
 import sys
@@ -8,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from plan_adapter import plan_from_spec
+from spec_gate import SpecGateError, attach_local_review, validate_spec_review
 
 
 @dataclass
@@ -95,10 +95,19 @@ def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
             raise RequirementsUnavailable(f"需求模块模型初始化失败：{exc}") from None
     try:
         result = run_specflow(requirement, out_dir=out_dir, agent=agent, discuss=True)
-        spec_path = Path(result.out_dir) / "spec.json"
-        return json.loads(spec_path.read_text(encoding="utf-8"))
+        run_dir = Path(result.out_dir)
+        spec = json.loads((run_dir / "spec.json").read_text(encoding="utf-8"))
+        if spec.get("review") is None:
+            audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+            spec = attach_local_review(spec, audit, run_dir.name)
     except Exception as exc:
         raise RequirementsUnavailable(f"需求模块执行失败：{exc}") from exc
+    try:
+        validate_spec_review(spec)
+    except SpecGateError as exc:
+        exc.details = {**exc.details, "run_id": run_dir.name}
+        raise
+    return spec
 
 
 def parse_start(data, requirements_output: Path, list_version: str) -> StartEntry:
@@ -107,8 +116,9 @@ def parse_start(data, requirements_output: Path, list_version: str) -> StartEntr
     summary = ""
     plan = None
 
-    if isinstance(data, dict) and data.get("spec_id") and data.get("modules") and not data.get("tasks"):
+    if isinstance(data, dict) and ("spec_id" in data or "modules" in data):
         spec = data
+        validate_spec_review(spec)
         try:
             plan = plan_from_spec(spec)
         except ValueError as exc:
@@ -140,16 +150,11 @@ def parse_start(data, requirements_output: Path, list_version: str) -> StartEntr
     return StartEntry(tasks, spec_version, list_version, plan_id, plan, spec)
 
 
-def revise_spec(current: dict, replacement: dict | None) -> dict:
-    """合并同一规格的修订稿，使用需求模块的正文哈希口径。"""
-    if replacement is not None and (
-            not isinstance(replacement, dict) or replacement.get("spec_id") != current["spec_id"]):
-        raise ValueError("修订稿必须引用当前规格 ID")
-    revised = {**current, **(replacement or {}), "version": current["version"] + 1}
-    if revised.get("status") == "confirmed":
-        revised["status"] = "draft"
-    metadata = {"hash", "status", "created_at", "revisions", "escalation"}
-    content = {key: value for key, value in revised.items() if key not in metadata}
-    canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    revised["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return revised
+def reviewed_replacement(current: dict, replacement: dict | None) -> dict:
+    if replacement is None:
+        raise ValueError("退回规格需要提交已复审通过的下一版规格")
+    if (not isinstance(replacement, dict) or replacement.get("spec_id") != current["spec_id"]
+            or replacement.get("version") != current["version"] + 1):
+        raise ValueError("修订稿必须是同一规格的下一版")
+    validate_spec_review(replacement)
+    return replacement

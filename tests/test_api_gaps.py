@@ -17,6 +17,7 @@ V2 = ROOT / "contracts" / "v2"
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
 from agent import AgentHandler, AgentServer, RealtimeAgent  # noqa: E402
+from spec_gate import _digest, spec_body_hash  # noqa: E402
 
 
 def load_schema(name: str) -> dict:
@@ -256,8 +257,20 @@ class ApiGapTest(unittest.TestCase):
             self.assertIn("版本已变更", stale["last_error"])
             self.assertEqual(stale["running"], 0)
 
-            revised = {**spec, "modules": [{**spec["modules"][0], "name": "修订后的模块"},
-                                           *spec["modules"][1:]]}
+            revised = {**spec, "version": spec["version"] + 1,
+                       "modules": [{**spec["modules"][0], "name": "修订后的模块"},
+                                   *spec["modules"][1:]]}
+            revised["hash"] = spec_body_hash(revised)
+            ref = {key: revised[key] for key in ("spec_id", "version", "hash")}
+            audit = {**spec["review"]["audit"], "spec_ref": ref}
+            audit["hash"] = _digest({key: audit[key] for key in ("spec_ref", "issues", "checks")})
+            revised["review"] = {**spec["review"], "spec_ref": ref, "audit": audit}
+            post_json(f"{base}/api/events", {**op, "return_to": "spec", "reason": "缺复审",
+                                             "plan_version": 2})
+            missing = wait_for_progress(base, lambda progress: "需要提交" in progress["last_error"])
+            self.assertEqual(missing["plan_version"], 2)
+            self.assertEqual(len(missing["decisions"]), 1)
+
             post_json(f"{base}/api/events", {**op, "return_to": "spec", "reason": "修订模块",
                                              "plan_version": 2, "spec": revised})
             refreshed = wait_for_progress(base, lambda progress: progress["plan_version"] == 3)
