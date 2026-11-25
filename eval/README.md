@@ -69,3 +69,13 @@ python eval/real_smoke.py --require-real     # 仍是 Mock Agent 时返回 2，�
 同时报告 `ideaflow/agents.py` 里有没有 `MockAgent` 之外的真实实现。
 在接入真实模型之前，脚本会明确提示"本次产物来自 MockAgent"，不会把模板结果
 当成真实调用结论。
+
+## 查看一次需求运行（调提示词用）
+
+```bash
+python eval/show_run.py modules/requirements/runs --baseline 旧运行目录
+```
+
+打印快照条目数、功能清单、模块、待确认项、模型调用次数与 token；
+`--baseline` 会对比两次运行的功能/模块数量与新增功能，适合反复调提示词。
+同一输出目录多次运行时自动取最新一次。
