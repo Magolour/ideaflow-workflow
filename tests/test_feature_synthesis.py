@@ -26,7 +26,7 @@ class NoRefAgent:
                 if stage == "features":
                     return {"features": [
                         {"name": name, "description": f"{name}能力",
-                         "source_refs": ["CLM-001"], "inferred": True,
+                         "source_refs": ["CLM-002"], "inferred": True,
                          "priority": "high"}
                         for name in ("聊天会话", "好友通讯录", "消息通知",
                                      "群聊", "朋友圈")]}
@@ -153,7 +153,7 @@ class FeatureSynthesisTest(unittest.TestCase):
             result = run(IDEA, out_dir=folder, agent=NoRefAgent(), discuss=True)
             self.assertEqual(len(result.spec.modules), 5)
             payload = json.loads((result.out_dir / "spec.v1.json").read_text(encoding="utf-8"))
-            payload.pop("artifacts", None)  # 导出层附加字段，不属于 spec 契约
+            self.assertNotIn("artifacts", payload)
             by_file = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
             validator = Draft202012Validator(inline(load_schema("spec.schema.json"), by_file))
             errors = sorted(validator.iter_errors(payload), key=str)

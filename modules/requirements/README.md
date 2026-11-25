@@ -310,8 +310,9 @@ python -m ideaflow.spec_cli export --dir runs/spec-demo
 
 | 文件 | 用途 |
 | --- | --- |
-| `spec.v{n}.json` | 机读：决策、模块、接口、映射、验收、待决项、`artifacts` 指向 Markdown |
+| `spec.v{n}.json` | 机读纯规格：决策、模块、接口、映射、验收、待决项，不含导出元数据 |
 | `spec.v{n}.md` | 人读：需求追溯表、设计决策、模块接口、验收、非目标、待决问题、估算 |
+| `spec.bundle.json` | 导出包：纯规格 + `artifacts`（JSON / Markdown / 内容哈希） |
 | `spec.json` / `spec.md` | 最新版别名，便于下游直接读取 |
 
 - 同版判定：`spec_id + version + content_hash`，Markdown 头部与附录都写完整哈希；

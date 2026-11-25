@@ -3,6 +3,9 @@
 本文件记录「讨论后归纳功能清单，再由功能清单生成规格模块」这一轮的实现范围、
 验收结果和已知限制，可直接作为 PR 说明使用。
 
+> 后续针对 `eval/check_spec_quality.py` 的文件契约、CLM→R 映射、审计分母、
+> 验收/估时/未决项修复见 [`docs/SPEC_QUALITY.md`](SPEC_QUALITY.md)。
+
 ## 1. 本轮改动
 
 - 讨论收敛后新增 `features` 阶段：`ideaflow/features.py` 调
@@ -33,7 +36,7 @@ Ran 191 tests ... OK
 ```
 
 原始要求是 187 条不能退化；本分支新增了功能归纳、范围拆分、模块去重等用例，
-现在共 191 条，全部通过。
+加上规格质量用例后共 199 条，全部通过。
 
 ### 2.2 根目录测试
 
@@ -58,7 +61,7 @@ total 6
 tasks ['聊天会话','好友通讯录','消息通知','群聊','朋友圈','登录注册']
 ```
 
-### 2.4 真实模型冒烟
+### 2.4 真实模型冒烟（质量修复前）
 
 ```text
 python eval/real_smoke.py --require-real --out .dsh-real/real2
@@ -101,7 +104,7 @@ Mock「我要做微信」：
   新增功能：聊天会话、好友通讯录、消息通知、群聊、朋友圈、登录注册
 ```
 
-真实 campus-books：
+真实 campus-books（质量修复前）：
 
 ```text
 快照条目 26 ｜ 功能 10 ｜ 模块 10 ｜ 待确认 10 ｜ 状态 awaiting_human
@@ -115,9 +118,11 @@ Mock「我要做微信」：
   - `CONSTRAINT_CONFLICT`：承诺 25.5 天，超出 14 天期限；
   - `CONSTRAINT_RISK`：10 个模块与 2 名开发不匹配。
   按现有规则会升级人工决策；`real_smoke` 的契约校验仍通过。
-- 真实功能全部只引用 `CLM` 编号，因此模块的 `requirement_ids` 为空，
-  并在 `open_items` 里生成 10 条「待确认对应需求」。这是约定的处理方式，
-  覆盖率也只按被功能引用的需求计算。
+- 功能只引用 `CLM` 编号时，先用 claim 的 `requirement_ids` 反查 R；查不到再用
+  正文重叠兜底；仍查不到才退化为 `F-xx`，同时 audit 按功能数计数。不要再把
+  `requirement_ids` 留空。
+- 规格文件 `spec.v*.json` / `spec.json` 只保留契约字段；导出元数据在
+  `spec.bundle.json`，详见 [`docs/SPEC_QUALITY.md`](SPEC_QUALITY.md)。
 - 真实运行产物不提交仓库；需要复现时用
   `python eval/real_smoke.py --require-real --out <目录>`。
 - 真实模型的 API key 只在本次进程的环境变量中使用，没有写入 `.env`、日志或
