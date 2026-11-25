@@ -75,6 +75,39 @@ class LLMAgentTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, "LLM_BAD_OUTPUT")
         self.assertEqual(len(transport.calls), 2)
 
+    def test_features_require_real_sources(self) -> None:
+        good = {"features": [
+            {"name": name, "description": f"{name}能力", "source_refs": ["CLM-001"],
+             "inferred": True, "priority": "high"}
+            for name in ("聊天会话", "好友通讯录", "消息通知", "群聊", "朋友圈")
+        ]}
+        agent, _ = agent_with([json.dumps(good, ensure_ascii=False)])
+        data = agent.respond("features", ROLE, {
+            "idea": "我要做微信",
+            "snapshot": {"items": [{"id": "R-01", "type": "requirement"}]},
+            "claims": [{"id": "CLM-001"}], "options": [],
+        })
+        self.assertEqual(len(data["features"]), 5)
+        self.assertEqual(data["features"][0]["source_refs"], ["CLM-001"])
+
+    def test_features_with_unknown_source_are_retried(self) -> None:
+        bad = {"features": [
+            {"name": f"功能{i}", "description": "x", "source_refs": ["CLM-999"],
+             "inferred": True, "priority": "high"} for i in range(5)
+        ]}
+        good = {"features": [
+            {"name": f"功能{i}", "description": "x", "source_refs": ["CLM-001"],
+             "inferred": True, "priority": "high"} for i in range(5)
+        ]}
+        agent, transport = agent_with([json.dumps(bad, ensure_ascii=False),
+                                       json.dumps(good, ensure_ascii=False)])
+        data = agent.respond("features", ROLE, {
+            "idea": "x", "snapshot": {"items": []}, "claims": [{"id": "CLM-001"}],
+            "options": [],
+        })
+        self.assertEqual(len(data["features"]), 5)
+        self.assertIn("FEATURE_REFS", transport.calls[1]["messages"][-1]["content"])
+
     def test_clarify_tolerates_string_claims(self) -> None:
         reply = json.dumps({
             "role": "ba",
