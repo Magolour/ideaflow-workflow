@@ -434,6 +434,9 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
                                "criterion": f"{name}主流程可用，关键操作不超过 3 步",
                                "verify": "按验收场景逐条演示"})
         if not refs:
+            acceptance.append({"id": "", "requirement_id": "",
+                               "criterion": f"{name}主流程可用，关键操作不超过 3 步",
+                               "verify": "按验收场景逐条演示"})
             mapping.append({"requirement_id": "", "module_ids": [module["id"]],
                             "decision_ids": [decision["id"]]})
             open_items.append({

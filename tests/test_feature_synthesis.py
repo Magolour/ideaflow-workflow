@@ -108,7 +108,12 @@ class FeatureSynthesisTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             result = run(IDEA, out_dir=folder, agent=NoRefAgent(), discuss=True)
             self.assertEqual(len(result.spec.modules), 5)
-            self.assertTrue((result.out_dir / "spec.v1.json").exists())
+            payload = json.loads((result.out_dir / "spec.v1.json").read_text(encoding="utf-8"))
+            payload.pop("artifacts", None)  # 导出层附加字段，不属于 spec 契约
+            by_file = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
+            validator = Draft202012Validator(inline(load_schema("spec.schema.json"), by_file))
+            errors = sorted(validator.iter_errors(payload), key=str)
+            self.assertEqual([], [f"{list(e.absolute_path)} {e.message}" for e in errors])
 
     def test_unmapped_features_survive_tight_deadline(self):
         from ideaflow.specflow import run
