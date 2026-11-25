@@ -164,11 +164,13 @@ class DiscussionMappingTest(unittest.TestCase):
     """讨论结论进快照的规则：去重、封顶、可追溯。"""
 
     class Board:
-        def __init__(self, assumptions, questions=(), objections=(), non_goals=()):
+        def __init__(self, assumptions, questions=(), objections=(), non_goals=(),
+                     options=()):
             self.assumptions = list(assumptions)
             self.open_questions = list(questions)
             self.objections = list(objections)
             self.non_goals = list(non_goals)
+            self.options = list(options)
 
         def unresolved_blocking(self):
             return [row for row in self.objections if row.get("severity") == "blocking"]
@@ -211,3 +213,23 @@ class DiscussionMappingTest(unittest.TestCase):
         source = _discussion_items(board)[0]["source"]
         self.assertEqual(source["actor"], "risk")
         self.assertEqual(source["round"], 2)
+
+    def test_option_scopes_become_requirements_before_optional_assumptions(self):
+        """一句话需求也要能拆：方案范围不能被推断假设挤出可选名额。"""
+        board = self.Board(
+            [{"text": f"推断假设 {index}", "role": "ba", "round": 1}
+             for index in range(5)],
+            options=[{"id": "OPT-A", "role": "synthesizer",
+                      "scope": ["聊天会话", "好友通讯录", "消息通知"]}],
+        )
+        items = _discussion_items(board, limit=8)
+        scopes = [row["text"] for row in items if row["type"] == "requirement"]
+        self.assertEqual(scopes, ["范围：聊天会话", "范围：好友通讯录", "范围：消息通知"])
+        self.assertTrue(all(row["priority"] == "should"
+                            for row in items if row["type"] == "requirement"))
+
+    def test_option_scope_dedupes_with_existing_text(self):
+        board = self.Board(
+            [], options=[{"id": "OPT-A", "scope": ["两周内出演示版"]}])
+        items = _discussion_items(board, existing=["两周内出演示版"])
+        self.assertEqual(items, [])

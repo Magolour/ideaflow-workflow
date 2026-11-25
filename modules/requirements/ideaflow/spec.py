@@ -20,15 +20,8 @@ from .snapshot import Snapshot
 from .storage import content_hash, now_iso, read_json, write_json
 
 SPEC_STATUS = ("draft", "awaiting_human", "confirmed")
+MAX_MODULES = 12
 
-MODULE_NAMES = (
-    ("发布", "教材发布"),
-    ("搜索", "教材检索"),
-    ("支付", "成交与结算"),
-    ("收藏", "收藏夹"),
-    ("评价", "信用评价"),
-    ("自提", "自提与面交"),
-)
 VALUE_ORDER = ("搜索", "支付", "发布", "收藏", "评价", "自提")
 FEATURE_ALIASES = {"支付": ("支付", "付款", "结算"), "搜索": ("搜索", "检索"),
                    "发布": ("发布", "上传"), "收藏": ("收藏", "关注")}
@@ -210,6 +203,9 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
     other = next(draft for draft in drafts.values() if draft.draft_id != base_id)
     if features is not None:
         return _spec_from_features(snapshot, features, reviews, base)
+    if len(snapshot.requirements) > MAX_MODULES:
+        raise ContractError("TOO_MANY_MODULES",
+                            f"单份规格最多 {MAX_MODULES} 个模块", "requirements")
 
     deadline = next((value for value in
                      (deadline_days(item["text"]) for item in snapshot.constraints)
@@ -256,6 +252,7 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
     modules = []
     mapping = []
     acceptance = []
+    used_names: set[str] = set()
     for index, item in enumerate(snapshot.requirements, 1):
         left = base.decision_for(item["id"])
         right = adopted.get(item["id"])
@@ -287,7 +284,7 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
             }
         decisions.append(decision)
 
-        module_name = _module_name(item["text"], index)
+        module_name = _unique_module_name(_module_name(item["text"], index), used_names)
         module = {
             "id": f"M-{index:02d}",
             "name": module_name,
@@ -382,8 +379,9 @@ def _unique_module_name(name: str, used: set[str]) -> str:
 def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
                         reviews: dict[str, Any], base: Draft) -> Spec:
     rows = payload.get("features") or []
-    if len(rows) > 12:
-        raise ContractError("TOO_MANY_MODULES", "单份规格最多 12 个模块", "features")
+    if len(rows) > MAX_MODULES:
+        raise ContractError("TOO_MANY_MODULES",
+                            f"单份规格最多 {MAX_MODULES} 个模块", "features")
     if not rows:
         raise ContractError("EMPTY_FEATURES", "功能清单为空，无法生成规格", "features")
 
@@ -441,7 +439,7 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
                             "decision_ids": [decision["id"]]})
             open_items.append({
                 "id": f"OPEN-{len(open_items) + 1:02d}",
-                "question": f"功能「{name}」暂未对应到明确需求，是否确认纳入首版？",
+                "question": f"功能「{name}」待确认对应需求：是否确认纳入首版？",
                 "impact": [], "blocking": False, "candidates": [],
                 "origin": "features", "resolution": None,
             })

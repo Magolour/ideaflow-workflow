@@ -100,6 +100,50 @@ class FeatureSynthesisTest(unittest.TestCase):
         for module in modules:
             self.assertIn(module["name"], names,
                           f"模块 {module['name']} 不在功能清单里")
+        # 功能只引用部分需求时，未被引用的需求不应被当成“未覆盖”阻断。
+        self.assertTrue(self.result.audits[-1]["passed"],
+                        self.result.audits[-1]["issues"])
+        self.assertEqual(self.result.spec.status, "draft")
+
+    def test_invalid_feature_count_is_rejected(self):
+        from ideaflow.agents import MockAgent
+        from ideaflow.contracts import ContractError
+        from ideaflow.specflow import run
+
+        class TooFewAgent(MockAgent):
+            def respond(self, stage, role, context):
+                if stage == "features":
+                    return {"features": [
+                        {"name": "聊天会话", "description": "聊天",
+                         "source_refs": ["R-01"], "inferred": True,
+                         "priority": "high"}]}
+                return super().respond(stage, role, context)
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ContractError) as caught:
+                run(IDEA, out_dir=folder, agent=TooFewAgent(), discuss=True)
+        self.assertEqual(caught.exception.code, "FEATURE_COUNT")
+
+    def test_more_than_twelve_modules_is_rejected(self):
+        from ideaflow.contracts import ContractError
+        from ideaflow.spec import build_spec
+
+        features = {"features": [
+            {"id": f"F-{index:02d}", "name": f"功能{index}", "description": "x",
+             "source_refs": ["R-01"], "inferred": True, "priority": "high"}
+            for index in range(1, 14)
+        ]}
+        with self.assertRaises(ContractError) as caught:
+            build_spec(self.result.snapshot, self.result.race.drafts,
+                       self.result.reviews, features=features)
+        self.assertEqual(caught.exception.code, "TOO_MANY_MODULES")
+
+    def test_duplicate_module_names_are_disambiguated(self):
+        from ideaflow.spec import _unique_module_name
+
+        used: set[str] = set()
+        names = [_unique_module_name("聊天会话", used) for _ in range(3)]
+        self.assertEqual(names, ["聊天会话", "聊天会话（2）", "聊天会话（3）"])
 
     def test_features_without_requirement_refs_still_export(self):
         """功能只引用主张时，规格仍能生成与导出，不被覆盖率误拦。"""

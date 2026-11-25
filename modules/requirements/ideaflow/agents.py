@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .contracts import ContractError, validate_stances, validate_synthesis
+from .features import normalize_features
 from .roles import DISCUSSION_ROLES, Role
 
 
@@ -799,45 +800,7 @@ class LLMAgent:
 
     @staticmethod
     def _normalize_features(data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        allowed = {item["id"] for item in context.get("snapshot", {}).get("items", [])}
-        allowed |= {row["id"] for row in context.get("claims", [])}
-        allowed |= {row["id"] for row in context.get("options", [])}
-        forbidden = ("问题定义", "关键路径", "全部范围", "结构边界", "剩余预算")
-        rows = data.get("features")
-        if not isinstance(rows, list) or not (3 <= len(rows) <= 12):
-            raise ContractError("FEATURE_COUNT", "功能清单需要 3~12 条", "features")
-        features = []
-        seen: set[str] = set()
-        for index, row in enumerate(rows):
-            if not isinstance(row, dict):
-                raise ContractError("INVALID_FIELD", "功能必须是对象", f"features[{index}]")
-            name = str(row.get("name") or "").strip()
-            if not (2 <= len(name) <= 24):
-                raise ContractError("FEATURE_NAME", "功能名需要 2~24 字", f"features[{index}].name")
-            if any(word in name for word in forbidden):
-                raise ContractError("FEATURE_NAME", f"功能名仍是过程约束：{name}",
-                                    f"features[{index}].name")
-            if name in seen:
-                raise ContractError("FEATURE_NAME", f"功能名重复：{name}",
-                                    f"features[{index}].name")
-            seen.add(name)
-            refs = [str(item) for item in (row.get("source_refs") or [])]
-            if not refs:
-                raise ContractError("FEATURE_REFS", "每条功能至少一个来源", f"features[{index}]")
-            unknown = [item for item in refs if item not in allowed]
-            if unknown:
-                raise ContractError("FEATURE_REFS", f"来源不存在：{unknown[0]}",
-                                    f"features[{index}].source_refs")
-            features.append({
-                "name": name,
-                "description": str(row.get("description") or "").strip() or name,
-                "source_refs": refs,
-                "inferred": bool(row.get("inferred", True)),
-                "priority": (row.get("priority") if row.get("priority") in
-                             ("high", "medium", "low") else "high"),
-            })
-        data["features"] = features
-        return data
+        return normalize_features(data, context)
 
     @staticmethod
     def _normalize_synthesis(data: dict[str, Any], known: set[str]) -> dict[str, Any]:

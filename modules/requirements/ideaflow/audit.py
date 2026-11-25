@@ -74,13 +74,20 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
     mapped = {row["requirement_id"] for row in spec.mapping}
     accepted = {row["requirement_id"] for row in spec.acceptance}
 
-    feature_mode = (any(not row["requirement_ids"] for row in spec.modules)
-                    or any(row["requirement_id"] == "" for row in spec.mapping))
+    # 功能清单模式：模块只来自功能，原文需求通过 source_refs 追溯。
+    # 未被任何功能引用的需求不再要求单独有决策/模块/验收，覆盖率也只按
+    # 被引用的需求计算，避免把“功能清单没收录”误判成“需求未覆盖”。
+    feature_mode = (any(row.get("origin") == "features" for row in spec.decisions)
+                    or any(not row["requirement_ids"] for row in spec.modules)
+                    or any(row.get("requirement_id") == "" for row in spec.mapping))
+    mapped_requirements = snapshot.ids("requirement") & mapped
+    coverage_total = (len(mapped_requirements) if feature_mode
+                      else len(snapshot.requirements))
     covered_decisions = 0
     covered_modules = 0
     for requirement in snapshot.requirements:
         rid = requirement["id"]
-        if feature_mode and rid not in mapped:
+        if feature_mode and rid not in mapped_requirements:
             continue
         decision = decisions.get(rid)
         if decision is None:
@@ -200,7 +207,7 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
         "counts": counts,
         "passed": counts["blocking"] == 0,
         "checks": {
-            "coverage": {"requirements": len(snapshot.requirements),
+            "coverage": {"requirements": coverage_total,
                          "with_decision": covered_decisions,
                          "with_module": covered_modules,
                          "with_acceptance": len(accepted & snapshot.ids("requirement"))},

@@ -448,6 +448,23 @@ def _discussion_items(board: Any, *, existing: Iterable[str] = (),
             "source": source,
         })
 
+    blocking = getattr(board, "unresolved_blocking", None)
+    if callable(blocking):
+        for row in blocking():
+            text = row.get("text", "")
+            consequence = row.get("consequence", "")
+            add("open", f"未解决阻断：{text}（{consequence}）" if consequence
+                else f"未解决阻断：{text}", "must",
+                actor=row.get("role"), round_no=row.get("round"))
+
+    # 方案范围先于推断假设入列：可选条目的名额有限，先保住能落模块的范围。
+    for row in getattr(board, "options", []):
+        if not isinstance(row, dict):
+            continue
+        for scope in row.get("scope") or []:
+            add("requirement", f"范围：{scope}", "should",
+                actor=row.get("role") or "synthesizer", key_text=scope)
+
     for row in getattr(board, "assumptions", []):
         text = row.get("text") if isinstance(row, dict) else row
         actor = row.get("role") if isinstance(row, dict) else None
@@ -460,22 +477,6 @@ def _discussion_items(board: Any, *, existing: Iterable[str] = (),
             continue
         add("open", row.get("text", ""), "must" if row.get("blocking") else "should",
             actor=row.get("source"), round_no=row.get("round"))
-
-    blocking = getattr(board, "unresolved_blocking", None)
-    if callable(blocking):
-        for row in blocking():
-            text = row.get("text", "")
-            consequence = row.get("consequence", "")
-            add("open", f"未解决阻断：{text}（{consequence}）" if consequence
-                else f"未解决阻断：{text}", "must",
-                actor=row.get("role"), round_no=row.get("round"))
-
-    for row in getattr(board, "options", []):
-        if not isinstance(row, dict):
-            continue
-        for scope in row.get("scope") or []:
-            add("requirement", f"范围：{scope}", "should",
-                actor=row.get("role") or "synthesizer", key_text=scope)
 
     for row in getattr(board, "non_goals", []):
         if not isinstance(row, dict):
