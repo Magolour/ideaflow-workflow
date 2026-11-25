@@ -41,7 +41,6 @@ class ResourceEdgeTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    @unittest.skip("待实现：调度只看 force/data，resource 边不阻塞")
     def test_resource_edge_does_not_block(self):
         agent = make_agent(self.out, EDGES)
         agent._dispatch_ready()
@@ -56,7 +55,6 @@ class ResourceEdgeTest(unittest.TestCase):
         self.assertEqual(agent.tasks["T2"]["status"], "running",
                          "T1 完成后 T2 应被派发")
 
-    @unittest.skip("待实现：分层时 resource 边不计入度")
     def test_resource_peer_shares_first_layer(self):
         agent = make_agent(self.out, EDGES)
         self.assertEqual(agent.layers, [["T1", "T3"], ["T2"]])

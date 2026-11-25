@@ -78,7 +78,6 @@ class FailureBranchTest(AgentCase):
         self.assertEqual(self.agent.waiting_on["gate_type"], "task_failed")
         self.assertIn("task_failed", self.actions())
 
-    @unittest.skip("待确认：失败开门后实例应为 waiting_human 还是 blocked（团队定）")
     def test_failed_gate_keeps_waiting_human_status(self):
         self.start({"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
         for _ in range(MAX_RETRY + 1):

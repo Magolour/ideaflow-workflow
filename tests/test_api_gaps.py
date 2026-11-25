@@ -170,7 +170,6 @@ class ApiGapTest(unittest.TestCase):
         self.assertTrue(task.get("requirement_refs"), "任务应保留对需求条款的引用")
         self.assertTrue(task.get("design_refs"), "任务应保留对设计模块的引用")
 
-    @unittest.skip("待实现：任务完成要落产物（artifact），交付记录才有据可依")
     def test_task_completion_records_artifact(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
@@ -187,7 +186,6 @@ class ApiGapTest(unittest.TestCase):
         artifacts = list((self.out / "artifacts").rglob("*")) if (self.out / "artifacts").exists() else []
         self.assertTrue(artifacts, "产物应有落盘文件或记录")
 
-    @unittest.skip("待实现：全部任务终态后实例进入 delivery_pending 并生成交付记录")
     def test_all_done_enters_delivery_pending(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
@@ -205,7 +203,6 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual(delivery["status"], "draft")
         self.assertEqual([item["task_id"] for item in delivery["items"]], ["T1"])
 
-    @unittest.skip("待实现：交付确认后实例 completed，并记录 delivery 决策")
     def test_delivery_confirm_completes_instance(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
@@ -228,11 +225,13 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual(progress["delivery"]["decided_by"], "human:tester")
         self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
 
-    @unittest.skip("待实现：一句话到交付的完整链路（桥 + spec 入口 + 执行闭环）")
     def test_full_chain_from_idea_to_delivery(self):
         with running_server(self.out) as (base, _):
-            body = post_json(f"{base}/api/start",
-                             {"requirement": "做一个校园二手书交易小程序，支持发布、搜索和线下交易"})
+            body = post_json(f"{base}/api/start", {"requirement": (
+                "做一个校园二手书交易小程序。"
+                "学生可以发布二手教材。"
+                "学生可以按书名搜索教材。"
+                "买家可以在线付款并线下自提。")})
             progress = body["progress"]
             self.assertTrue(progress["plan_id"], "想法入口应产出计划号")
             self.assertEqual(progress["spec_version"], "v1", "规格版本应来自需求模块")
