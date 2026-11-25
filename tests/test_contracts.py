@@ -72,6 +72,7 @@ class ContractTest(unittest.TestCase):
     def setUpClass(cls):
         cls.schemas = {key: load(path) for key, path in FILES.items()}
         cls.by_file = {path: cls.schemas[key] for key, path in FILES.items()}
+        cls.by_file["spec-review.schema.json"] = load("spec-review.schema.json")
 
     def inline(self, node):
         """把跨文件 $ref 展开，避免测试依赖网络或 resolver 版本。"""

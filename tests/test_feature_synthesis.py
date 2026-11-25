@@ -103,7 +103,7 @@ class FeatureSynthesisTest(unittest.TestCase):
         # 功能只引用部分需求时，未被引用的需求不应被当成“未覆盖”阻断。
         self.assertTrue(self.result.audits[-1]["passed"],
                         self.result.audits[-1]["issues"])
-        self.assertEqual(self.result.spec.status, "draft")
+        self.assertEqual(self.result.spec.status, "confirmed")
 
     def test_invalid_feature_count_is_rejected(self):
         from ideaflow.agents import MockAgent

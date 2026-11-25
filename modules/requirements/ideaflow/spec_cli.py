@@ -24,6 +24,7 @@ from .drafts import SATISFIES_LABEL, Draft
 from .escalate import escalate, save_question
 from .pipeline import slugify
 from .race import load_drafts, load_race, retry_failed, run_race, save_race, unchanged_groups
+from .resolutions import answer_question
 from .reviews import SEVERITY_LABEL, review_all
 from .revisions import save_revisions, scope_revision
 from .snapshot import ITEM_TYPE_LABEL, PRIORITY_LABEL, Snapshot, build, load, save
@@ -569,6 +570,15 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_answer(args: argparse.Namespace) -> int:
+    spec = load_spec(args.dir)
+    ref = {"spec_id": spec.spec_id, "version": spec.version, "hash": spec.hash}
+    outcome = answer_question(args.dir, ref, args.question, args.option, args.answer, args.actor)
+    print(json.dumps({key: outcome[key] for key in ("status", "spec", "audit", "question")},
+                     ensure_ascii=False, indent=2))
+    return 0 if outcome["status"] == "confirmed" else 1
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     citations = read_json(root / "citations.json")
@@ -655,6 +665,14 @@ def build_parser() -> argparse.ArgumentParser:
     escalate = sub.add_parser("escalate", help="为无法自动解决的冲突生成人工问题")
     escalate.add_argument("--dir", required=True, help="规格目录")
     escalate.set_defaults(func=cmd_escalate)
+
+    answer = sub.add_parser("answer", help="提交人工回答并复审")
+    answer.add_argument("--dir", required=True, help="规格运行目录")
+    answer.add_argument("--question", required=True, help="当前人工问题 ID")
+    answer.add_argument("--option", choices=("A", "B", "C"), required=True)
+    answer.add_argument("--answer", required=True, help="人工决策依据")
+    answer.add_argument("--actor", required=True, help="处理人")
+    answer.set_defaults(func=cmd_answer)
 
     trace = sub.add_parser("trace", help="查看某个快照条目被哪些草案引用")
     trace.add_argument("--dir", required=True, help="交付目录")

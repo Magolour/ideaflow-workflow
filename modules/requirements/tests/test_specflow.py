@@ -97,9 +97,9 @@ class SpecFlowTest(unittest.TestCase):
         self.assertEqual(len(data["revisions"]), 1)
         self.assertEqual(data["revisions"][0]["id"], "REV-001")
         self.assertEqual(data["revisions"][0]["recheck"]["resolved"], ["AUD-02"])
-        self.assertEqual(data["question"]["id"], "HUMAN-Q-01")
+        self.assertRegex(data["question"]["id"], r"^HUMAN-Q-[0-9a-f]{12}$")
         self.assertIn("需人工决策", data["markdown"])
-        self.assertIn("HUMAN-Q-01", data["markdown"])
+        self.assertIn(data["question"]["id"], data["markdown"])
 
     def test_artifacts_are_written(self) -> None:
         result = run(load_case(TIGHT), out_dir=self.root, case_name=TIGHT)
@@ -133,7 +133,7 @@ class SpecFlowTest(unittest.TestCase):
     def test_free_idea_can_pass_audit(self) -> None:
         data = run("做一个团队值班排班工具，支持换班和请假。",
                    out_dir=self.root).payload
-        self.assertEqual(data["status"], "draft")
+        self.assertEqual(data["status"], "confirmed")
         self.assertIsNone(data["question"])
         self.assertTrue(data["audits"][0]["passed"])
         self.assertTrue(data["html"])

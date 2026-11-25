@@ -582,10 +582,14 @@ function renderSpecResult(data) {
     els.specBanner.hidden = false;
     els.specBanner.innerHTML = `<div><b>待人工决策 ${escapeHtml(data.question.id)}</b>：`
       + `${escapeHtml(data.question.question)}</div><a data-goto="audit">查看问题与选项 →</a>`;
-  } else if (spec.status === "draft") {
+  } else if (spec.status === "confirmed") {
     els.specBanner.className = "spec-banner ok";
     els.specBanner.hidden = false;
-    els.specBanner.innerHTML = `<div><b>自审查通过</b>：需求覆盖、约束核对与验收口径均已通过，可进入人工确认。</div>`;
+    els.specBanner.innerHTML = `<div><b>规格审查通过</b>。可下载规格 JSON 并提交编排。</div>`;
+  } else if (spec.status === "blocked") {
+    els.specBanner.className = "spec-banner";
+    els.specBanner.hidden = false;
+    els.specBanner.innerHTML = '<div><b>规格仍有阻断</b>。请在「审查与修订」核对问题清单。</div>';
   } else {
     els.specBanner.hidden = true;
   }
@@ -601,7 +605,7 @@ function renderSpecResult(data) {
 
   const runId = encodeURIComponent(data.run_id);
   els.specDlMd.href = `/api/download?run_id=${runId}&artifact=spec-md`;
-  els.specDlJson.href = `/api/download?run_id=${runId}&artifact=spec-json`;
+  els.specDlJson.href = `/api/download?run_id=${runId}&artifact=spec-input`;
 
   switchSpecTab(specTabFromUrl);
   showOnly(els.specResult);
@@ -798,6 +802,19 @@ function renderAuditPanel(data) {
         不决策：${escapeHtml(data.question.if_undecided)}<br>
         <b>建议 ${escapeHtml(data.question.recommended)}（仅建议，不代替决定）</b>
       </p>
+      ${data.question.options.some(option => option.automatic) ? `
+        <form id="specAnswerForm">
+          <label>决定
+            <select name="option" required>
+              <option value="">请选择</option>
+              ${data.question.options.filter(option => option.automatic).map(option =>
+                `<option value="${escapeHtml(option.key)}">${escapeHtml(option.text)}</option>`).join("")}
+            </select>
+          </label>
+          <label>处理人 <input name="actor" maxlength="80" required></label>
+          <label>理由 <input name="answer" maxlength="1000" required></label>
+          <button type="submit">提交回答并复审</button>
+        </form>` : '<p class="q-meta">请人工修订规格后重新审查。</p>'}
     </article>`
     : '<p class="empty-inline">没有需要人工决策的问题。</p>';
 
@@ -813,9 +830,52 @@ function renderAuditPanel(data) {
     ${question}`;
 }
 
+async function submitSpecAnswer(event) {
+  if (event.target.id !== "specAnswerForm") return;
+  event.preventDefault();
+  const data = state.spec;
+  if (!data?.question) return;
+  const form = event.target;
+  const fields = Object.fromEntries(new FormData(form));
+  const submit = form.querySelector("button[type=submit]");
+  submit.disabled = true;
+  try {
+    const response = await fetch("/api/spec/answer", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        ...fields, run_id: data.run_id, spec_ref: data.question.spec_ref,
+        question_id: data.question.id
+      })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error?.message || "提交失败");
+    if (state.spec !== data) return;
+    const {spec_id: id, ...spec} = result.spec;
+    const labels = {requirement: "明确要求", constraint: "约束", open: "待澄清"};
+    renderSpecResult({
+      ...data, status: result.status,
+      status_label: {confirmed: "审查通过", awaiting_human: "待人工决策", blocked: "有阻断"}[result.status],
+      spec: {...spec, id},
+      snapshot: {id: result.snapshot.snapshot_id, version: result.snapshot.version,
+        hash: result.snapshot.hash, counts: result.counts,
+        items: result.snapshot.items.map(item => ({...item, label: labels[item.type]}))},
+      audits: [...data.audits, result.audit], revisions: spec.revisions, question: result.question,
+      markdown: result.markdown, html: result.html
+    });
+    switchSpecTab("audit");
+    toast(result.status === "confirmed" ? "复审通过，可以下载新版规格" : "复审已完成，仍有阻断");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    submit.disabled = false;
+  }
+}
+
 /* ------------------------------ 事件绑定 ------------------------------ */
 
 function bind() {
+  els.panelAudit.addEventListener("submit", submitSpecAnswer);
   els.idea.addEventListener("input", () => {
     els.ideaCount.textContent = `${els.idea.value.length} / 1200`;
     if (els.idea.value.trim()) {

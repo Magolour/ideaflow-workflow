@@ -19,7 +19,7 @@ from .estimate import pert
 from .snapshot import Snapshot
 from .storage import content_hash, now_iso, read_json, write_json
 
-SPEC_STATUS = ("draft", "awaiting_human", "confirmed")
+SPEC_STATUS = ("draft", "awaiting_human", "confirmed", "blocked")
 MAX_MODULES = 12
 
 VALUE_ORDER = ("搜索", "支付", "发布", "收藏", "评价", "自提")
@@ -111,6 +111,7 @@ class Spec:
     created_at: str = field(default_factory=now_iso)
     revisions: list[dict[str, Any]] = field(default_factory=list)
     escalation: dict[str, Any] | None = None
+    review: dict[str, Any] | None = None
 
     @property
     def hash(self) -> str:
@@ -148,9 +149,12 @@ class Spec:
         return [row for row in self.open_items if row["blocking"] and not row["resolution"]]
 
     def to_json(self) -> dict[str, Any]:
-        return {**self._content(), "hash": self.hash, "status": self.status,
-                "created_at": self.created_at, "revisions": self.revisions,
-                "escalation": self.escalation}
+        payload = {**self._content(), "hash": self.hash, "status": self.status,
+                   "created_at": self.created_at, "revisions": self.revisions,
+                   "escalation": self.escalation}
+        if self.review is not None:
+            payload["review"] = self.review
+        return payload
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> "Spec":
@@ -172,6 +176,7 @@ class Spec:
                 created_at=payload.get("created_at", now_iso()),
                 revisions=list(payload.get("revisions", [])),
                 escalation=payload.get("escalation"),
+                review=payload.get("review"),
             )
         except KeyError as error:
             raise ContractError("INVALID_SPEC", f"规格缺少字段 {error}", "spec") from None

@@ -76,7 +76,7 @@ python -m unittest discover -s tests -v
 
 - 四种入口生成或载入计划后统一进入 `status=waiting_human` 和 `waiting_on.gate_type=plan_approval`。任务清单入口也分配计划号，计划的 `spec_ref` 为 `null`。
 - 页面用 `Progress.plan_id` 和 `plan_version` 展示当前待批计划，通过 `/api/events` 提交 `human_op`、`action=approve` 及这两个字段。兼容命令行的简写批准会在入队时绑定当前待批版本。批准写入 `target_type=plan` 的决策后开始派发。
-- 退回使用 `action=return`，必须传当前计划引用、`return_to=plan|spec` 和非空 `reason`。退回计划沿用当前规格，计划版本递增。退回规格需要当前运行有规格正文，规格与计划版本均递增。调用方可附同一规格 ID 的 `spec` 修订稿，否则沿用现有正文。旧版文件和退回原因保留，新计划重新等待批准。
+- 退回使用 `action=return`，必须传当前计划引用、`return_to=plan|spec` 和非空 `reason`。退回计划沿用当前规格，计划版本递增。退回规格须提交同一 ID 的、已复审通过的下一版 `spec`，规格与计划版本均递增。旧版文件和退回原因保留，新计划重新等待批准。
 - `Progress.can_return_spec` 告知页面当前是否有可退回的规格正文。计划批准、定向退回和交付确认的结果从 `decisions` 读取。
 
 ## 入口约定
@@ -96,6 +96,21 @@ python -m unittest discover -s tests -v
 旧的 `pm_breakdown()` 捷径废弃；规格入口与想法入口最终都落在同一份 spec 上。
 
 作业 2 的演示可在网页粘贴规格 JSON，启动后在计划审批面板批准当前版本。
+
+## 规格审查门禁
+
+想法和外部规格入口在拆计划前检查 `review`。它绑定规格 ID、版本、正文哈希与快照引用，且不参与规格正文哈希。`review_ref` 仍指向 A/B 草案评审。请只从可信的需求模块或规格提供方接收规格，哈希用于一致性校验。
+
+| 规格审查结果 | API 行为 |
+| --- | --- |
+| `confirmed` / `approved`，审查无阻断 | 可拆计划，之后进入计划审批 |
+| `awaiting_human` | 409 `SPEC_HUMAN_REQUIRED`，附问题和审查 |
+| `blocked` 且无人工问题 | 422 `SPEC_BLOCKED_NO_QUESTION`，附审查 |
+| 缺审查，或正文、版本、快照、审查信息不一致 | 409，并用错误码标明原因 |
+
+规格入口返回 409 或 422 时不创建编排实例。需求模块保留运行产物，复审通过后提交新规格 JSON 重新启动。外部历史规格进入编排前需要获得当前版本的审查。想法入口兼容旧需求模块的产物格式，可从本次运行的 `audit.json` 读取审查结果。
+
+需求工作台的 `POST /api/spec/answer` 接受 `run_id`、`spec_ref`（ID、版本、哈希）、`question_id`、`option`、`answer` 和 `actor`。成功后返回新版 `spec`、`audit` 和当前 `question`。工期冲突的 A 选项修改期限快照，B 选项应用现有裁剪规则。两种修订均重新审查，旧版和人工回答保留。旧引用或重复回答返回 409，需要人工修改或无法继续裁剪的选择返回 422。需求工作台提供可直接交给编排器的 `artifact=spec-input` 下载。
 
 ## 变更规则
 

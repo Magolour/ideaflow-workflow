@@ -26,6 +26,13 @@
     "escalation"
   ],
   "properties": {
+    "review": {
+      "description": "绑定当前规格版本的最终审查结论；历史规格可省略",
+      "oneOf": [
+        {"$ref": "spec-review.schema.json"},
+        {"type": "null"}
+      ]
+    },
     "spec_id": {
       "type": "string",
       "pattern": "^SPEC-[A-Za-z0-9_-]+$"
