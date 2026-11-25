@@ -35,7 +35,6 @@ def codes(review: dict) -> set[str]:
 class PlanReviewTest(unittest.TestCase):
     """计划评审：模块覆盖、任务粒度、依赖合法性。"""
 
-    @unittest.skip("待实现：计划评审 review_plan(spec, plan) 与 plan_review 产物")
     def test_missing_module_coverage_is_reported(self):
         from plan_review import review_plan
 
@@ -46,7 +45,6 @@ class PlanReviewTest(unittest.TestCase):
         missing = [row for row in review["issues"] if row["code"] == "MODULE_WITHOUT_TASK"]
         self.assertEqual(missing[0]["module_id"], "M-02")
 
-    @unittest.skip("待实现：计划评审 review_plan(spec, plan) 与 plan_review 产物")
     def test_task_granularity_is_flagged(self):
         from plan_review import review_plan
 
@@ -55,7 +53,6 @@ class PlanReviewTest(unittest.TestCase):
         review = review_plan(SPEC, plan)
         self.assertIn("TASK_TOO_LARGE", codes(review))
 
-    @unittest.skip("待实现：计划评审 review_plan(spec, plan) 与 plan_review 产物")
     def test_dangling_dependency_is_flagged(self):
         from plan_review import review_plan
 
@@ -64,7 +61,6 @@ class PlanReviewTest(unittest.TestCase):
         review = review_plan(SPEC, plan)
         self.assertIn("DEPENDENCY_INVALID", codes(review))
 
-    @unittest.skip("待实现：计划评审 review_plan(spec, plan) 与 plan_review 产物")
     def test_cycle_is_flagged(self):
         from plan_review import review_plan
 
@@ -74,7 +70,6 @@ class PlanReviewTest(unittest.TestCase):
         review = review_plan(SPEC, plan)
         self.assertIn("DEPENDENCY_CYCLE", codes(review))
 
-    @unittest.skip("待实现：计划评审 review_plan(spec, plan) 与 plan_review 产物")
     def test_clean_plan_has_no_issues(self):
         from plan_review import review_plan
 
