@@ -81,6 +81,27 @@ class FeatureSynthesisTest(unittest.TestCase):
             self.assertIn(module["name"], names,
                           f"模块 {module['name']} 不在功能清单里")
 
+    def test_features_without_requirement_refs_still_export(self):
+        """功能只引用主张时，规格仍能生成与导出，不被覆盖率误拦。"""
+        from ideaflow.agents import MockAgent
+        from ideaflow.specflow import run
+
+        class NoRefAgent(MockAgent):
+            def respond(self, stage, role, context):
+                if stage == "features":
+                    return {"features": [
+                        {"name": name, "description": f"{name}能力",
+                         "source_refs": ["CLM-001"], "inferred": True,
+                         "priority": "high"}
+                        for name in ("聊天会话", "好友通讯录", "消息通知",
+                                     "群聊", "朋友圈")]}
+                return super().respond(stage, role, context)
+
+        with tempfile.TemporaryDirectory() as folder:
+            result = run(IDEA, out_dir=folder, agent=NoRefAgent(), discuss=True)
+            self.assertEqual(len(result.spec.modules), 5)
+            self.assertTrue((result.out_dir / "spec.v1.json").exists())
+
     def test_plan_granularity(self):
         from plan_adapter import plan_from_spec
 

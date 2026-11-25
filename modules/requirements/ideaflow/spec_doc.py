@@ -39,8 +39,10 @@ def _title(snapshot: Snapshot) -> str:
 
 def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
     """生成规格正文。内容只来自规格与快照，不含时间戳，保证可复现。"""
-    decision_by_req = {row["requirement_ids"][0]: row for row in spec.decisions}
-    module_by_req = {row["requirement_ids"][0]: row for row in spec.modules}
+    decision_by_req = {rid: row for row in spec.decisions
+                       for rid in (row.get("requirement_ids") or [])}
+    module_by_req = {rid: row for row in spec.modules
+                     for rid in (row.get("requirement_ids") or [])}
     acceptance_by_req = {row["requirement_id"]: row for row in spec.acceptance}
 
     parts: list[str] = []
@@ -80,7 +82,9 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
 
     parts += ["## 3 设计决策", ""]
     for decision in spec.decisions:
-        parts += [f"### {decision['id']} · {decision['requirement_ids'][0]}", ""]
+        requirement_id = (decision["requirement_ids"][0]
+                          if decision.get("requirement_ids") else "未映射需求")
+        parts += [f"### {decision['id']} · {requirement_id}", ""]
         parts += [f"- **选择**：{decision['choice']}",
                   f"- **理由**：{decision['reason']}",
                   f"- **来源**：{'、'.join(decision['draft_ids'])}"
