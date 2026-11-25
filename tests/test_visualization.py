@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -87,6 +89,54 @@ class PageAnchorTest(unittest.TestCase):
         self.assertIn("放行", self.html)
         self.assertIn("驳回", self.html)
         self.assertIn("已等待", self.html)
+
+    @unittest.skipUnless(shutil.which("node"), "需要 Node.js 执行工作台脚本")
+    def test_spec_submission_preserves_original_json_numbers(self):
+        script = r"""
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const editor = new Map();
+const actions = new Map();
+function element(id) {
+  if (!editor.has(id)) editor.set(id, {value: "", focus() {}, classList: {add() {}, remove() {}},
+    addEventListener(name, callback) { actions.set(id + ":" + name, callback); } });
+  return editor.get(id);
+}
+const requests = [];
+const context = vm.createContext({
+  document: {getElementById: element, addEventListener() {}},
+  window: {addEventListener() {}},
+  location: {protocol: "http:"},
+  localStorage: {getItem() { return null; }, removeItem() {}},
+  fetch: async (path, options) => {
+    requests.push({path, body: options.body});
+    return {ok: true, text: async () => '{"progress":{"total":0}}'};
+  }
+});
+const html = fs.readFileSync(process.argv[2], "utf-8");
+const source = html.split("<script>").at(-1).split("</script>")[0].replace(/\bboot\(\);\s*$/, "");
+vm.runInContext(source, context);
+vm.runInContext("pull = async () => {}; refreshEntryTag = () => {}; toast = () => {};", context);
+(async () => {
+  const raw = '{"spec_id":"SPEC-1","modules":[{"estimate_days":1.0}]}';
+  element("req").value = raw;
+  await vm.runInContext("startRun()", context);
+  assert.deepEqual(requests.shift(), {path: "/api/start", body: raw});
+
+  vm.runInContext('state = {plan_id:"PLAN-1",plan_version:1,waiting_on:{gate_type:"plan_approval"}}; planAction("spec");', context);
+  element("reasonText").value = 'Reason with "quotes"';
+  element("reviewedSpec").value = raw;
+  actions.get("reasonOk:click")();
+  const event = requests.shift();
+  assert.equal(event.path, "/api/events");
+  assert.ok(event.body.includes(raw));
+  assert.equal(JSON.parse(event.body).reason, 'Reason with "quotes"');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+        result = subprocess.run(["node", "-", str(PAGE)], input=script, text=True,
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class FixtureContractTest(unittest.TestCase):
