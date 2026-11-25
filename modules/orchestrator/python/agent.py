@@ -15,6 +15,7 @@ import queue as queuelib
 import re
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
 from plan_adapter import plan_from_spec
+from plan_review import review_plan
 
 PYTHON_DIR = Path(__file__).resolve().parent
 ROOT = PYTHON_DIR.parent
@@ -31,6 +33,7 @@ WEB_PAGE = ROOT / "web" / "index.html"
 DEFAULT_BASE_URL = "https://ws-381dxklyh659xv9g.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "deepseek-v4.1-flash-1017"
 EDGE_TYPES = {"force", "data", "resource"}
+BLOCKING_EDGE_TYPES = {"force", "data"}  # resource 只表示共享资源，不参与调度阻塞
 
 
 def load_env() -> None:
@@ -172,6 +175,8 @@ def topo_layers(task_ids: list[str], edges: list[dict]) -> tuple[list[list[str]]
     indegree = {task_id: 0 for task_id in task_ids}
     children = {task_id: [] for task_id in task_ids}
     for edge in edges:
+        if edge.get("type") not in BLOCKING_EDGE_TYPES:
+            continue
         indegree[edge["to"]] += 1
         children[edge["from"]].append(edge["to"])
 
@@ -414,6 +419,9 @@ class RealtimeAgent:
         self.seq = self._last_seq()
         self.log: list[dict] = []
         self.decisions: list[dict] = []
+        self.delivery: dict | None = None
+        self.artifact_seq = 0
+        self._auto_thread: threading.Thread | None = None
         self.queue: queuelib.PriorityQueue = queuelib.PriorityQueue()
         self._tick = itertools.count()
         threading.Thread(target=self._worker, daemon=True).start()
@@ -449,8 +457,10 @@ class RealtimeAgent:
             pm_summary = ""
             requirement = ""
             plan = None
+            spec_obj = None
             if (isinstance(data, dict) and data.get("spec_id") and data.get("modules")
                     and not data.get("tasks")):
+                spec_obj = data
                 try:
                     plan = plan_from_spec(data)
                 except ValueError as exc:
@@ -459,6 +469,7 @@ class RealtimeAgent:
             elif isinstance(data, dict) and not data.get("tasks") and str(data.get("requirement") or "").strip():
                 requirement = str(data["requirement"]).strip()
                 spec = requirement_to_spec(requirement, self.out_dir / "requirements")
+                spec_obj = spec
                 plan = plan_from_spec(spec)
                 tasks, spec_version = normalize_tasks(plan)
                 pm_summary = f"需求模块生成 {spec['spec_id']} v{spec['version']}"
@@ -475,6 +486,8 @@ class RealtimeAgent:
                 spec_ref = payload.get("spec_ref")
                 if isinstance(spec_ref, dict) and isinstance(spec_ref.get("version"), int):
                     spec_version = f"v{spec_ref['version']}"
+                if payload.get("plan_id") and payload.get("tasks"):
+                    plan = payload
             self.spec_version = spec_version
             try:
                 edges, summary = analyze(tasks, self.mock)
@@ -501,8 +514,19 @@ class RealtimeAgent:
                       f"确认 {len(edges)} 条依赖边（AI 分析：{summary or '无'}）")
             self.emit("system", "graph", self.graph_id, "graph_built",
                       f"建图完成：{len(tasks)} 个任务、{len(layers)} 个并行组、无环")
+            if plan is not None and spec_obj is not None:
+                review = review_plan(spec_obj, plan)
+                (self.out_dir / "plan_review.json").write_text(
+                    json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+                self.emit("system", "plan", str(plan["plan_id"]), "plan_validated",
+                          f"计划质量检查：{len(review['issues'])} 个问题"
+                          if review["issues"] else "计划质量检查通过")
             self._dispatch_ready()
             self.save(update_graph=True)
+            if plan is not None:
+                self._write_plan_artifacts(plan)
+            if requirement and self.mock:
+                self._start_mock_executor()
             return self.snapshot()
 
     # ----- 队列与处理 -----
@@ -548,6 +572,7 @@ class RealtimeAgent:
         detail = str(packet.get("detail") or "")
         if str(packet.get("result")) == "done":
             task["status"] = "done"
+            self._record_artifact(task)
             self.emit("ai", "task", task_id, "task_done",
                       detail or f"完成 {task['name']}")
         else:
@@ -573,6 +598,9 @@ class RealtimeAgent:
         if action in {"reject", "skip"} and not reason:
             raise ValueError("驳回或跳过必须填写理由")
         if not self.waiting_on:
+            if self.status == "delivery_pending" and action == "approve" and self.delivery:
+                self._confirm_delivery(str(packet.get("operator") or "demo"))
+                return
             raise ValueError("当前没有等待中的人工节点")
         task_id = self.waiting_on["object_id"]
         self.waiting_on = None
@@ -593,13 +621,14 @@ class RealtimeAgent:
             self._cascade_blocked(task_id)
         self._dispatch_ready()
 
-    def _record_decision(self, action: str, task_id: str, reason: str,
-                         operator: str) -> None:
+    def _record_decision(self, action: str, target_id: str, reason: str,
+                         operator: str, target_type: str = "task",
+                         target_version: int = 1) -> dict:
         decision = {
             "decision_id": f"DEC-{len(self.decisions) + 1:04d}",
-            "target_type": "task",
-            "target_id": task_id,
-            "target_version": 1,
+            "target_type": target_type,
+            "target_id": target_id,
+            "target_version": target_version,
             "action": action,
             "actor": f"human:{operator}",
             "created_at": now_iso(),
@@ -610,7 +639,8 @@ class RealtimeAgent:
         with self.decisions_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(decision, ensure_ascii=False) + "\n")
         self.emit(f"human:{operator}", "decision", decision["decision_id"],
-                  "decision_recorded", f"{action} {task_id}" + (f"：{reason}" if reason else ""))
+                  "decision_recorded", f"{action} {target_id}" + (f"：{reason}" if reason else ""))
+        return decision
 
     def _cascade_blocked(self, root: str) -> list[str]:
         """驳回后把下游未开始的任务一并置为 blocked，避免工作流静默卡死。"""
@@ -618,7 +648,7 @@ class RealtimeAgent:
         while queue:
             current = queue.pop(0)
             for edge in self.edges:
-                if edge["from"] != current:
+                if edge["from"] != current or edge.get("type") not in BLOCKING_EDGE_TYPES:
                     continue
                 child_id, child = edge["to"], self.tasks[edge["to"]]
                 if child["status"] != "pending":
@@ -792,7 +822,8 @@ class RealtimeAgent:
 
     def _deps_done(self, task_id: str) -> bool:
         return all(self.tasks[edge["from"]]["status"] in TERMINAL
-                   for edge in self.edges if edge["to"] == task_id)
+                   for edge in self.edges
+                   if edge["to"] == task_id and edge.get("type") in BLOCKING_EDGE_TYPES)
 
     def _dispatch_ready(self) -> None:
         if not self.started:
@@ -823,13 +854,158 @@ class RealtimeAgent:
         self.emit("system", "instance", self.instance_id, "human_gate_entered", detail)
 
     def _maybe_complete(self) -> None:
+        """收口实例状态：人工门开着时优先 waiting_human，全部终态后转交付。"""
         states = [task["status"] for task in self.tasks.values()]
-        if states and all(state in TERMINAL or state in {"blocked", "failed"}
-                          for state in states):
-            self.status = "completed" if all(state in TERMINAL for state in states) else "blocked"
+        if not states:
+            return
+        all_terminal = all(state in TERMINAL for state in states)
+        if all(state in TERMINAL or state in {"blocked", "failed"} for state in states):
+            if all_terminal:
+                if self.delivery is None:
+                    self._create_delivery()
+                self.status = ("completed" if self.delivery["status"] == "confirmed"
+                               else "delivery_pending")
+            elif self.waiting_on:
+                self.status = "waiting_human"
+            else:
+                self.status = "blocked"
             return
         if not self.waiting_on:
             self.status = "running"
+
+    # ----- 产物与交付 -----
+
+    def _record_artifact(self, task: dict) -> str:
+        """任务完成时登记产物，交付记录据此可追溯。"""
+        self.artifact_seq += 1
+        artifact_id = f"ART-{self.artifact_seq:04d}"
+        folder = self.out_dir / "artifacts" / artifact_id
+        folder.mkdir(parents=True, exist_ok=True)
+        record = {
+            "artifact_id": artifact_id,
+            "task_id": task["task_id"],
+            "kind": "record",
+            "summary": task.get("deliverable") or task["name"],
+            "created_at": now_iso(),
+        }
+        (folder / "artifact.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        task.setdefault("artifact_ids", []).append(artifact_id)
+        self.emit("system", "artifact", artifact_id, "artifact_created",
+                  f"任务 {task['task_id']} 产出 {artifact_id}")
+        return artifact_id
+
+    def _create_delivery(self) -> None:
+        items = []
+        for task_id in self.order or list(self.tasks):
+            task = self.tasks[task_id]
+            if task["status"] not in TERMINAL:
+                continue
+            items.append({
+                "task_id": task_id,
+                "artifact_ids": list(task.get("artifact_ids") or []),
+                "acceptance": "passed" if task["status"] == "done" else "skipped",
+            })
+        delivery = {
+            "delivery_id": "DLV-0001",
+            "instance_id": self.instance_id,
+            "items": items,
+            "status": "draft",
+            "created_at": now_iso(),
+        }
+        if self.plan_id:
+            delivery["plan_id"] = self.plan_id
+        self.delivery = delivery
+        self._write_delivery()
+        self.emit("system", "delivery", delivery["delivery_id"], "delivery_created",
+                  f"交付记录 {delivery['delivery_id']} 待人工确认（{len(items)} 项）")
+
+    def _write_delivery(self) -> None:
+        if self.delivery is None:
+            return
+        (self.out_dir / "delivery.json").write_text(
+            json.dumps(self.delivery, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _confirm_delivery(self, operator: str) -> None:
+        delivery = self.delivery
+        decision = self._record_decision("approve", str(delivery["delivery_id"]), "",
+                                         operator, target_type="delivery")
+        delivery.update({
+            "status": "confirmed",
+            "decided_by": f"human:{operator}",
+            "decided_at": now_iso(),
+            "decision_id": decision["decision_id"],
+        })
+        self._write_delivery()
+        self.status = "completed"
+        self.emit(f"human:{operator}", "delivery", delivery["delivery_id"],
+                  "delivery_confirmed", f"交付 {delivery['delivery_id']} 已确认")
+
+    def _start_mock_executor(self) -> None:
+        """mock 模式下的自动执行器：把 running 的 AI 任务逐个收尾，用于全链路演示。"""
+        if self._auto_thread is not None:
+            return
+
+        def run() -> None:
+            while True:
+                time.sleep(0.05)
+                with self.lock:
+                    if not self.started:
+                        continue
+                    if self.status in {"delivery_pending", "completed", "blocked", "aborted"}:
+                        return
+                    task = next((item for item in self.tasks.values()
+                                 if item["status"] == "running"), None)
+                    if task is None:
+                        continue
+                    try:
+                        self._ai_report({"task_id": task["task_id"], "result": "done",
+                                         "detail": "mock 模式自动执行完成"})
+                        self.save()
+                    except Exception as exc:  # 自动执行失败留在 last_error，等人工介入
+                        self.last_error = str(exc)
+
+        self._auto_thread = threading.Thread(target=run, daemon=True)
+        self._auto_thread.start()
+
+    # ----- 计划产物 -----
+
+    def _write_plan_artifacts(self, plan: dict) -> None:
+        """plan.json / plan.md / 依赖图共用同一个 plan_id + version，便于核对同版。"""
+        plan_id = str(plan.get("plan_id") or self.plan_id or "PLAN-UNKNOWN")
+        version = int(plan.get("version") or 1)
+        stem = f"{plan_id}-v{version}"
+        payload = {**plan, "plan_id": plan_id, "version": version}
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        (self.out_dir / "plan.json").write_text(text, encoding="utf-8")
+        (self.out_dir / f"plan-{stem}.json").write_text(text, encoding="utf-8")
+        markdown = self._plan_markdown(payload, plan_id, version)
+        (self.out_dir / "plan.md").write_text(markdown, encoding="utf-8")
+        (self.out_dir / f"plan-{stem}.md").write_text(markdown, encoding="utf-8")
+        png = self.out_dir / "task_flow.png"
+        if png.exists():
+            (self.out_dir / f"task_flow-{stem}.png").write_bytes(png.read_bytes())
+
+    @staticmethod
+    def _plan_markdown(plan: dict, plan_id: str, version: int) -> str:
+        spec_ref = plan.get("spec_ref") or {}
+        lines = [
+            f"# 计划 {plan_id} · v{version}",
+            "",
+            f"- 计划号：{plan_id}",
+            f"- 计划版本：v{version}",
+            f"- 规格：{spec_ref.get('spec_id', '')} v{spec_ref.get('version', '')}",
+            f"- 任务数：{len(plan.get('tasks') or [])}",
+            "",
+            "| 任务 | 名称 | 角色 | 预估天数 | 依赖 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for task in plan.get("tasks") or []:
+            lines.append(
+                f"| {task.get('task_id', '')} | {task.get('name', '')} | "
+                f"{task.get('suggested_role', '')} | {task.get('estimate_days', '')} | "
+                f"{'、'.join(task.get('depends_on') or [])} |")
+        return "\n".join(lines) + "\n"
 
     # ----- 对外输出 -----
 
@@ -866,12 +1042,14 @@ class RealtimeAgent:
                  "depends_on": t.get("depends_on", []),
                  "write_paths": t.get("write_paths", []),
                  "review_required": t.get("review_required", False),
+                 "artifact_ids": list(t.get("artifact_ids") or []),
                  **({"estimate_days": t["estimate_days"]} if "estimate_days" in t else {})}
                 for t in self.tasks.values()
             ],
             "layers": self.layers,
             "execution_order": self.order,
             "decisions": list(self.decisions),
+            "delivery": self.delivery,
         }
 
     def event_stream(self) -> dict:
