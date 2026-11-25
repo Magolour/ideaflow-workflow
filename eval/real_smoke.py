@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +123,7 @@ def main() -> int:
     try:
         result = check(args.case, agent=agent, discuss=args.require_real)
     except Exception as exc:  # 调用失败、案例不存在、契约异常
+        traceback.print_exc()
         print(f"运行失败：{type(exc).__name__}: {exc}")
         return 2
 
