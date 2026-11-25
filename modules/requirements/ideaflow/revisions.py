@@ -186,11 +186,14 @@ def scope_revision(spec: Spec, snapshot: Snapshot,
         current = float(module["estimate_days"])
         if current <= 0.6:
             continue
-        if not module.get("requirement_ids"):
+        refs = [str(item) for item in (module.get("requirement_ids") or [])
+                if str(item).startswith("R-")]
+        if not refs:
+            # 功能退化为 F 编号时没有可裁剪的真实需求，不静默改估算。
             continue
         new_cost = max(0.5, round(current * 0.5, 1))
         saving = current - new_cost
-        requirement_id = module["requirement_ids"][0]
+        requirement_id = refs[0]
         decision = _find_decision(spec, requirement_id)
         feature = feature_of(module["name"]) or feature_of(decision["scope"])
         choice = SIMPLIFY.get(feature, f"{decision['choice']}（首版只做最小实现）")

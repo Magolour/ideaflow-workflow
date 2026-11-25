@@ -116,6 +116,8 @@ class Blackboard:
                 "evidence": row["evidence"],
                 "assumes": assumed,
             }
+            if row.get("requirement_ids"):
+                claim["requirement_ids"] = list(row["requirement_ids"])
             self.claims.append(claim)
             claim_ids.append(claim["id"])
 
