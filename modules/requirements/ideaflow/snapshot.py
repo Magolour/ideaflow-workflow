@@ -470,6 +470,13 @@ def _discussion_items(board: Any, *, existing: Iterable[str] = (),
                 else f"未解决阻断：{text}", "must",
                 actor=row.get("role"), round_no=row.get("round"))
 
+    for row in getattr(board, "options", []):
+        if not isinstance(row, dict):
+            continue
+        for scope in row.get("scope") or []:
+            add("requirement", f"范围：{scope}", "should",
+                actor=row.get("role") or "synthesizer", key_text=scope)
+
     for row in getattr(board, "non_goals", []):
         if not isinstance(row, dict):
             continue

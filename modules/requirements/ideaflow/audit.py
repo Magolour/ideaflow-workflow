@@ -74,10 +74,14 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
     mapped = {row["requirement_id"] for row in spec.mapping}
     accepted = {row["requirement_id"] for row in spec.acceptance}
 
+    feature_mode = (any(not row["requirement_ids"] for row in spec.modules)
+                    or any(row["requirement_id"] == "" for row in spec.mapping))
     covered_decisions = 0
     covered_modules = 0
     for requirement in snapshot.requirements:
         rid = requirement["id"]
+        if feature_mode and rid not in mapped:
+            continue
         decision = decisions.get(rid)
         if decision is None:
             _issue(issues, "COVERAGE_MISSING_DECISION",
@@ -103,7 +107,7 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
                    f"{rid}「{requirement['text']}」没有验收条件",
                    requirement_ids=[rid], fix_hint="补充可度量的验收条件")
 
-    if mapped != snapshot.ids("requirement"):
+    if mapped != snapshot.ids("requirement") and not feature_mode:
         missing = snapshot.ids("requirement") - mapped
         _issue(issues, "MAPPING_INCONSISTENT",
                f"映射表缺少需求：{', '.join(sorted(missing)) or '—'}",

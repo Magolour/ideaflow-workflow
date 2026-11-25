@@ -16,6 +16,7 @@ from .artifacts import deliver
 from .audit import audit_spec, save_audit
 from .contracts import ContractError
 from .escalate import escalate, save_question
+from .features import synthesize
 from .pipeline import run as run_discussion
 from .pipeline import slugify
 from .race import run_race, save_race
@@ -105,6 +106,12 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         f"{counts['requirement']} 条要求、{counts['constraint']} 条约束、"
         f"{counts['open']} 个待澄清")
 
+    feature_payload = None
+    if discuss:
+        feature_agent = agent or MockAgent()
+        feature_payload = synthesize(raw_text, snapshot, board, feature_agent, target)
+        say(f"功能清单：{len(feature_payload['features'])} 条功能")
+
     draft_agent = None if isinstance(agent, MockAgent) else agent
     race = run_race(snapshot, max_attempts=2, agent=draft_agent)
     if race.failed_groups:
@@ -119,7 +126,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         f"{group} {draft.commit_days} 天" for group, draft in sorted(race.drafts.items())))
 
     reviews = review_all(snapshot, race.drafts)
-    spec = build_spec(snapshot, race.drafts, reviews)
+    spec = build_spec(snapshot, race.drafts, reviews, features=feature_payload)
     write_json(target / "review.json", reviews)
     save_spec(spec, target)
     say(f"评审整合：以 {spec.base_draft} 为基线，{len(spec.decisions)} 条决策、"

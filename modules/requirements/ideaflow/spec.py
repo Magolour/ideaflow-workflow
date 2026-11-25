@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,11 +58,10 @@ def feature_of(text: str) -> str | None:
 
 
 def _module_name(text: str, index: int) -> str:
-    key = feature_of(text)
-    for name, label in MODULE_NAMES:
-        if key and name == key:
-            return label
-    return f"需求模块 {index}"
+    """按需求正文生成模块名，不再依赖固定教材词表。"""
+    clean = re.sub(r"^(支持|可以|能够|实现|提供|需要)", "", str(text)).strip(" 。；，,.")
+    clean = re.sub(r"[，,。；;].*$", "", clean).strip()
+    return clean[:12] or f"模块 {index}"
 
 
 def _interfaces(text: str, index: int) -> list[dict[str, str]]:
@@ -199,13 +200,16 @@ def effort_for(modules: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
-               reviews: dict[str, Any]) -> Spec:
+               reviews: dict[str, Any],
+               features: dict[str, Any] | None = None) -> Spec:
     if len(drafts) < 2:
         raise ContractError("NEED_TWO_DRAFTS", "整合规格需要两份草案", "drafts")
     by_id = {draft.draft_id: draft for draft in drafts.values()}
     base_id = reviews["verdict"]["base_draft"]
     base = by_id[base_id]
     other = next(draft for draft in drafts.values() if draft.draft_id != base_id)
+    if features is not None:
+        return _spec_from_features(snapshot, features, reviews, base)
 
     deadline = next((value for value in
                      (deadline_days(item["text"]) for item in snapshot.constraints)
@@ -360,6 +364,106 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
         review_ref={"file": "review.json", "hash": content_hash(reviews)},
     )
 
+
+
+
+def _unique_module_name(name: str, used: set[str]) -> str:
+    if name not in used:
+        used.add(name)
+        return name
+    index = 2
+    while f"{name}（{index}）" in used:
+        index += 1
+    unique = f"{name}（{index}）"
+    used.add(unique)
+    return unique
+
+
+def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
+                        reviews: dict[str, Any], base: Draft) -> Spec:
+    rows = payload.get("features") or []
+    if len(rows) > 12:
+        raise ContractError("TOO_MANY_MODULES", "单份规格最多 12 个模块", "features")
+    if not rows:
+        raise ContractError("EMPTY_FEATURES", "功能清单为空，无法生成规格", "features")
+
+    decisions: list[dict[str, Any]] = []
+    modules: list[dict[str, Any]] = []
+    mapping: list[dict[str, Any]] = []
+    acceptance: list[dict[str, Any]] = []
+    open_items: list[dict[str, Any]] = []
+    used_names: set[str] = set()
+
+    for index, feature in enumerate(rows, 1):
+        name = _unique_module_name(str(feature.get("name") or f"功能 {index}").strip(),
+                                   used_names)
+        refs = [str(item) for item in (feature.get("source_refs") or [])
+                if re.fullmatch(r"R-\d+", str(item))]
+        decision = {
+            "id": f"DEC-{index:02d}",
+            "scope": feature.get("description") or name,
+            "choice": f"实现{name}：{feature.get('description') or name}",
+            "reason": f"功能清单推断：{name}",
+            "requirement_ids": refs,
+            "draft_ids": [base.draft_id], "claim_ids": [],
+            "origin": "features", "satisfies": "full",
+            "cost_days": 2.0, "needs_human": False,
+        }
+        module = {
+            "id": f"M-{index:02d}",
+            "name": name,
+            "responsibility": feature.get("description") or name,
+            "requirement_ids": refs,
+            "decision_ids": [decision["id"]],
+            "interfaces": [{"name": f"handle{index:02d}", "caller": "应用层",
+                            "input": "{payload}", "output": "result | error"}],
+            "estimate_days": 2.0,
+            "deliverable": f"{name}交付物",
+            "acceptance_items": [f"{name}主流程通过验收"],
+            "depends_on": [],
+            "write_paths": [],
+            "suggested_role": "ai",
+        }
+        decisions.append(decision)
+        modules.append(module)
+        for requirement_id in refs:
+            mapping.append({"requirement_id": requirement_id,
+                            "module_ids": [module["id"]],
+                            "decision_ids": [decision["id"]]})
+            acceptance.append({"id": "", "requirement_id": requirement_id,
+                               "criterion": f"{name}主流程可用，关键操作不超过 3 步",
+                               "verify": "按验收场景逐条演示"})
+        if not refs:
+            mapping.append({"requirement_id": "", "module_ids": [module["id"]],
+                            "decision_ids": [decision["id"]]})
+            open_items.append({
+                "id": f"OPEN-{len(open_items) + 1:02d}",
+                "question": f"功能「{name}」暂未对应到明确需求，是否确认纳入首版？",
+                "impact": [], "blocking": False, "candidates": [],
+                "origin": "features", "resolution": None,
+            })
+        elif feature.get("inferred"):
+            open_items.append({
+                "id": f"OPEN-{len(open_items) + 1:02d}",
+                "question": f"功能「{name}」由讨论推断，是否确认纳入首版？",
+                "impact": refs, "blocking": False, "candidates": [],
+                "origin": "features", "resolution": None,
+            })
+
+    for index, row in enumerate(acceptance, 1):
+        row["id"] = f"ACC-{index:02d}"
+
+    return Spec(
+        spec_id="SPEC-001", version=1, status="draft",
+        snapshot_id=snapshot.snapshot_id, snapshot_version=snapshot.version,
+        snapshot_hash=snapshot.hash,
+        architecture="按功能清单划分模块：每个功能一个模块，跨模块只经应用层接口调用。",
+        base_draft=base.draft_id,
+        decisions=decisions, modules=modules, mapping=mapping, acceptance=acceptance,
+        non_goals=[], open_items=open_items, not_adopted=[],
+        effort=effort_for(modules),
+        review_ref={"file": "review.json", "hash": content_hash(reviews)},
+    )
 
 def save_spec(spec: Spec, directory: str | Path) -> Path:
     root = Path(directory)

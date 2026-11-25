@@ -54,6 +54,8 @@ class MockAgent:
     def respond(self, stage: str, role: Role, context: dict[str, Any]) -> dict[str, Any]:
         if stage == "clarify":
             return self._clarify(role)
+        if stage == "features":
+            return self._features(context)
         if stage == "respond":
             return self._respond(role, context)
         if stage == "review":
@@ -71,6 +73,28 @@ class MockAgent:
         raise ValueError(f"MockAgent 不支持阶段：{stage}")
 
     # ---------- 首轮澄清 ----------
+
+    @staticmethod
+    def _features(context: dict[str, Any]) -> dict[str, Any]:
+        idea = str(context.get("idea") or "")
+        if "微信" in idea:
+            names = ["聊天会话", "好友通讯录", "消息通知", "群聊", "朋友圈", "登录注册"]
+        else:
+            names = ["需求录入", "列表与检索", "详情查看", "提交与审批", "通知提醒", "统计导出"]
+        items = context.get("snapshot", {}).get("items", [])
+        refs = [item["id"] for item in items
+                if item.get("type") == "requirement"] or [
+                    item["id"] for item in context.get("claims", [])] or [
+                    item["id"] for item in context.get("options", [])]
+        ref = refs[0] if refs else ""
+        return {
+            "features": [
+                {"name": name, "description": f"提供{name}能力",
+                 "source_refs": [ref] if ref else [], "inferred": True,
+                 "priority": "high"}
+                for name in names
+            ],
+        }
 
     @staticmethod
     def _clarify(role: Role) -> dict[str, Any]:
@@ -459,6 +483,8 @@ STAGE_HINTS: dict[str, str] = {
     "review": '{"role":"<role id>","reviews":[{"claim":"CLM-001",'
               '"verdict":"preserved|deferred|omitted|distorted","note":"说明"}],'
               '"claims":[],"assumptions":[],"objections":[],"questions":[]}',
+    "features": '{"features":[{"name":"聊天会话","description":"一对一聊天能力",'
+                '"source_refs":["CLM-001"],"inferred":true,"priority":"high"}]}',
     "draft": '{"decisions":[{"requirement_ids":["R-01"],"choice":"方案",'
              '"reason":"理由","cost_days":2.0,"satisfies":"full|partial|declined",'
              '"risk":"风险"}],"claims":[{"text":"主张","requirement_ids":["R-01"],'
@@ -476,6 +502,8 @@ STAGE_RULES = {
     "sign": "对每个候选方案给出四态立场之一；有条件必须写条件，反对必须写理由。",
     "counterexample": "提出一个能推翻当前共识的具体反例。",
     "review": "至少复核 1 条给定主张；claim 只能用给定编号，结论四选一。",
+    "features": "归纳 5~10 条功能；名称 2~24 字，写能力不写过程约束；"
+                "每条 source_refs 至少一条且只能用给定编号；推断项标 inferred=true。",
     "draft": "覆盖快照里的每一条明确要求；只能引用给定编号；成本必须大于 0。",
 }
 
@@ -640,6 +668,8 @@ class LLMAgent:
 
     def _postprocess(self, stage: str, role: Role, context: dict[str, Any],
                      data: dict[str, Any]) -> dict[str, Any]:
+        if stage == "features":
+            return self._normalize_features(data, context)
         if stage == "synthesize":
             known = {row["id"] for row in context.get("claims", [])}
             return validate_synthesis(self._normalize_synthesis(data, known),
@@ -765,6 +795,48 @@ class LLMAgent:
                 raise ContractError("EMPTY_REVIEWS",
                                     "必须复核至少一条自己的论点，claim 用给定编号",
                                     "reviews")
+        return data
+
+    @staticmethod
+    def _normalize_features(data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        allowed = {item["id"] for item in context.get("snapshot", {}).get("items", [])}
+        allowed |= {row["id"] for row in context.get("claims", [])}
+        allowed |= {row["id"] for row in context.get("options", [])}
+        forbidden = ("问题定义", "关键路径", "全部范围", "结构边界", "剩余预算")
+        rows = data.get("features")
+        if not isinstance(rows, list) or not (3 <= len(rows) <= 12):
+            raise ContractError("FEATURE_COUNT", "功能清单需要 3~12 条", "features")
+        features = []
+        seen: set[str] = set()
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ContractError("INVALID_FIELD", "功能必须是对象", f"features[{index}]")
+            name = str(row.get("name") or "").strip()
+            if not (2 <= len(name) <= 24):
+                raise ContractError("FEATURE_NAME", "功能名需要 2~24 字", f"features[{index}].name")
+            if any(word in name for word in forbidden):
+                raise ContractError("FEATURE_NAME", f"功能名仍是过程约束：{name}",
+                                    f"features[{index}].name")
+            if name in seen:
+                raise ContractError("FEATURE_NAME", f"功能名重复：{name}",
+                                    f"features[{index}].name")
+            seen.add(name)
+            refs = [str(item) for item in (row.get("source_refs") or [])]
+            if not refs:
+                raise ContractError("FEATURE_REFS", "每条功能至少一个来源", f"features[{index}]")
+            unknown = [item for item in refs if item not in allowed]
+            if unknown:
+                raise ContractError("FEATURE_REFS", f"来源不存在：{unknown[0]}",
+                                    f"features[{index}].source_refs")
+            features.append({
+                "name": name,
+                "description": str(row.get("description") or "").strip() or name,
+                "source_refs": refs,
+                "inferred": bool(row.get("inferred", True)),
+                "priority": (row.get("priority") if row.get("priority") in
+                             ("high", "medium", "low") else "high"),
+            })
+        data["features"] = features
         return data
 
     @staticmethod
