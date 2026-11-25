@@ -884,9 +884,8 @@ class RealtimeAgent:
         record = {
             "artifact_id": artifact_id,
             "task_id": task["task_id"],
-            "plan_id": self.plan_id,
             "kind": "record",
-            "name": task.get("deliverable") or task["name"],
+            "summary": task.get("deliverable") or task["name"],
             "created_at": now_iso(),
         }
         (folder / "artifact.json").write_text(
