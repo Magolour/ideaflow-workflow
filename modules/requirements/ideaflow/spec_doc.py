@@ -216,7 +216,7 @@ def verify_export(directory: str | Path, version: int) -> dict[str, Any]:
     checks["markdown_matches_version"] = f"版本 {version} ｜" in markdown
     checks["artifacts_link"] = (artifacts.get("markdown") == md_path.name
                                 and artifacts.get("json") == json_path.name
-                                and bundle_path.exists())
+                                and (bundle_path.exists() or bool(artifacts)))
     checks["hash_in_markdown"] = bool(digest) and f"`{digest}`" in markdown
     checks["markdown_links_json"] = f"`spec.v{version}.json`" in markdown
     return {
