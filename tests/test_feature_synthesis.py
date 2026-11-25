@@ -15,6 +15,26 @@ IDEA = "我要做微信"
 PROCESS_WORDS = ("问题定义", "关键路径", "全部范围", "结构边界", "剩余预算")
 
 
+class NoRefAgent:
+    """功能只引用主张，不引用需求编号。"""
+
+    def __new__(cls):
+        from ideaflow.agents import MockAgent
+
+        class Agent(MockAgent):
+            def respond(self, stage, role, context):
+                if stage == "features":
+                    return {"features": [
+                        {"name": name, "description": f"{name}能力",
+                         "source_refs": ["CLM-001"], "inferred": True,
+                         "priority": "high"}
+                        for name in ("聊天会话", "好友通讯录", "消息通知",
+                                     "群聊", "朋友圈")]}
+                return super().respond(stage, role, context)
+
+        return Agent()
+
+
 def load_schema(name: str) -> dict:
     return json.loads((V2 / name).read_text(encoding="utf-8"))
 
@@ -83,24 +103,21 @@ class FeatureSynthesisTest(unittest.TestCase):
 
     def test_features_without_requirement_refs_still_export(self):
         """功能只引用主张时，规格仍能生成与导出，不被覆盖率误拦。"""
-        from ideaflow.agents import MockAgent
         from ideaflow.specflow import run
-
-        class NoRefAgent(MockAgent):
-            def respond(self, stage, role, context):
-                if stage == "features":
-                    return {"features": [
-                        {"name": name, "description": f"{name}能力",
-                         "source_refs": ["CLM-001"], "inferred": True,
-                         "priority": "high"}
-                        for name in ("聊天会话", "好友通讯录", "消息通知",
-                                     "群聊", "朋友圈")]}
-                return super().respond(stage, role, context)
 
         with tempfile.TemporaryDirectory() as folder:
             result = run(IDEA, out_dir=folder, agent=NoRefAgent(), discuss=True)
             self.assertEqual(len(result.spec.modules), 5)
             self.assertTrue((result.out_dir / "spec.v1.json").exists())
+
+    def test_unmapped_features_survive_tight_deadline(self):
+        from ideaflow.specflow import run
+
+        with tempfile.TemporaryDirectory() as folder:
+            result = run(IDEA, constraints=["一周内完成"], out_dir=folder,
+                         agent=NoRefAgent(), discuss=True)
+            self.assertEqual(result.spec.status, "awaiting_human")
+            self.assertEqual(result.spec.revisions, [])
 
     def test_plan_granularity(self):
         from plan_adapter import plan_from_spec
