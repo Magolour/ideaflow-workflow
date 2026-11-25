@@ -473,13 +473,15 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                 content_type = "application/json; charset=utf-8"
                 fallback, suffix = "human-question.json", "question.json"
             else:
-                meta_path = (run_dir / "spec.json").resolve()
+                meta_path = (run_dir / "spec.bundle.json").resolve()
+                if not meta_path.exists():
+                    meta_path = (run_dir / "spec.json").resolve()
                 if not meta_path.exists():
                     raise ApiError(404, "UNKNOWN_SPEC", "该次运行没有规格文件")
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 artifacts = meta.get("artifacts", {})
-                key = "markdown" if artifact == "spec-md" else "json"
-                name = artifacts.get(key)
+                key = "markdown" if artifact == "spec-md" else "bundle"
+                name = artifacts.get(key) or artifacts.get("json")
                 if not name:
                     raise ApiError(404, "UNKNOWN_SPEC", "规格缺少导出记录")
                 target = (run_dir / name).resolve()

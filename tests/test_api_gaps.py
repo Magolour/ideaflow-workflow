@@ -76,7 +76,7 @@ class RuntimeProgressContractTest(unittest.TestCase):
             import yaml
         except ImportError:  # pragma: no cover
             self.skipTest("未安装 pyyaml")
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.out = Path(self.tmp.name)
         openapi = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
         schemas = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
@@ -104,7 +104,7 @@ class ApiGapTest(unittest.TestCase):
     """成员 4 实现后去掉 skip，绿了即验收。"""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.out = Path(self.tmp.name)
 
     def tearDown(self):
@@ -175,7 +175,8 @@ class ApiGapTest(unittest.TestCase):
     def test_task_completion_records_artifact(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
-                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+                      {"tasks": [{"task_id": "T1", "name": "写接口",
+                                 "deliverable": "接口清单", "suggested_role": "ai"}]})
             post_json(f"{base}/api/events",
                       {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
             for _ in range(20):
@@ -183,10 +184,18 @@ class ApiGapTest(unittest.TestCase):
                 progress = get_json(f"{base}/api/progress")
                 if progress["tasks"][0]["status"] == "done":
                     break
-        self.assertTrue(progress["tasks"][0].get("artifact_ids"),
-                        "任务完成时应登记至少一个产物")
-        artifacts = list((self.out / "artifacts").rglob("*")) if (self.out / "artifacts").exists() else []
-        self.assertTrue(artifacts, "产物应有落盘文件或记录")
+        task = progress["tasks"][0]
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(len(task["artifact_ids"]), 1)
+        artifact_id = task["artifact_ids"][0]
+        artifact = json.loads((self.out / "artifacts" / artifact_id / "artifact.json")
+                              .read_text(encoding="utf-8"))
+        files = {name: load_schema(name) for name in
+                 ("artifact.schema.json", "enums.schema.json")}
+        Draft202012Validator(inline(files["artifact.schema.json"], files)).validate(artifact)
+        self.assertEqual(artifact["artifact_id"], artifact_id)
+        self.assertEqual(artifact["task_id"], task["task_id"])
+        self.assertEqual(artifact["summary"], "接口清单")
 
     def test_all_done_enters_delivery_pending(self):
         with running_server(self.out) as (base, _):
@@ -204,6 +213,9 @@ class ApiGapTest(unittest.TestCase):
         self.assertIsNotNone(delivery)
         self.assertEqual(delivery["status"], "draft")
         self.assertEqual([item["task_id"] for item in delivery["items"]], ["T1"])
+        self.assertEqual(delivery["items"][0]["artifact_ids"],
+                         progress["tasks"][0]["artifact_ids"])
+        self.assertEqual(progress["decisions"], [])
 
     def test_delivery_confirm_completes_instance(self):
         with running_server(self.out) as (base, _):
@@ -223,9 +235,24 @@ class ApiGapTest(unittest.TestCase):
                 if progress["status"] == "completed":
                     break
         self.assertEqual(progress["status"], "completed")
-        self.assertEqual(progress["delivery"]["status"], "confirmed")
-        self.assertEqual(progress["delivery"]["decided_by"], "human:tester")
-        self.assertIn("delivery", [row["target_type"] for row in progress["decisions"]])
+        delivery = progress["delivery"]
+        self.assertEqual(delivery["status"], "confirmed")
+        self.assertEqual(delivery["decided_by"], "human:tester")
+        self.assertEqual(json.loads((self.out / "delivery.json").read_text(encoding="utf-8")),
+                         delivery)
+        self.assertEqual(len(progress["decisions"]), 1)
+        decision = progress["decisions"][0]
+        self.assertEqual(decision["target_type"], "delivery")
+        self.assertEqual(decision["target_id"], delivery["delivery_id"])
+        self.assertEqual(decision["decision_id"], delivery["decision_id"])
+        self.assertEqual(decision["action"], "approve")
+        self.assertEqual([json.loads(line) for line in
+                          (self.out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()],
+                         [decision])
+        files = {name: load_schema(name) for name in
+                 ("delivery.schema.json", "decision.schema.json", "enums.schema.json")}
+        Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
+        Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
 
     def test_full_chain_from_idea_to_delivery(self):
         with running_server(self.out) as (base, _):

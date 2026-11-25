@@ -68,51 +68,83 @@ def _issue(rows: list[dict[str, Any]], issue_type: str, message: str, *,
 
 def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
-    decisions = {row["requirement_ids"][0]: row for row in spec.decisions
-                 if row["requirement_ids"]}
     modules = {module_id for row in spec.modules for module_id in [row["id"]]}
     mapped = {row["requirement_id"] for row in spec.mapping}
     accepted = {row["requirement_id"] for row in spec.acceptance}
 
-    # 功能清单模式：模块只来自功能，原文需求通过 source_refs 追溯。
-    # 未被任何功能引用的需求不再要求单独有决策/模块/验收，覆盖率也只按
-    # 被引用的需求计算，避免把“功能清单没收录”误判成“需求未覆盖”。
-    feature_mode = (any(row.get("origin") == "features" for row in spec.decisions)
-                    or any(not row["requirement_ids"] for row in spec.modules)
-                    or any(row.get("requirement_id") == "" for row in spec.mapping))
-    mapped_requirements = snapshot.ids("requirement") & mapped
-    coverage_total = (len(mapped_requirements) if feature_mode
-                      else len(snapshot.requirements))
+    # 功能清单模式：模块只来自功能，覆盖率按“功能数”计数。
+    # 每个功能都必须有需求引用、模块和验收；缺任何一个都按 blocking 报，
+    # 不能因为原文需求没有被全部收录就真空通过。
+    feature_mode = any(row.get("origin") == "features" for row in spec.decisions)
     covered_decisions = 0
     covered_modules = 0
-    for requirement in snapshot.requirements:
-        rid = requirement["id"]
-        if feature_mode and rid not in mapped_requirements:
-            continue
-        decision = decisions.get(rid)
-        if decision is None:
-            _issue(issues, "COVERAGE_MISSING_DECISION",
-                   f"{rid}「{requirement['text']}」没有对应决策",
-                   requirement_ids=[rid], fix_hint="为该需求补一条决策")
-        else:
-            covered_decisions += 1
-            if decision["satisfies"] != "full":
-                _issue(issues, "REQUIREMENT_OVERRIDDEN",
-                       f"{rid}「{requirement['text']}」未被完全满足：{decision['choice']}",
-                       requirement_ids=[rid],
-                       fix_hint="确认是否放宽约束，或把该需求正式列为非目标")
-            module_ids = [row["module_ids"] for row in spec.mapping
-                          if row["requirement_id"] == rid]
-            if not module_ids or not module_ids[0]:
-                _issue(issues, "COVERAGE_MISSING_MODULE",
-                       f"{rid}「{requirement['text']}」没有对应模块",
-                       requirement_ids=[rid], fix_hint="补充模块并在 mapping 中登记")
+    covered_acceptance = 0
+    if feature_mode:
+        feature_decisions = [row for row in spec.decisions
+                             if row.get("origin") == "features"]
+        coverage_total = len(feature_decisions)
+        modules_for_decision: dict[str, list[str]] = {}
+        for module in spec.modules:
+            for decision_id in module.get("decision_ids") or []:
+                modules_for_decision.setdefault(decision_id, []).append(module["id"])
+        acceptance_ids = {row["requirement_id"] for row in spec.acceptance}
+        for index, decision in enumerate(feature_decisions, 1):
+            refs = [str(item) for item in (decision.get("requirement_ids") or [])
+                    if str(item)]
+            label = refs[0] if refs else f"功能 {index}"
+            scope = str(decision.get("scope") or label)
+            if refs:
+                covered_decisions += 1
             else:
+                _issue(issues, "COVERAGE_MISSING_DECISION",
+                       f"功能「{scope}」没有对应需求",
+                       fix_hint="把功能映射到 R 编号，或显式退化为 F 编号")
+            module_ids = modules_for_decision.get(decision["id"]) or []
+            if module_ids:
                 covered_modules += 1
-        if rid not in accepted:
-            _issue(issues, "COVERAGE_MISSING_ACCEPTANCE",
-                   f"{rid}「{requirement['text']}」没有验收条件",
-                   requirement_ids=[rid], fix_hint="补充可度量的验收条件")
+            else:
+                _issue(issues, "COVERAGE_MISSING_MODULE",
+                       f"功能「{scope}」没有对应模块",
+                       requirement_ids=refs,
+                       fix_hint="为功能补充模块并在 mapping 中登记")
+            if refs and any(ref in acceptance_ids for ref in refs):
+                covered_acceptance += 1
+            else:
+                _issue(issues, "COVERAGE_MISSING_ACCEPTANCE",
+                       f"功能「{scope}」没有验收条件",
+                       requirement_ids=refs,
+                       fix_hint="按功能补充可度量的验收条件")
+    else:
+        decisions = {row["requirement_ids"][0]: row for row in spec.decisions
+                     if row["requirement_ids"]}
+        coverage_total = len(snapshot.requirements)
+        for requirement in snapshot.requirements:
+            rid = requirement["id"]
+            decision = decisions.get(rid)
+            if decision is None:
+                _issue(issues, "COVERAGE_MISSING_DECISION",
+                       f"{rid}「{requirement['text']}」没有对应决策",
+                       requirement_ids=[rid], fix_hint="为该需求补一条决策")
+            else:
+                covered_decisions += 1
+                if decision["satisfies"] != "full":
+                    _issue(issues, "REQUIREMENT_OVERRIDDEN",
+                           f"{rid}「{requirement['text']}」未被完全满足：{decision['choice']}",
+                           requirement_ids=[rid],
+                           fix_hint="确认是否放宽约束，或把该需求正式列为非目标")
+                module_ids = [row["module_ids"] for row in spec.mapping
+                              if row["requirement_id"] == rid]
+                if not module_ids or not module_ids[0]:
+                    _issue(issues, "COVERAGE_MISSING_MODULE",
+                           f"{rid}「{requirement['text']}」没有对应模块",
+                           requirement_ids=[rid], fix_hint="补充模块并在 mapping 中登记")
+                else:
+                    covered_modules += 1
+            if rid not in accepted:
+                _issue(issues, "COVERAGE_MISSING_ACCEPTANCE",
+                       f"{rid}「{requirement['text']}」没有验收条件",
+                       requirement_ids=[rid], fix_hint="补充可度量的验收条件")
+        covered_acceptance = len(accepted & snapshot.ids("requirement"))
 
     if mapped != snapshot.ids("requirement") and not feature_mode:
         missing = snapshot.ids("requirement") - mapped
@@ -210,7 +242,7 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
             "coverage": {"requirements": coverage_total,
                          "with_decision": covered_decisions,
                          "with_module": covered_modules,
-                         "with_acceptance": len(accepted & snapshot.ids("requirement"))},
+                         "with_acceptance": covered_acceptance},
             "constraints": {"total": len(snapshot.constraints), "verified": verified},
             "acceptance": {"total": len(spec.acceptance), "measurable": measurable},
         },

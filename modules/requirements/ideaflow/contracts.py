@@ -151,6 +151,10 @@ def validate_role_output(payload: Any, *, role_id: str, stage: str,
             "evidence": evidence,
             "assumes": assumed,
         })
+        refs = [str(item).strip() for item in (row.get("requirement_ids") or [])
+                if str(item).strip()]
+        if refs:
+            claims_out[-1]["requirement_ids"] = list(dict.fromkeys(refs))
 
     assumptions_out: list[dict[str, str]] = []
     for index, row in enumerate(_rows(payload.get("assumptions", []), "assumptions")):

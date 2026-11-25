@@ -456,7 +456,8 @@ class MockAgent:
 STAGE_HINTS: dict[str, str] = {
     "clarify": '{"role":"<role id>","questions":["没有答复就无法继续的问题"]}',
     "diverge": '{"role":"<role id>","claims":[{"text":"主张","reason":"依据",'
-               '"evidence":"fact|rule|value|assumption","assumes":[0]}],'
+               '"evidence":"fact|rule|value|assumption","assumes":[0],'
+               '"requirement_ids":["R-01"]}],'
                '"assumptions":[{"text":"假设","verify_by":"验证方式"}],'
                '"objections":[],"questions":["待确认问题"]}',
     "critique": '{"role":"<role id>","claims":[],"assumptions":[],'
@@ -496,7 +497,8 @@ STAGE_HINTS: dict[str, str] = {
 
 STAGE_RULES = {
     "clarify": "只问没有答复就无法继续的问题，最多 3 个。",
-    "diverge": "从本角色关注点出发，给 2—3 条有依据的主张，至少 1 条假设。",
+    "diverge": "从本角色关注点出发，给 2—3 条有依据的主张，至少 1 条假设；"
+               "主张尽量带上给定快照的需求编号 requirement_ids。",
     "critique": "只针对其他角色的具体主张提出异议，必须写后果与严重级。",
     "respond": "逐条回应指到本角色的异议，至少 1 条；objection 只能用给定编号，立场三选一。",
     "synthesize": "至少 2 个候选方案、2 个工作包；只能引用给定的主张编号。",

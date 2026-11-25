@@ -34,7 +34,8 @@ class ExportTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_writes_versioned_and_latest_files(self) -> None:
-        for name in ("spec.v1.json", "spec.v1.md", "spec.json", "spec.md"):
+        for name in ("spec.v1.json", "spec.v1.md", "spec.json", "spec.md",
+                     "spec.bundle.json"):
             self.assertTrue((self.root / name).exists(), name)
 
     def test_same_content_hash_in_both_formats(self) -> None:
@@ -43,8 +44,11 @@ class ExportTest(unittest.TestCase):
         self.assertIn(self.spec.hash, markdown)
         payload = json.loads((self.root / "spec.v1.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["hash"], self.spec.hash)
-        self.assertEqual(payload["artifacts"]["markdown"], "spec.v1.md")
-        self.assertEqual(payload["artifacts"]["content_hash"], self.spec.hash)
+        self.assertNotIn("artifacts", payload, "spec 文件必须保持纯规格，不带导出元数据")
+        bundle = json.loads((self.root / "spec.bundle.json").read_text(encoding="utf-8"))
+        self.assertEqual(bundle["artifacts"]["markdown"], "spec.v1.md")
+        self.assertEqual(bundle["artifacts"]["json"], "spec.v1.json")
+        self.assertEqual(bundle["artifacts"]["content_hash"], self.spec.hash)
 
     def test_verify_passes_and_checks_are_explicit(self) -> None:
         check = verify_export(self.root, 1)

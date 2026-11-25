@@ -157,26 +157,34 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
 
 
 def export_spec(spec: Spec, snapshot: Snapshot, directory: str | Path) -> dict[str, Any]:
-    """写出同版 JSON 与 Markdown，并返回可核对的摘要。"""
+    """写出同版 JSON 与 Markdown，并返回可核对的摘要。
+
+    `spec.v{n}.json` / `spec.json` 只保留 spec 契约内的字段；导出元数据
+    （artifacts）单独写到 `spec.bundle.json`，避免污染下游消费的规格文件。
+    """
     root = Path(directory)
     json_name = f"spec.v{spec.version}.json"
     md_name = f"spec.v{spec.version}.md"
+    bundle_name = "spec.bundle.json"
     markdown = render_spec_markdown(spec, snapshot)
 
-    payload = {**spec.to_json(),
-               "artifacts": {"json": json_name, "markdown": md_name,
-                             "content_hash": spec.hash}}
-    write_json(root / json_name, payload)
+    pure = spec.to_json()
+    bundle = {**pure,
+              "artifacts": {"json": json_name, "markdown": md_name,
+                            "bundle": bundle_name, "content_hash": spec.hash}}
+    write_json(root / json_name, pure)
     write_text(root / md_name, markdown)
-    write_json(root / "spec.json", payload)
+    write_json(root / "spec.json", pure)
     write_text(root / "spec.md", markdown)
+    write_json(root / bundle_name, bundle)
     return {
         "spec_id": spec.spec_id,
         "version": spec.version,
         "content_hash": spec.hash,
         "json": json_name,
         "markdown": md_name,
-        "json_sha256": content_hash(payload),
+        "bundle": bundle_name,
+        "json_sha256": content_hash(pure),
         "markdown_sha256": content_hash(markdown),
         "markdown_text": markdown,
     }
@@ -191,6 +199,8 @@ def verify_export(directory: str | Path, version: int) -> dict[str, Any]:
         raise ContractError("EXPORT_NOT_FOUND", "找不到同版导出文件", "export")
 
     payload = read_json(json_path)
+    bundle_path = root / "spec.bundle.json"
+    bundle = read_json(bundle_path) if bundle_path.exists() else payload
     markdown = md_path.read_text(encoding="utf-8")
     checks: dict[str, bool] = {}
     try:
@@ -201,11 +211,12 @@ def verify_export(directory: str | Path, version: int) -> dict[str, Any]:
         checks["json_integrity"] = False
 
     digest = payload.get("hash", "")
-    artifacts = payload.get("artifacts", {})
+    artifacts = bundle.get("artifacts", {})
     checks["version_matches"] = payload.get("version") == version
     checks["markdown_matches_version"] = f"版本 {version} ｜" in markdown
     checks["artifacts_link"] = (artifacts.get("markdown") == md_path.name
-                                and artifacts.get("json") == json_path.name)
+                                and artifacts.get("json") == json_path.name
+                                and (bundle_path.exists() or bool(artifacts)))
     checks["hash_in_markdown"] = bool(digest) and f"`{digest}`" in markdown
     checks["markdown_links_json"] = f"`spec.v{version}.json`" in markdown
     return {
@@ -215,5 +226,6 @@ def verify_export(directory: str | Path, version: int) -> dict[str, Any]:
         "content_hash": digest,
         "json": json_path.name,
         "markdown": md_path.name,
+        "bundle": bundle_path.name if bundle_path.exists() else "",
         "spec": spec,
     }

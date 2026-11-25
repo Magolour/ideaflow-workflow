@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .constraints import shares_topic
 from .contracts import ContractError
 from .roles import Role
 from .snapshot import Snapshot
@@ -29,14 +30,57 @@ PRIORITIES = ("high", "medium", "low")
 MIN_FEATURES, MAX_FEATURES = 3, 12
 
 
+def claim_requirements(snapshot: Snapshot, board: Any) -> dict[str, list[str]]:
+    """把讨论主张/方案范围映射到快照需求编号。
+
+    模型给的主张通常不带 requirement_ids；这里先用显式引用，再用正文重叠
+    （双向重叠，防止长句包短句时漏掉）反查，最后把方案范围按“范围：…”条目
+    对应回需求。映射结果同时用于 features 上下文和规格生成。
+    """
+    known = {item["id"] for item in snapshot.requirements}
+    mapping: dict[str, list[str]] = {}
+
+    def match(text: str) -> list[str]:
+        hits: list[str] = []
+        for item in snapshot.requirements:
+            requirement_text = str(item.get("text") or "")
+            if not requirement_text:
+                continue
+            if (shares_topic(text, requirement_text)
+                    or shares_topic(requirement_text, text)):
+                hits.append(item["id"])
+        return list(dict.fromkeys(hits))[:5]
+
+    for row in getattr(board, "claims", []):
+        explicit = [str(item) for item in (row.get("requirement_ids") or [])
+                    if str(item) in known]
+        mapping[row["id"]] = (list(dict.fromkeys(explicit))
+                              if explicit else match(str(row.get("text") or "")))
+
+    for row in getattr(board, "options", []):
+        scopes = [str(item) for item in (row.get("scope") or []) if str(item)]
+        hits: list[str] = []
+        for scope in scopes:
+            hits.extend(item["id"] for item in snapshot.requirements
+                        if str(item.get("text") or "") == f"范围：{scope}")
+        if not hits:
+            hits = match(" ".join(scopes))
+        mapping[row["id"]] = list(dict.fromkeys(hits))[:5]
+    return mapping
+
+
 def build_context(idea: str, snapshot: Snapshot, board: Any) -> dict[str, Any]:
+    refs = claim_requirements(snapshot, board)
     return {
         "idea": idea,
         "snapshot": snapshot.to_json(),
         "claims": [{"id": row["id"], "text": row.get("text", ""),
-                    "role": row.get("role", "")} for row in getattr(board, "claims", [])],
+                    "role": row.get("role", ""),
+                    "requirement_ids": refs.get(row["id"], [])}
+                   for row in getattr(board, "claims", [])],
         "options": [{"id": row["id"], "name": row.get("name", ""),
-                     "scope": list(row.get("scope") or [])}
+                     "scope": list(row.get("scope") or []),
+                     "requirement_ids": refs.get(row["id"], [])}
                     for row in getattr(board, "options", [])],
     }
 

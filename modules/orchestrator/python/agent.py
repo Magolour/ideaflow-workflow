@@ -111,43 +111,59 @@ SYSTEM_PROMPT = (
 )
 
 
+def _model_candidates() -> list[str]:
+    models = [item.strip() for item in os.getenv("AI_MODELS", "").split(",") if item.strip()]
+    primary = os.getenv("AI_MODEL", DEFAULT_MODEL).strip()
+    if primary and primary not in models:
+        models.insert(0, primary)
+    return models or [DEFAULT_MODEL]
+
+
 def chat_json(system: str, user: str) -> dict:
     api_key = os.getenv("AI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
     if not api_key:
         raise SystemExit("未找到 AI_API_KEY，请写入 .env 或使用 --mock")
     base_url = os.getenv("AI_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    payload = {
-        "model": os.getenv("AI_MODEL", DEFAULT_MODEL),
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-    }
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {api_key}"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("AI_TIMEOUT", "90"))) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise SystemExit(f"模型接口 HTTP {exc.code}：{exc.read().decode('utf-8', 'replace')[:300]}")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise SystemExit(f"模型接口不可达：{exc}")
+    errors: list[str] = []
+    for model in _model_candidates():
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+        }
+        request = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {api_key}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=float(os.getenv("AI_TIMEOUT", "90"))) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:300]
+            if exc.code in {401, 403, 404, 408, 409, 429} or exc.code >= 500:
+                errors.append(f"{model} HTTP {exc.code}: {detail}")
+                continue
+            raise SystemExit(f"模型接口 HTTP {exc.code}：{detail}")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            errors.append(f"{model} 不可达: {exc}")
+            continue
 
-    content = data["choices"][0]["message"]["content"].strip()
-    if content.startswith("```"):
-        content = content.strip("`")
-        content = content[4:] if content.lower().startswith("json") else content
-    start, end = content.find("{"), content.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError("模型未返回 JSON 对象")
-    return json.loads(content[start:end + 1])
+        content = data["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.strip("`")
+            content = content[4:] if content.lower().startswith("json") else content
+        start, end = content.find("{"), content.rfind("}")
+        if start == -1 or end <= start:
+            raise ValueError("模型未返回 JSON 对象")
+        return json.loads(content[start:end + 1])
+    raise SystemExit("所有模型均不可用：" + "；".join(errors))
 
 
 def validate_edges(raw_edges, task_ids: set[str]) -> list[dict]:
@@ -884,9 +900,8 @@ class RealtimeAgent:
         record = {
             "artifact_id": artifact_id,
             "task_id": task["task_id"],
-            "plan_id": self.plan_id,
             "kind": "record",
-            "name": task.get("deliverable") or task["name"],
+            "summary": task.get("deliverable") or task["name"],
             "created_at": now_iso(),
         }
         (folder / "artifact.json").write_text(

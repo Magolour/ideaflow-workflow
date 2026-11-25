@@ -46,7 +46,7 @@ TASKS = {
 
 class DecisionRecordTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.out = Path(self.tmp.name)
         self.agent = RealtimeAgent(out_dir=self.out, mock=True,
                                    upload_path=self.out / "uploaded.json")

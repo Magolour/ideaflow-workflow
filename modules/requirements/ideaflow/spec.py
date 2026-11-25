@@ -194,7 +194,8 @@ def effort_for(modules: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
                reviews: dict[str, Any],
-               features: dict[str, Any] | None = None) -> Spec:
+               features: dict[str, Any] | None = None,
+               claim_refs: dict[str, list[str]] | None = None) -> Spec:
     if len(drafts) < 2:
         raise ContractError("NEED_TWO_DRAFTS", "整合规格需要两份草案", "drafts")
     by_id = {draft.draft_id: draft for draft in drafts.values()}
@@ -202,7 +203,8 @@ def build_spec(snapshot: Snapshot, drafts: dict[str, Draft],
     base = by_id[base_id]
     other = next(draft for draft in drafts.values() if draft.draft_id != base_id)
     if features is not None:
-        return _spec_from_features(snapshot, features, reviews, base)
+        return _spec_from_features(snapshot, features, reviews, base,
+                                   claim_refs or {})
     if len(snapshot.requirements) > MAX_MODULES:
         raise ContractError("TOO_MANY_MODULES",
                             f"单份规格最多 {MAX_MODULES} 个模块", "requirements")
@@ -376,8 +378,67 @@ def _unique_module_name(name: str, used: set[str]) -> str:
     return unique
 
 
+def _feature_refs(feature: dict[str, Any], snapshot: Snapshot,
+                  claim_refs: dict[str, list[str]]) -> list[str]:
+    """功能 → 需求编号：显式 R、claim 反查、功能文本兜底、最后才用 F-id。"""
+    known = snapshot.ids("requirement")
+    refs: list[str] = []
+    for source in feature.get("source_refs") or []:
+        source = str(source)
+        if source in known:
+            refs.append(source)
+        else:
+            refs.extend(claim_refs.get(source, []))
+    refs = [item for item in dict.fromkeys(refs) if item in known]
+    if refs:
+        return refs
+
+    text = f"{feature.get('name') or ''} {feature.get('description') or ''}".strip()
+    for item in snapshot.requirements:
+        requirement_text = str(item.get("text") or "")
+        if (text and requirement_text
+                and (shares_topic(text, requirement_text)
+                     or shares_topic(requirement_text, text))):
+            refs.append(item["id"])
+    return list(dict.fromkeys(refs))[:5]
+
+
+def _feature_estimate(feature: dict[str, Any], refs: list[str], base: Draft,
+                      index: int, total: int) -> float:
+    """优先取草案工作包里对应需求的估算，其次取决策成本，最后才均摊。"""
+    packages = [row for row in (base.packages or []) if isinstance(row, dict)]
+    for requirement_id in refs:
+        for package in packages:
+            if requirement_id in str(package.get("name") or ""):
+                value = package.get("likely") or package.get("optimistic")
+                if value:
+                    return max(0.5, round(float(value), 1))
+
+    for requirement_id in refs:
+        decision = base.decision_for(requirement_id)
+        if decision and decision.get("cost_days") is not None:
+            return max(0.5, round(float(decision["cost_days"]), 1))
+
+    text = f"{feature.get('name') or ''} {feature.get('description') or ''}".strip()
+    for package in packages:
+        name = str(package.get("name") or "")
+        if name and text and (shares_topic(name, text) or shares_topic(text, name)):
+            value = package.get("likely") or package.get("optimistic")
+            if value:
+                return max(0.5, round(float(value), 1))
+
+    packages = [row for row in packages if "联调" not in str(row.get("name") or "")]
+    if packages:
+        package = packages[(index - 1) % len(packages)]
+        value = package.get("likely") or package.get("optimistic")
+        if value:
+            return max(0.5, round(float(value), 1))
+    return max(0.5, round(base.commit_days / max(1, total), 1))
+
+
 def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
-                        reviews: dict[str, Any], base: Draft) -> Spec:
+                        reviews: dict[str, Any], base: Draft,
+                        claim_refs: dict[str, list[str]]) -> Spec:
     rows = payload.get("features") or []
     if len(rows) > MAX_MODULES:
         raise ContractError("TOO_MANY_MODULES",
@@ -391,33 +452,45 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
     acceptance: list[dict[str, Any]] = []
     open_items: list[dict[str, Any]] = []
     used_names: set[str] = set()
+    unresolved: list[dict[str, str]] = []
+    inferred: list[dict[str, Any]] = []
 
     for index, feature in enumerate(rows, 1):
         name = _unique_module_name(str(feature.get("name") or f"功能 {index}").strip(),
                                    used_names)
-        refs = [str(item) for item in (feature.get("source_refs") or [])
-                if re.fullmatch(r"R-\d+", str(item))]
+        description = str(feature.get("description") or name).strip() or name
+        refs = _feature_refs(feature, snapshot, claim_refs)
+        feature_id = str(feature.get("id") or f"F-{index:02d}")
+        if not refs:
+            refs = [feature_id]
+            unresolved.append({"feature": feature_id, "name": name})
+        elif feature.get("inferred"):
+            inferred.append({"feature": feature_id, "name": name, "refs": refs})
+
+        estimate = _feature_estimate(feature, refs, base, index, len(rows))
+        criterion = (f"{name}：{description}；主流程 5 秒内返回结果，"
+                     "重复提交只记一次，验收时逐条演示")
         decision = {
             "id": f"DEC-{index:02d}",
-            "scope": feature.get("description") or name,
-            "choice": f"实现{name}：{feature.get('description') or name}",
+            "scope": description,
+            "choice": f"实现{name}：{description}",
             "reason": f"功能清单推断：{name}",
             "requirement_ids": refs,
             "draft_ids": [base.draft_id], "claim_ids": [],
             "origin": "features", "satisfies": "full",
-            "cost_days": 2.0, "needs_human": False,
+            "cost_days": estimate, "needs_human": False,
         }
         module = {
             "id": f"M-{index:02d}",
             "name": name,
-            "responsibility": feature.get("description") or name,
+            "responsibility": description,
             "requirement_ids": refs,
             "decision_ids": [decision["id"]],
             "interfaces": [{"name": f"handle{index:02d}", "caller": "应用层",
                             "input": "{payload}", "output": "result | error"}],
-            "estimate_days": 2.0,
+            "estimate_days": estimate,
             "deliverable": f"{name}交付物",
-            "acceptance_items": [f"{name}主流程通过验收"],
+            "acceptance_items": [criterion],
             "depends_on": [],
             "write_paths": [],
             "suggested_role": "ai",
@@ -428,31 +501,32 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
             mapping.append({"requirement_id": requirement_id,
                             "module_ids": [module["id"]],
                             "decision_ids": [decision["id"]]})
-            acceptance.append({"id": "", "requirement_id": requirement_id,
-                               "criterion": f"{name}主流程可用，关键操作不超过 3 步",
-                               "verify": "按验收场景逐条演示"})
-        if not refs:
-            acceptance.append({"id": "", "requirement_id": "",
-                               "criterion": f"{name}主流程可用，关键操作不超过 3 步",
-                               "verify": "按验收场景逐条演示"})
-            mapping.append({"requirement_id": "", "module_ids": [module["id"]],
-                            "decision_ids": [decision["id"]]})
-            open_items.append({
-                "id": f"OPEN-{len(open_items) + 1:02d}",
-                "question": f"功能「{name}」待确认对应需求：是否确认纳入首版？",
-                "impact": [], "blocking": False, "candidates": [],
-                "origin": "features", "resolution": None,
-            })
-        elif feature.get("inferred"):
-            open_items.append({
-                "id": f"OPEN-{len(open_items) + 1:02d}",
-                "question": f"功能「{name}」由讨论推断，是否确认纳入首版？",
-                "impact": refs, "blocking": False, "candidates": [],
-                "origin": "features", "resolution": None,
-            })
+        acceptance.append({"id": "", "requirement_id": refs[0],
+                           "criterion": criterion,
+                           "verify": "按验收场景逐条演示，记录耗时与重复提交结果"})
 
     for index, row in enumerate(acceptance, 1):
         row["id"] = f"ACC-{index:02d}"
+
+    if unresolved:
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": ("以下功能暂未对应到明确需求，是否确认纳入首版："
+                         + "、".join(row["name"] for row in unresolved)),
+            "impact": [row["feature"] for row in unresolved],
+            "blocking": False, "candidates": [],
+            "origin": "features", "resolution": None,
+        })
+    if inferred:
+        impacts = list(dict.fromkeys(
+            ref for row in inferred for ref in row["refs"]))
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": ("以下功能由讨论推断，是否确认纳入首版："
+                         + "、".join(row["name"] for row in inferred)),
+            "impact": impacts, "blocking": False, "candidates": [],
+            "origin": "features", "resolution": None,
+        })
 
     return Spec(
         spec_id="SPEC-001", version=1, status="draft",
