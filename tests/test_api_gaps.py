@@ -254,6 +254,62 @@ class ApiGapTest(unittest.TestCase):
         Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
         Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
 
+    def test_delivery_reject_requires_reason_and_blocks_instance(self):
+        def wait_for(base, predicate):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                progress = get_json(f"{base}/api/progress?since=0")
+                if predicate(progress):
+                    return progress
+                time.sleep(0.05)
+            self.fail(f"运行未达到预期状态：{progress}")
+
+        reason = "交付物缺少验证记录"
+        with running_server(self.out) as (base, _):
+            post_json(f"{base}/api/start",
+                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            post_json(f"{base}/api/events",
+                      {"type": "ai_report", "task_id": "T1", "result": "done"})
+            wait_for(base, lambda progress: progress["status"] == "delivery_pending")
+
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "reject", "reason": " "})
+            pending = wait_for(base, lambda progress: bool(progress["last_error"]))
+            self.assertIn("必须填写理由", pending["last_error"])
+            self.assertEqual(pending["status"], "delivery_pending")
+            self.assertEqual(pending["delivery"]["status"], "draft")
+            self.assertEqual(pending["decisions"], [])
+
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "reject", "reason": reason,
+                       "operator": "tester"})
+            blocked = wait_for(base, lambda progress: progress["status"] == "blocked")
+
+            post_json(f"{base}/api/events", {"type": "human_op", "action": "approve"})
+            replay = wait_for(base, lambda progress: bool(progress["last_error"]))
+            self.assertEqual(replay["status"], "blocked")
+            self.assertEqual(replay["decisions"], blocked["decisions"])
+
+        delivery = blocked["delivery"]
+        self.assertEqual(delivery["status"], "rejected")
+        self.assertEqual(delivery["decided_by"], "human:tester")
+        self.assertEqual(len(blocked["decisions"]), 1)
+        decision = blocked["decisions"][0]
+        self.assertEqual((decision["target_type"], decision["action"], decision["reason"]),
+                         ("delivery", "reject", reason))
+        self.assertEqual(decision["target_id"], delivery["delivery_id"])
+        self.assertEqual(decision["decision_id"], delivery["decision_id"])
+        self.assertEqual(json.loads((self.out / "delivery.json").read_text(encoding="utf-8")),
+                         delivery)
+        self.assertEqual([json.loads(line) for line in
+                          (self.out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()],
+                         [decision])
+        self.assertIn("delivery_rejected", [row["action"] for row in blocked["event_log"]])
+        files = {name: load_schema(name) for name in
+                 ("delivery.schema.json", "decision.schema.json", "enums.schema.json")}
+        Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
+        Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
+
     def test_full_chain_from_idea_to_delivery(self):
         with running_server(self.out) as (base, _):
             body = post_json(f"{base}/api/start", {"requirement": (

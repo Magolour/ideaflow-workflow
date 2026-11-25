@@ -595,11 +595,13 @@ class RealtimeAgent:
         if action not in {"approve", "reject", "skip"}:
             raise ValueError(f"非法人工操作：{action}")
         reason = str(packet.get("reason") or "")
-        if action in {"reject", "skip"} and not reason:
+        if action in {"reject", "skip"} and not reason.strip():
             raise ValueError("驳回或跳过必须填写理由")
+        operator = str(packet.get("operator") or "demo")
         if not self.waiting_on:
-            if self.status == "delivery_pending" and action == "approve" and self.delivery:
-                self._confirm_delivery(str(packet.get("operator") or "demo"))
+            if (self.status == "delivery_pending" and self.delivery
+                    and self.delivery["status"] == "draft" and action in {"approve", "reject"}):
+                self._decide_delivery(action, reason, operator)
                 return
             raise ValueError("当前没有等待中的人工节点")
         task_id = self.waiting_on["object_id"]
@@ -609,13 +611,12 @@ class RealtimeAgent:
         if task:
             task["status"] = {"approve": "done", "reject": "blocked",
                               "skip": "skipped"}[action]
-        self._record_decision(action, task_id, reason,
-                              str(packet.get("operator") or "demo"))
-        self.emit(f"human:{packet.get('operator', 'demo')}", "instance",
+        self._record_decision(action, task_id, reason, operator)
+        self.emit(f"human:{operator}", "instance",
                   self.instance_id, "human_gate_exited",
                   f"{action} {task_id}" + (f"：{reason}" if reason else ""))
         if task and action == "approve":
-            self.emit(f"human:{packet.get('operator', 'demo')}", "task", task_id,
+            self.emit(f"human:{operator}", "task", task_id,
                       "task_done", f"人工确认完成 {task['name']}")
         if action == "reject":
             self._cascade_blocked(task_id)
@@ -863,8 +864,11 @@ class RealtimeAgent:
             if all_terminal:
                 if self.delivery is None:
                     self._create_delivery()
-                self.status = ("completed" if self.delivery["status"] == "confirmed"
-                               else "delivery_pending")
+                self.status = {
+                    "draft": "delivery_pending",
+                    "confirmed": "completed",
+                    "rejected": "blocked",
+                }[self.delivery["status"]]
             elif self.waiting_on:
                 self.status = "waiting_human"
             else:
@@ -926,20 +930,23 @@ class RealtimeAgent:
         (self.out_dir / "delivery.json").write_text(
             json.dumps(self.delivery, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _confirm_delivery(self, operator: str) -> None:
+    def _decide_delivery(self, action: str, reason: str, operator: str) -> None:
         delivery = self.delivery
-        decision = self._record_decision("approve", str(delivery["delivery_id"]), "",
+        approved = action == "approve"
+        decision = self._record_decision(action, delivery["delivery_id"], reason,
                                          operator, target_type="delivery")
         delivery.update({
-            "status": "confirmed",
-            "decided_by": f"human:{operator}",
-            "decided_at": now_iso(),
+            "status": "confirmed" if approved else "rejected",
+            "decided_by": decision["actor"],
+            "decided_at": decision["created_at"],
             "decision_id": decision["decision_id"],
         })
         self._write_delivery()
-        self.status = "completed"
-        self.emit(f"human:{operator}", "delivery", delivery["delivery_id"],
-                  "delivery_confirmed", f"交付 {delivery['delivery_id']} 已确认")
+        self.status = "completed" if approved else "blocked"
+        self.emit(decision["actor"], "delivery", delivery["delivery_id"],
+                  "delivery_confirmed" if approved else "delivery_rejected",
+                  f"交付 {delivery['delivery_id']} 已确认" if approved
+                  else f"交付 {delivery['delivery_id']} 已驳回：{reason}")
 
     def _start_mock_executor(self) -> None:
         """mock 模式下的自动执行器：把 running 的 AI 任务逐个收尾，用于全链路演示。"""
