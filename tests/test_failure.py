@@ -55,7 +55,9 @@ class AgentCase(unittest.TestCase):
         self.tmp.cleanup()
 
     def start(self, payload=None):
-        return self.agent.start(payload or TASKS, json.dumps(payload or TASKS).encode("utf-8"))
+        self.agent.start(payload or TASKS, json.dumps(payload or TASKS).encode("utf-8"))
+        self.agent.process({"type": "human_op", "action": "approve"})
+        return self.agent.snapshot()
 
     def actions(self):
         return [event["action"] for event in self.agent.log]

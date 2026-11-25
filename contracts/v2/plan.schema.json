@@ -22,7 +22,8 @@
       "minimum": 1
     },
     "spec_ref": {
-      "type": "object",
+      "type": ["object", "null"],
+      "description": "由规格生成的计划引用对应的规格版本；直接从任务清单启动时为 null",
       "additionalProperties": false,
       "required": [
         "spec_id",
