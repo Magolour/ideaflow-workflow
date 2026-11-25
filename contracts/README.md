@@ -66,13 +66,13 @@ python -m unittest discover -s tests -v
 | 任务失败开门后实例状态：应保持 `waiting_human` 还是转 `blocked`（待团队定口径） | `openapi.yaml` 的 `Progress.status` | 编排器（成员 4） |
 | 一句话到交付的完整链路（桥 + spec 入口 + 执行闭环） | `openapi.yaml` 的 `/api/start` | 成员 1/4 |
 | 计划评审：模块覆盖、任务粒度、依赖合法性与成环 | 新增 `plan_review.review_plan(spec, plan)` | 编排器（成员 4） |
-| 需求归纳：把讨论结论整理成功能清单 `features.json` | `features.schema.json` | 需求模块（成员 2/3） |
 
-共 17 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`tests/test_plan_review.py` 5 条、`tests/test_feature_synthesis.py` 5 条。
+共 12 条：`tests/test_api_gaps.py` 4 条、`tests/test_scheduling.py` 2 条、`tests/test_failure.py` 1 条、`tests/test_plan_review.py` 5 条。
 
 已解除挂起（断言现在生效，改坏了会红）：
 想法入口经规格、`/api/start` 接受 `spec.json`、`/api/progress` 返回 `decisions`、
-计划来源透传、计划自带 `depends_on` 时不再调模型、讨论阶段接入规格。
+计划来源透传、计划自带 `depends_on` 时不再调模型、讨论阶段接入规格、
+需求归纳（功能清单生成、命名、来源、模块与功能对应）。
 
 退回规格/计划暂不写断言：入口与状态转移未定义，等成员 1 定完再补。
 
