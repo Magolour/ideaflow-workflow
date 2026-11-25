@@ -47,6 +47,11 @@ def deadline_days(text: str) -> int | None:
     return amount
 
 
+def replace_deadline(text: str, days: int) -> str:
+    """替换期限片段，保留同一条约束里的其余内容。"""
+    return _DEADLINE.sub(f"{days} 天", text, count=1)
+
+
 def headcount(text: str) -> int | None:
     """“只有两名开发”“2 人” → 2。"""
     match = _HEADCOUNT.search(text)

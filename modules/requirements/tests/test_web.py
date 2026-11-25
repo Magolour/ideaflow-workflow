@@ -221,7 +221,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(result["status"], "awaiting_human")
         self.assertEqual([row["spec_version"] for row in result["audits"]], [1, 2])
         self.assertEqual(len(result["revisions"]), 1)
-        self.assertEqual(result["question"]["id"], "HUMAN-Q-01")
+        self.assertRegex(result["question"]["id"], r"^HUMAN-Q-[0-9a-f]{12}$")
         self.assertEqual(len(result["drafts"]), 2)
         self.assertEqual(result["ai_calls"], 0)
 
@@ -241,10 +241,16 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(payload["hash"], result["spec"]["hash"])
         self.assertEqual(payload["artifacts"]["markdown"], result["files"]["markdown"])
 
+        status, _, body = self.get(f"/api/download?run_id={run_id}&artifact=spec-input")
+        self.assertEqual(status, 200)
+        pure = json.loads(body)
+        self.assertNotIn("artifacts", pure)
+        self.assertEqual(pure["review"]["question"]["id"], result["question"]["id"])
+
         status, _, body = self.get(
             f"/api/download?run_id={run_id}&artifact=question")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)["id"], "HUMAN-Q-01")
+        self.assertEqual(json.loads(body)["id"], result["question"]["id"])
 
         status, body = self.post("/api/generate", {"flow": "spec",
                                                    "case": "campus-books-tight"})
