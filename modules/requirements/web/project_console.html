@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IdeaFlow · 需求控制台</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#0e1116; --panel:#161a22; --panel2:#1d222c; --line:#2a3140;
+    --text:#e6eaf2; --muted:#96a0b5; --accent:#7aa2f7; --ok:#63c98b;
+    --warn:#e0a94a; --bad:#ee6a6a; --chip:#252c39;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  header{padding:16px 22px 10px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#151a23,#0e1116)}
+  h1{margin:0 0 2px;font-size:18px}
+  .sub{color:var(--muted);font-size:12.5px}
+  main{max-width:1500px;margin:0 auto;padding:16px 22px 60px}
+  .drop{display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;
+    border:1px dashed #3a4458;border-radius:10px;padding:14px 16px;background:var(--panel)}
+  .drop.over{border-color:var(--accent);background:#182033}
+  button,.file-btn{background:#24304a;color:var(--text);border:1px solid #34405c;border-radius:7px;
+    padding:7px 12px;cursor:pointer;font-size:13px}
+  button:hover,.file-btn:hover{border-color:var(--accent)}
+  button.active{background:#2c3d60;border-color:var(--accent)}
+  input[type=file]{display:none}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 12px}
+  .tab{padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;color:var(--muted)}
+  .tab.active{color:var(--text);border-color:var(--accent);background:#1c2740}
+  .metrics{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+  .metric{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 13px;min-width:104px}
+  .metric b{display:block;font-size:19px}
+  .metric span{color:var(--muted);font-size:12px}
+  h2{font-size:15px;margin:16px 0 8px}
+  h3{font-size:13.5px;margin:12px 0 6px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line)}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:12.8px}
+  th{color:var(--muted);font-weight:500;background:#141922}
+  tr:last-child td{border-bottom:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:11px}
+  .claim{background:var(--panel2);border:1px solid #27303f;border-radius:8px;padding:9px;margin-bottom:8px;cursor:pointer}
+  .claim:hover{border-color:#3b4a66}
+  .claim.selected{border-color:var(--accent);background:#1b2436}
+  .id{color:var(--accent);font-size:12px;font-weight:600}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:999px;padding:0 8px;font-size:11px;margin:2px 4px 2px 0}
+  .chip.must{color:#ffb4b4;background:#3a2022}
+  .obj{margin-top:7px;border-left:3px solid var(--warn);background:#211e18;padding:7px 8px;border-radius:0 6px 6px 0;font-size:12.5px}
+  .obj.blocking{border-left-color:var(--bad);background:#241a1c}
+  .consensus{padding:9px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+  .consensus.ok{border-color:#2f5d3a} .consensus.warn{border-color:#5c4a24} .consensus.bad{border-color:#5c2b2b}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .toolbar input,.toolbar select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 9px}
+  .empty{color:var(--muted);padding:12px;border:1px dashed var(--line);border-radius:8px}
+  .graph-wrap{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px;overflow:auto}
+  svg{display:block;min-width:900px}
+  .node rect{fill:#1b2230;stroke:#3a4a66;stroke-width:1;rx:7}
+  .node.claim rect{stroke:#3c5b8a}
+  .node.feature rect{stroke:#3f6b4f}
+  .node.module rect{stroke:#7a5a3a}
+  .node text{fill:#dce4f2;font-size:11.5px}
+  .node .sub{fill:#8e9bb2;font-size:10px}
+  .node.selected rect{stroke:var(--accent);stroke-width:2}
+  .edge{stroke:#48566e;stroke-width:1.2;fill:none}
+  .edge.hi{stroke:var(--accent);stroke-width:2}
+  .timeline{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .event{display:grid;grid-template-columns:56px 140px 1fr;gap:8px;padding:6px 9px;border-bottom:1px solid #202633;font-size:12.5px}
+  .event:last-child{border-bottom:none}
+  .event .seq{color:var(--muted)} .event .actor{color:#a8b7d6}
+  .split{display:grid;grid-template-columns:1.4fr .6fr;gap:12px}
+  @media(max-width:1000px){.split{grid-template-columns:1fr}}
+  .detail{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px;min-height:100px}
+  .detail h4{margin:0 0 6px;font-size:13px}
+  .pill{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;background:var(--chip);color:var(--muted)}
+  .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <h1>IdeaFlow · 需求控制台</h1>
+  <div class="sub">拖入一次运行的 blackboard.json / features.json / spec.json / events.jsonl，按讨论、追溯、规格、时间线查看。</div>
+</header>
+<main>
+  <div class="drop" id="drop">
+    <div><strong>拖入运行产物</strong><div class="sub">可多选；只拖 blackboard 也能看讨论</div></div>
+    <div class="toolbar">
+      <label class="file-btn">选择文件<input type="file" id="files" multiple accept=".json,.jsonl,.txt"></label>
+      <button id="demo">载入示例</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="discussion">讨论</button>
+    <button class="tab" data-tab="trace">追溯</button>
+    <button class="tab" data-tab="spec">规格</button>
+    <button class="tab" data-tab="timeline">时间线</button>
+    <button class="tab" data-tab="todos">待办</button>
+  </div>
+
+  <div id="view"></div>
+</main>
+
+<script>
+const ROLE_ORDER=["ba","user","tech","innovation","risk","skeptic"];
+const ROLE_NAMES={ba:"需求分析",user:"用户视角",tech:"技术专家",innovation:"创新顾问",risk:"风险评估",skeptic:"质疑者",synthesizer:"记录员",host:"主持人",human:"人工"};
+const STANCE={agree:"赞同",conditional:"有条件赞同",oppose:"反对",unreviewed:"未评审"};
+const EVIDENCE={fact:"事实",rule:"规则",value:"价值",assumption:"假设"};
+const VERDICT={preserved:"保留",deferred:"延期",omitted:"遗漏",distorted:"歪曲"};
+
+let state={board:null,features:null,spec:null,events:[]};
+let tab="overview";
+let selectedNode=null;
+let q="";
+
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const roleName=id=>ROLE_NAMES[id]||id||"—";
+const fmt=v=>Array.isArray(v)?v.join("、"):(v??"—");
+
+function board(){return state.board||{}}
+function spec(){return state.spec||{}}
+function featureRows(){return state.features?.features||[]}
+function claims(){return board().claims||[]}
+function objections(){return board().objections||[]}
+
+function countBy(rows,key){return rows.reduce((a,r)=>{const v=r[key]??"unknown";a[v]=(a[v]||0)+1;return a},{})}
+
+async function loadFiles(list){
+  for(const f of list){
+    const text=await f.text();
+    if(f.name.endsWith(".jsonl")||f.name.includes("events")){
+      state.events=parseEvents(text);
+    }else{
+      const data=JSON.parse(text);
+      if(Array.isArray(data)) state.events=data;
+      else if(data.claims) state.board=data;
+      else if(data.features) state.features=data;
+      else if(data.modules&&data.spec_id) state.spec=data;
+    }
+  }
+  render();
+}
+function parseEvents(text){return text.split(/\r?\n/).filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean)}
+
+function analyze(){
+  const b=board(), s=spec();
+  const blocking=objections().filter(o=>o.severity==="blocking"&&o.status!=="closed");
+  const openQ=(b.open_questions||[]).filter(q=>q.blocking&&!q.resolution);
+  const inferred=featureRows().filter(f=>f.inferred);
+  const unmatched=featureRows().filter(f=>!(f.source_refs||[]).some(r=>String(r).startsWith("R-")));
+  const noEstimate=(s.modules||[]).filter(m=>m.estimate_days==null);
+  return {blocking,openQ,inferred,unmatched,noEstimate};
+}
+
+function render(){
+  if(!state.board&&!state.spec) return;
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  const fn={overview:renderOverview,discussion:renderDiscussion,trace:renderTrace,spec:renderSpec,timeline:renderTimeline,todos:renderTodos}[tab];
+  if(fn) $("view").innerHTML=fn();
+  if(tab==="trace") drawTrace();
+  if(tab==="discussion") bindDiscussion();
+}
+
+function metric(v,l){return `<div class="metric"><b>${esc(v)}</b><span>${esc(l)}</span></div>`}
+
+function renderOverview(){
+  const b=board(), s=spec(), a=analyze();
+  const consensus=b.consensus||{};
+  const stateName=consensus.state||s.status||"unknown";
+  const tone=stateName==="consensus"||stateName==="confirmed"?"ok":stateName==="no_consensus"||stateName==="awaiting_human"?"bad":"warn";
+  const term=b.termination||{};
+  return `
+  <div class="consensus ${tone}">
+    <strong>${esc(consensus.label||stateName)}</strong>
+    <span class="muted">｜ ${esc(consensus.reason||s.status||"")}</span>
+    <div class="small muted">终止：${esc(term.label||term.reason||"未记录")} ｜ 想法：${esc(b.idea||s.snapshot_ref?.snapshot_id||"—")}</div>
+  </div>
+  <div class="metrics">
+    ${metric(claims().length,"主张")}
+    ${metric(objections().length,"异议")}
+    ${metric(a.blocking.length,"阻断异议")}
+    ${metric(featureRows().length,"功能")}
+    ${metric((s.modules||[]).length,"模块")}
+    ${metric((s.acceptance||[]).length,"验收")}
+    ${metric((s.open_items||[]).length+a.openQ.length,"待确认")}
+    ${metric(state.events.length,"事件")}
+  </div>
+  <div class="split">
+    <div class="card"><h3>当前状态</h3>
+      <table><tbody>
+        <tr><th>讨论轮次</th><td>${esc(b.round??"—")}</td><th>规格版本</th><td>${esc(s.version??"—")}</td></tr>
+        <tr><th>规格状态</th><td>${esc(s.status??"—")}</td><th>基线草案</th><td>${esc(s.base_draft??"—")}</td></tr>
+        <tr><th>功能来源</th><td>${featureRows().filter(f=>f.source_refs?.length).length}/${featureRows().length}</td><th>缺失估算</th><td>${a.noEstimate.length}</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card"><h3>提示</h3>
+      ${a.blocking.length?`<div class="small" style="color:var(--bad)">有 ${a.blocking.length} 条阻断异议未解决</div>`:""}
+      ${a.unmatched.length?`<div class="small" style="color:var(--warn)">${a.unmatched.length} 条功能未映射到 R 编号</div>`:""}
+      ${a.noEstimate.length?`<div class="small" style="color:var(--warn)">${a.noEstimate.length} 个模块缺估算</div>`:""}
+      ${!a.blocking.length&&!a.unmatched.length&&!a.noEstimate.length?`<div class="small muted">没有明显缺口</div>`:""}
+    </div>
+  </div>`;
+}
+
+function renderDiscussion(){
+  const cs=claims().filter(c=>{
+    if(!q) return true;
+    return [c.id,c.text,c.reason,c.role].some(v=>String(v||"").toLowerCase().includes(q));
+  });
+  const byTarget={};
+  objections().forEach(o=>{(byTarget[o.target]||=[]).push(o)});
+  const roles=ROLE_ORDER.filter(r=>claims().some(c=>c.role===r))
+    .concat(Object.keys(countBy(claims(),"role")).filter(r=>!ROLE_ORDER.includes(r)));
+
+  const roleHtml=roles.map(r=>{
+    const own=cs.filter(c=>c.role===r);
+    if(!own.length) return "";
+    return `<div class="card"><h3>${esc(roleName(r))} <span class="muted small">${own.length} 条</span></h3>
+      ${own.map(c=>`<div class="claim" data-claim="${esc(c.id)}">
+        <div class="id">${esc(c.id)} <span class="chip">${esc(EVIDENCE[c.evidence]||c.evidence||"")}</span></div>
+        <div>${esc(c.text||"")}</div>
+        <div class="small muted">${esc(c.reason||"")}</div>
+        ${(byTarget[c.id]||[]).map(o=>`<div class="obj ${o.severity==="blocking"?"blocking":""}">
+          <b>${esc(o.id)}</b> · ${esc(roleName(o.role))} · ${esc(o.severity||"")}
+          <div>${esc(o.text||"")}</div>
+          <div class="small muted">${o.response?`回应 ${esc(roleName(o.response.role))} · ${esc(STANCE[o.response.position]||o.response.position)}：${esc(o.response.argument||"")}`:"未回应"}</div>
+        </div>`).join("")}
+      </div>`).join("")}
+    </div>`;
+  }).join("");
+
+  return `<div class="toolbar">
+    <input id="q" placeholder="搜索主张 / 异议 / 角色" value="${esc(q)}" style="min-width:260px">
+    <span class="muted small">${cs.length}/${claims().length} 条主张</span>
+  </div>
+  <div class="grid">${roleHtml||'<div class="empty">没有符合条件的主张</div>'}</div>`;
+}
+
+function bindDiscussion(){
+  const input=$("q");
+  if(input) input.addEventListener("input",e=>{q=e.target.value.trim().toLowerCase();$("view").innerHTML=renderDiscussion();bindDiscussion()});
+  document.querySelectorAll(".claim").forEach(node=>node.addEventListener("click",()=>node.classList.toggle("selected")));
+}
+
+function traceNodes(){
+  const cs=claims().slice(0,18);
+  const fs=featureRows();
+  const ms=spec().modules||[];
+  return {claims:cs,features:fs,modules:ms};
+}
+
+function renderTrace(){
+  const {claims:cs,features:fs,modules:ms}=traceNodes();
+  if(!cs.length&&!fs.length&&!ms.length) return '<div class="empty">至少拖入 blackboard.json 或 features.json / spec.json</div>';
+  return `<div class="split">
+    <div class="graph-wrap"><svg id="traceSvg" width="1180" height="620"></svg></div>
+    <div class="detail" id="traceDetail"><h4>追溯链</h4>
+      <div class="small muted">主张 CLM → 功能 F → 模块 M。点击节点查看来源。</div>
+      <div class="small" style="margin-top:8px">虚线表示来源引用；节点颜色区分类型。</div>
+    </div>
+  </div>
+  <div class="small muted" style="margin-top:6px">提示：功能只引用 CLM/OPT 时不会出现 R 节点，属正常；在规格里会进待确认。</div>`;
+}
+
+function drawTrace(){
+  const svg=$("traceSvg"); if(!svg) return;
+  const {claims:cs,features:fs,modules:ms}=traceNodes();
+  const W=1180,H=620,NW=190,NH=40;
+  const cols=[cs,fs,ms].filter(c=>c.length);
+  const x=[60,470,860];
+  const yFor=(i,n)=>36+ (H-80)* (n===1?0.5:i/(n-1));
+  const pos={};
+  const put=(id,cx,cy,kind,label,sub)=>{
+    pos[id]={x:cx,y:cy,kind,label,sub};
+  };
+  cs.forEach((c,i)=>put(c.id,x[0],yFor(i,cs.length),"claim",c.id,c.text));
+  fs.forEach((f,i)=>put(f.id||f.name,x[1],yFor(i,fs.length),"feature",f.id||"F",f.name));
+  ms.forEach((m,i)=>put(m.id,x[2],yFor(i,ms.length),"module",m.id,m.name));
+
+  const edges=[];
+  fs.forEach(f=>{
+    (f.source_refs||[]).forEach(ref=>{if(pos[ref]) edges.push([ref,f.id||f.name,true])});
+  });
+  ms.forEach(m=>{
+    const f=fs.find(x=>x.name===m.name)||fs.find(x=>(x.source_refs||[]).some(r=>(m.requirement_ids||[]).includes(r)));
+    if(f) edges.push([f.id||f.name,m.id,false]);
+  });
+
+  let html="";
+  edges.forEach(([a,b,dashed])=>{
+    const p=pos[a],q2=pos[b]; if(!p||!q2) return;
+    html+=`<path class="edge" data-from="${esc(a)}" data-to="${esc(b)}" d="M ${p.x+NW} ${p.y+NH/2} C ${p.x+NW+40} ${p.y+NH/2}, ${q2.x-40} ${q2.y+NH/2}, ${q2.x} ${q2.y+NH/2}" ${dashed?'stroke-dasharray="4 4"':''}/>`;
+  });
+  Object.entries(pos).forEach(([id,p])=>{
+    const cls=`node ${p.kind} ${selectedNode===id?"selected":""}`;
+    html+=`<g class="${cls}" data-node="${esc(id)}" transform="translate(${p.x},${p.y})">
+      <rect width="${NW}" height="${NH}" rx="7"></rect>
+      <text x="10" y="17">${esc(p.label)}</text>
+      <text class="sub" x="10" y="32">${esc(String(p.sub||"").slice(0,26))}</text>
+    </g>`;
+  });
+  svg.innerHTML=html;
+  svg.querySelectorAll(".node").forEach(node=>node.addEventListener("click",()=>{
+    selectedNode=selectedNode===node.dataset.node?null:node.dataset.node;
+    drawTrace(); showNodeDetail(selectedNode);
+  }));
+}
+
+function showNodeDetail(id){
+  if(!id){$("traceDetail").innerHTML='<h4>追溯链</h4><div class="small muted">点击节点查看来源。</div>';return}
+  const c=claims().find(x=>x.id===id);
+  const f=featureRows().find(x=>(x.id||x.name)===id);
+  const m=(spec().modules||[]).find(x=>x.id===id);
+  let html="";
+  if(c) html+=`<h4>${esc(c.id)} · ${esc(roleName(c.role))}</h4><div>${esc(c.text)}</div><div class="small muted">依据：${esc(c.reason||"")}</div>`;
+  if(f) html+=`<h4>${esc(f.id||"")} · ${esc(f.name)}</h4><div>${esc(f.description||"")}</div><div class="small muted">来源：${esc(fmt(f.source_refs))} ｜ 推断：${f.inferred?"是":"否"}</div>`;
+  if(m) html+=`<h4>${esc(m.id)} · ${esc(m.name)}</h4><div>${esc(m.responsibility||"")}</div><div class="small muted">需求：${esc(fmt(m.requirement_ids))} ｜ 估时：${esc(m.estimate_days??"未定")} ｜ 依赖：${esc(fmt(m.depends_on))}</div>`;
+  $("traceDetail").innerHTML=html||'<div class="empty">未找到节点</div>';
+}
+
+function renderSpec(){
+  const s=spec();
+  if(!s.spec_id) return '<div class="empty">拖入 spec.json 查看模块、验收与待确认项。</div>';
+  const mods=(s.modules||[]).map(m=>`<tr>
+    <td>${esc(m.id)}</td><td>${esc(m.name)}</td><td>${esc(fmt(m.requirement_ids))}</td>
+    <td>${esc(m.estimate_days??"null")}</td><td>${esc(fmt(m.depends_on))}</td></tr>`).join("");
+  const acc=(s.acceptance||[]).map(a=>`<tr><td>${esc(a.id)}</td><td>${esc(a.requirement_id)}</td><td>${esc(a.criterion)}</td></tr>`).join("");
+  const open=(s.open_items||[]).map(o=>`<tr><td>${esc(o.id)}</td><td>${esc(o.question)}</td><td>${o.blocking?"阻断":"可延后"}</td></tr>`).join("");
+  return `<div class="metrics">${metric(s.spec_id,"规格")}${metric("v"+s.version,"版本")}${metric(s.status,"状态")}${metric((s.modules||[]).length,"模块")}</div>
+    <h2>模块</h2><table><thead><tr><th>ID</th><th>名称</th><th>需求</th><th>估时</th><th>依赖</th></tr></thead><tbody>${mods||'<tr><td colspan="5">无</td></tr>'}</tbody></table>
+    <h2>验收</h2><table><thead><tr><th>ID</th><th>需求</th><th>判据</th></tr></thead><tbody>${acc||'<tr><td colspan="3">无</td></tr>'}</tbody></table>
+    <h2>待确认</h2><table><thead><tr><th>ID</th><th>问题</th><th>类型</th></tr></thead><tbody>${open||'<tr><td colspan="3">无</td></tr>'}</tbody></table>`;
+}
+
+function renderTimeline(){
+  if(!state.events.length) return '<div class="empty">拖入 events.jsonl 查看时间线。</div>';
+  const rows=state.events.slice(-300).map(e=>`<div class="event">
+    <span class="seq">#${esc(e.seq??"")}</span><span class="actor">${esc(roleName(e.actor))}</span>
+    <span>${esc(e.action||"")} · ${esc(e.detail||"")}</span></div>`).join("");
+  return `<div class="timeline">${rows}</div>`;
+}
+
+function renderTodos(){
+  const a=analyze(), s=spec();
+  const rows=[];
+  (board().open_questions||[]).filter(q=>q.blocking&&!q.resolution).forEach(q=>rows.push(["讨论",q.id,q.text,"阻断"]));
+  (s.open_items||[]).forEach(o=>rows.push(["规格",o.id,o.question,o.blocking?"阻断":"可延后"]));
+  a.unmatched.forEach(f=>rows.push(["功能",f.id||"",`${f.name} 未映射需求`,"待确认"]));
+  a.noEstimate.forEach(m=>rows.push(["模块",m.id,`${m.name} 缺少估算`,"待确认"]));
+  if(!rows.length) return '<div class="empty">没有待办</div>';
+  return `<table><thead><tr><th>来源</th><th>编号</th><th>事项</th><th>类型</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td>${esc(r[3])}</td></tr>`).join("")}
+  </tbody></table>`;
+}
+
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{tab=b.dataset.tab;render()}));
+
+const drop=$("drop");
+drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("over")});
+drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
+drop.addEventListener("drop",e=>{e.preventDefault();drop.classList.remove("over");if(e.dataTransfer.files.length)loadFiles(e.dataTransfer.files)});
+$("files").addEventListener("change",e=>{if(e.target.files.length)loadFiles(e.target.files)});
+document.addEventListener("dragover",e=>e.preventDefault());
+document.addEventListener("drop",e=>e.preventDefault());
+
+$("demo").addEventListener("click",()=>{
+  state.board={
+    idea:"做一个校园二手书交易小程序，学生可以发布、搜索教材并线下交易",
+    round:2,
+    claims:[
+      {id:"CLM-001",role:"ba",evidence:"fact",text:"首版只覆盖发布、搜索、线下交易三条主路径",reason:"原文没有运营与商业化需求"},
+      {id:"CLM-002",role:"user",evidence:"assumption",text:"学生更愿意按课程代码搜索教材",reason:"教材名称容易重名"},
+      {id:"CLM-003",role:"tech",evidence:"rule",text:"首版用现成后端与对象存储即可",reason:"无需自建推荐系统"},
+      {id:"CLM-004",role:"risk",evidence:"assumption",text:"校园内线下交易存在爽约风险",reason:"缺少约束机制"},
+    ],
+    objections:[
+      {id:"OBJ-001",role:"skeptic",target:"CLM-002",severity:"major",status:"open",text:"没有证据表明学生按课程代码搜索",consequence:"搜索设计可能偏离真实习惯",response:{role:"user",position:"conditional",argument:"先做书名与课程代码双字段"}},
+      {id:"OBJ-002",role:"risk",target:"CLM-004",severity:"blocking",status:"open",text:"爽约风险没有兜底",consequence:"交易体验不可控",response:null},
+    ],
+    assumptions:[{id:"ASM-001",text:"校内交易以线下为主"}],
+    options:[],
+    open_questions:[{id:"Q-001",text:"由谁验收首版？",source:"ba",blocking:true,resolution:null}],
+    reviews:[{role:"ba",claim:"CLM-001",verdict:"preserved",note:"已写入决策"}],
+    termination:{label:"存在价值分歧",reason:"value_conflict",stop:true},
+    consensus:{state:"no_consensus",label:"未达成共识",reason:"存在需要真人决定的价值取舍"},
+  };
+  state.features={features:[
+    {id:"F-01",name:"发布教材",description:"填写书名、价格、校区并上传封面",source_refs:["CLM-001"],inferred:true,priority:"high"},
+    {id:"F-02",name:"搜索教材",description:"按书名或课程代码检索",source_refs:["CLM-002"],inferred:true,priority:"high"},
+    {id:"F-03",name:"线下交易",description:"生成交易凭证并记录成交",source_refs:["CLM-001"],inferred:true,priority:"medium"},
+  ]};
+  state.spec={spec_id:"SPEC-001",version:2,status:"awaiting_human",base_draft:"DRAFT-A",
+    modules:[
+      {id:"M-01",name:"发布教材",requirement_ids:["R-01"],estimate_days:2,depends_on:[]},
+      {id:"M-02",name:"搜索教材",requirement_ids:["R-02"],estimate_days:1.8,depends_on:["M-01"]},
+      {id:"M-03",name:"线下交易",requirement_ids:["F-03"],estimate_days:null,depends_on:["M-02"]},
+    ],
+    acceptance:[
+      {id:"ACC-01",requirement_id:"R-01",criterion:"提交后 3 秒内生成记录"},
+      {id:"ACC-02",requirement_id:"R-02",criterion:"按书名或关键词检索，空结果有提示"},
+      {id:"ACC-03",requirement_id:"F-03",criterion:"成交记录可追溯"},
+    ],
+    open_items:[
+      {id:"OPEN-01",question:"功能「线下交易」暂未对应明确需求，是否纳入首版？",blocking:false},
+      {id:"OPEN-02",question:"功能「线下交易」缺少估算，计划评审前补齐",blocking:false},
+    ]};
+  state.events=[
+    {seq:1,actor:"system",action:"run_created",detail:"实例创建"},
+    {seq:2,actor:"ba",action:"claims_written",detail:"提出 2 条主张"},
+    {seq:3,actor:"skeptic",action:"objection_created",detail:"OBJ-001 指向 CLM-002"},
+    {seq:4,actor:"host",action:"round_critique",detail:"第 1 轮新增 2 条异议"},
+  ];
+  tab="overview"; render();
+});
+if (new URLSearchParams(location.search).has("demo")) $("demo").click();
+</script>
+</body>
+</html>
