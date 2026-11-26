@@ -153,8 +153,7 @@ class FixtureContractTest(unittest.TestCase):
         cls.progress = fixture.Fixture().progress()
         openapi = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
         schemas = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
-        for name in ("Progress", "TaskState", "Edge"):
-            schemas[name] = openapi["components"]["schemas"][name]
+        schemas.update(openapi["components"]["schemas"])
         cls.schemas = schemas
         cls.by_file = schemas
 

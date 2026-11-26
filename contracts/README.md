@@ -1,6 +1,7 @@
 # IdeaFlow 公共契约 v2
 
 - 状态：生效（v2.0）。字段变更需先改 schema、样例与断言，再改代码。
+- v2.1 增补（2026-11-26）：任务 `kind`、`evidence` / `summary` 两个 schema、交付三态 `unverified`、`Progress` 的 `mode/phase/plan_review/spec`，以及四个新接口。
 - 原则：贴当前代码，先能产出、能消费；新字段先可选，适配后再转必填。
 
 ## 文件与映射
@@ -17,7 +18,9 @@
 | `artifact.schema.json` | 执行侧产出 | 任务产物：文件、结构化记录或外链 |
 | `delivery.schema.json` | 全部任务终态后生成 | 交付记录：每任务的产物与验收结论，人工确认后实例完成 |
 | `features.schema.json` | 讨论收敛后归纳 | 功能清单（F-xx），模块划分的输入 |
-| `enums.schema.json` | 全组 | 状态、动作、角色、优先级 |
+| `evidence.schema.json` | 执行侧写入 `artifacts/ART-xxxx/evidence.json` | 任务执行证据：命令、退出码、输出摘要、耗时、环境、哈希 |
+| `summary.schema.json` | 终态写 `summary.json`，`GET /api/summary` 读取 | 运行总结：周期、门禁等待、返工、失败、覆盖、未决 |
+| `enums.schema.json` | 全组 | 状态、动作、角色、优先级、任务类型、运行模式 |
 
 ## 已知差异（必须先对齐）
 
@@ -36,7 +39,16 @@
 12. 交付记录的 `plan_id` 可选，兼容旧版任务清单入口的交付记录；
 13. `Progress.spec_version` 取值约定为 `v{spec.version}`（如 v1），跨模块对接口径；
 14. `snapshot` 条目来源新增可选 `actor` / `round`，用于追溯讨论提出者与轮次；
-    讨论补充条目上限为原文条目 3 倍（must 优先保留），防止真实模型把快照撑爆。
+    讨论补充条目上限为原文条目 3 倍（must 优先保留），防止真实模型把快照撑爆；
+15. 模块的 `estimate_days` 允许为 `null`，表示拿不到估算：须同时写入 `open_items`，
+    下游按"缺失"处理（计划评审不报 `TASK_TOO_LARGE`），不得用均摊值冒充估算。
+16. `TaskState.kind` 与 `plan.tasks[].kind` 取值 `code/test/review/doc`，缺省按 `code`；
+    测试任务编号用 `T{n}T`、评审任务用 `T{n}R`，`plan` 的 `task_id` 模式已放宽为 `^T-?\d+[A-Za-z]?$`。
+17. `delivery.items[].acceptance` 增加 `unverified`：没有证据不得判 `passed`；
+    判定优先级为 failed → passed → unverified（见 `evidence.schema.json`）。
+18. `Progress` 新增只读字段 `mode`、`phase`、`plan_review`、`spec`（`edges` 已实现，本版补文档）；
+    新增接口 `PATCH /api/spec/item`、`POST /api/graph/edit`、`GET /api/replay`、`GET /api/summary`，
+    错误体统一为 `{error, message, details}`，错误码大写加下划线。
 
 ## 校验
 

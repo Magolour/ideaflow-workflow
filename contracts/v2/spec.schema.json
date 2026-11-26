@@ -147,7 +147,8 @@
             }
           },
           "estimate_days": {
-            "type": "number"
+            "type": ["number", "null"],
+            "description": "模块估时（天）。null 表示拿不到估算，须同时在 open_items 登记缺失，不得用默认值填充"
           },
           "deliverable": {
             "type": "string"

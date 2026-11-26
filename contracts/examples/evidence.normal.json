@@ -1,0 +1,11 @@
+{
+  "artifact_id": "ART-0001",
+  "task_id": "T2",
+  "kind": "test",
+  "command": "python -m pytest tests/test_listing.py -q",
+  "exit_code": 0,
+  "stdout_tail": "12 passed in 3.4s",
+  "duration_ms": 3400,
+  "environment": "python 3.13 / windows",
+  "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

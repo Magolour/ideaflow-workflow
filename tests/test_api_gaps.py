@@ -97,9 +97,7 @@ class RuntimeProgressContractTest(unittest.TestCase):
         self.out = Path(self.tmp.name)
         openapi = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
         schemas = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
-        schemas["Progress"] = openapi["components"]["schemas"]["Progress"]
-        schemas["TaskState"] = openapi["components"]["schemas"]["TaskState"]
-        schemas["Edge"] = openapi["components"]["schemas"]["Edge"]
+        schemas.update(openapi["components"]["schemas"])
         self.validator = Draft202012Validator(inline(schemas["Progress"], schemas))
 
     def tearDown(self):

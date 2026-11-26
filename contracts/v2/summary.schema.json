@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/summary.schema.json",
+  "title": "运行总结",
+  "description": "终态时由编排器写入 summary.json，GET /api/summary 读同一份文件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "status", "duration", "gate_waits", "rework", "coverage"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "$ref": "enums.schema.json#/$defs/instanceStatus"
+    },
+    "duration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "seconds"],
+      "properties": {
+        "start": {
+          "$ref": "enums.schema.json#/$defs/timestamp"
+        },
+        "end": {
+          "oneOf": [
+            { "$ref": "enums.schema.json#/$defs/timestamp" },
+            { "type": "null" }
+          ]
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "gate_waits": {
+      "type": "array",
+      "description": "每条门禁的等待；仍在等待的记 pending=true",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gate_type", "seconds"],
+        "properties": {
+          "gate_type": {
+            "$ref": "enums.schema.json#/$defs/gateType"
+          },
+          "object_id": { "type": "string" },
+          "seconds": { "type": "number", "minimum": 0 },
+          "actor": { "type": "string" },
+          "decision_id": { "type": "string" },
+          "pending": { "type": "boolean" }
+        }
+      }
+    },
+    "rework": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retries", "returns", "changes"],
+      "properties": {
+        "retries": { "type": "integer", "minimum": 0 },
+        "returns": { "type": "integer", "minimum": 0 },
+        "changes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "code"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "code": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "coverage": {
+      "description": "分母为绑定快照的需求条数；分母为 0 时返回 not_applicable",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirements", "with_module", "with_acceptance", "with_evidence"],
+          "properties": {
+            "requirements": { "type": "integer", "minimum": 0 },
+            "with_module": { "type": "integer", "minimum": 0 },
+            "with_acceptance": { "type": "integer", "minimum": 0 },
+            "with_evidence": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "string",
+          "const": "not_applicable"
+        }
+      ]
+    },
+    "open_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "question"],
+        "properties": {
+          "id": { "type": "string" },
+          "question": { "type": "string" },
+          "blocking": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

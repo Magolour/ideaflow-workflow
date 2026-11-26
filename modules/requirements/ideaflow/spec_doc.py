@@ -101,10 +101,13 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
 
     parts += ["## 4 模块与接口", ""]
     for module in spec.modules:
+        estimate = module.get("estimate_days")
+        estimate_text = (f"估算 {estimate} 天" if isinstance(estimate, (int, float))
+                         else "估算待补")
         parts += [f"### {module['id']} {module['name']}", "",
                   f"对应需求：{'、'.join(module['requirement_ids'])} ｜ "
                   f"决策：{'、'.join(module['decision_ids'])} ｜ "
-                  f"估算 {module['estimate_days']} 天", "",
+                  f"{estimate_text}", "",
                   f"职责：{module['responsibility']}", ""]
         parts += [_table(["接口", "调用方", "入参", "出参"],
                          [[row["name"], row["caller"], row["input"], row["output"]]

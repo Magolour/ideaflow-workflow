@@ -1,0 +1,15 @@
+{
+  "run_id": "INST-2026-0001",
+  "status": "completed",
+  "duration": {
+    "start": "2026-11-26T10:00:00+08:00",
+    "seconds": -5
+  },
+  "gate_waits": [],
+  "rework": {
+    "retries": 0,
+    "returns": 0,
+    "changes": 0
+  },
+  "coverage": "not_applicable"
+}
