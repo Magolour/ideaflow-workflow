@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from plan_adapter import plan_from_spec
+from plan_adapter import plan_from_spec, plan_from_spec_llm
 from spec_gate import SpecGateError, attach_local_review, validate_spec_review
 
 
@@ -110,7 +110,12 @@ def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
     return spec
 
 
-def parse_start(data, requirements_output: Path, list_version: str) -> StartEntry:
+def _build_plan(spec: dict, use_llm: bool) -> dict:
+    return plan_from_spec_llm(spec) if use_llm else plan_from_spec(spec)
+
+
+def parse_start(data, requirements_output: Path, list_version: str,
+                use_llm: bool = False) -> StartEntry:
     spec = None
     requirement = ""
     summary = ""
@@ -120,14 +125,17 @@ def parse_start(data, requirements_output: Path, list_version: str) -> StartEntr
         spec = data
         validate_spec_review(spec)
         try:
-            plan = plan_from_spec(spec)
+            plan = _build_plan(spec, use_llm)
         except ValueError as exc:
             raise ValueError(f"设计规格无法生成计划：{exc}") from None
     elif isinstance(data, dict) and not data.get("tasks"):
         requirement = str(data.get("requirement") or "").strip()
         if requirement:
             spec = requirement_to_spec(requirement, requirements_output)
-            plan = plan_from_spec(spec)
+            try:
+                plan = _build_plan(spec, use_llm)
+            except ValueError as exc:
+                raise ValueError(f"需求规格无法生成计划：{exc}") from None
             summary = f"需求模块生成 {spec['spec_id']} v{spec['version']}"
 
     if plan is not None:

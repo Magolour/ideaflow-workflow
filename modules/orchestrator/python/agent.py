@@ -396,7 +396,8 @@ class RealtimeAgent:
         with self.lock:
             if self.started:
                 raise RuntimeError("实例已启动，不能重复输入任务清单")
-            entry = parse_start(data, self.out_dir / "requirements", self.list_version)
+            entry = parse_start(data, self.out_dir / "requirements", self.list_version,
+                                use_llm=not self.mock)
             tasks, spec_obj = entry.tasks, entry.spec
             spec_version, requirement, pm_summary = entry.spec_version, entry.requirement, entry.summary
             plan_id = entry.plan_id or f"PLAN-{self.instance_id}"
