@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IdeaFlow · 讨论查看器</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a303c;
+    --text: #e6e9ef;
+    --muted: #97a0b3;
+    --accent: #7aa2f7;
+    --ok: #73d13d;
+    --warn: #e6a23c;
+    --bad: #f56c6c;
+    --chip: #262c38;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    padding: 18px 22px 12px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #151922, #0f1115);
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 18px 22px 60px; max-width: 1500px; margin: 0 auto; }
+  .drop {
+    border: 1px dashed #3a4356; border-radius: 10px; padding: 18px;
+    background: var(--panel); display: flex; gap: 14px; align-items: center;
+    justify-content: space-between; flex-wrap: wrap;
+  }
+  .drop.over { border-color: var(--accent); background: #182033; }
+  .drop strong { font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12px; }
+  button, .file-btn {
+    background: #24304a; color: var(--text); border: 1px solid #34405c;
+    border-radius: 7px; padding: 8px 12px; cursor: pointer; font-size: 13px;
+  }
+  button:hover, .file-btn:hover { border-color: var(--accent); }
+  input[type=file] { display: none; }
+  .metrics { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+  .metric {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    padding: 10px 14px; min-width: 110px;
+  }
+  .metric b { display: block; font-size: 20px; line-height: 1.3; }
+  .metric span { color: var(--muted); font-size: 12px; }
+  section { margin-top: 22px; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+  h2 .tag { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .role {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .role h3 { margin: 0; font-size: 14px; display: flex; justify-content: space-between; }
+  .role h3 small { color: var(--muted); font-weight: 400; }
+  .claim {
+    background: var(--panel-2); border: 1px solid #262d3a; border-radius: 8px;
+    padding: 10px;
+  }
+  .claim-id { color: var(--accent); font-size: 12px; font-weight: 600; }
+  .claim p { margin: 4px 0; }
+  .claim .reason { color: var(--muted); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip {
+    background: var(--chip); color: var(--muted); border-radius: 999px;
+    padding: 1px 8px; font-size: 11px;
+  }
+  .chip.blocking { color: #ffb4b4; background: #3a2022; }
+  .chip.major { color: #ffd18a; background: #3a2f1c; }
+  .chip.minor { color: #b9c6dd; }
+  .obj {
+    margin-top: 8px; padding: 8px; border-left: 3px solid var(--warn);
+    background: #201d18; border-radius: 0 6px 6px 0; font-size: 12.5px;
+  }
+  .obj.blocking { border-left-color: var(--bad); background: #241a1c; }
+  .obj .meta { color: var(--muted); }
+  .response { color: #b8c7e6; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; background: #151922; position: sticky; top: 0; }
+  tr:last-child td { border-bottom: none; }
+  .grid2 { display: grid; grid-template-columns: 1.2fr .8fr; gap: 14px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .option {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    padding: 12px; margin-bottom: 10px;
+  }
+  .option h4 { margin: 0 0 6px; font-size: 14px; }
+  .stance { font-weight: 600; }
+  .stance.agree { color: var(--ok); }
+  .stance.conditional { color: var(--warn); }
+  .stance.oppose { color: var(--bad); }
+  .stance.unreviewed { color: var(--muted); }
+  .timeline { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
+  .event { display: grid; grid-template-columns: 54px 150px 1fr; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #202632; font-size: 12.5px; }
+  .event:last-child { border-bottom: none; }
+  .event .seq { color: var(--muted); }
+  .event .actor { color: #a9b8d6; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+  .consensus { padding: 10px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
+  .consensus.ok { border-color: #2f5d34; }
+  .consensus.warn { border-color: #5c4a24; }
+  .consensus.bad { border-color: #5c2b2b; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
+  summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>IdeaFlow · 讨论查看器</h1>
+  <div class="sub">拖入一次运行的 <code>blackboard.json</code>；可选再拖入 <code>events.jsonl</code> 看时间线。纯本地解析，不上传。</div>
+</header>
+<main>
+  <div class="drop" id="drop">
+    <div>
+      <strong>把文件拖到这里</strong>
+      <div class="hint">blackboard.json 必选；events.jsonl 可选；也可以一次多选</div>
+    </div>
+    <div class="toolbar">
+      <label class="file-btn">选择文件<input type="file" id="files" multiple accept=".json,.jsonl,.txt"></label>
+      <button id="demo" type="button">载入内置示例</button>
+    </div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="content"></div>
+</main>
+
+<script>
+const ROLE_ORDER = ["ba", "user", "tech", "innovation", "risk", "skeptic"];
+const ROLE_NAMES = {
+  ba: "需求分析", user: "用户视角", tech: "技术专家",
+  innovation: "创新顾问", risk: "风险评估", skeptic: "质疑者",
+  synthesizer: "记录员/整合者", host: "主持人", human: "人工",
+};
+const EVIDENCE = { fact: "事实", rule: "规则", value: "价值", assumption: "假设" };
+const STANCE = { agree: "赞同", conditional: "有条件赞同", oppose: "反对", unreviewed: "未评审" };
+const VERDICT = { preserved: "保留", deferred: "延期", omitted: "遗漏", distorted: "歪曲" };
+
+let board = null;
+let events = [];
+
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[ch]));
+const roleName = (id) => ROLE_NAMES[id] || id || "未知角色";
+
+function countBy(rows, key) {
+  return rows.reduce((acc, row) => {
+    const value = row[key] ?? "unknown";
+    acc[value] = (acc[value] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+async function readFiles(fileList) {
+  for (const file of fileList) {
+    const text = await file.text();
+    if (file.name.endsWith(".jsonl") || file.name.includes("events")) {
+      events = parseEvents(text);
+    } else {
+      const data = JSON.parse(text);
+      if (Array.isArray(data)) events = data;
+      else board = data;
+    }
+  }
+  render();
+}
+
+function parseEvents(text) {
+  return text.split(/\r?\n/).filter(Boolean).map((line) => {
+    try { return JSON.parse(line); } catch { return null; }
+  }).filter(Boolean);
+}
+
+function render() {
+  if (!board) return;
+  renderSummary();
+  renderRoles();
+  renderObjections();
+  renderOptions();
+  renderQuestions();
+  renderReviews();
+  renderTimeline();
+}
+
+function metric(value, label) {
+  return `<div class="metric"><b>${esc(value)}</b><span>${esc(label)}</span></div>`;
+}
+
+function renderSummary() {
+  const claims = board.claims || [];
+  const objections = board.objections || [];
+  const openObjectives = objections.filter((row) => row.status !== "closed");
+  const blocking = openObjectives.filter((row) => row.severity === "blocking");
+  const consensus = board.consensus || {};
+  const termination = board.termination || {};
+  const state = consensus.state || "unknown";
+  const tone = state === "consensus" ? "ok" : state === "no_consensus" ? "bad" : "warn";
+  const roleCounts = countBy(claims, "role");
+
+  $("summary").innerHTML = `
+    <div class="consensus ${tone}">
+      <strong>${esc(consensus.label || state)}</strong>
+      <span class="muted">｜ ${esc(consensus.reason || "无判定说明")}</span>
+      <div class="hint">终止：${esc(termination.label || termination.reason || "未记录")}
+        ${termination.stop === false ? "（未停止）" : ""}</div>
+    </div>
+    <div class="metrics">
+      ${metric(board.round ?? 0, "讨论轮次")}
+      ${metric(claims.length, "主张")}
+      ${metric(openObjectives.length, "未决异议")}
+      ${metric(blocking.length, "阻断异议")}
+      ${metric((board.assumptions || []).length, "假设")}
+      ${metric((board.options || []).length, "候选方案")}
+      ${metric((board.open_questions || []).filter((q) => q.blocking).length, "阻断问题")}
+      ${metric(Object.keys(roleCounts).length, "参与角色")}
+    </div>
+    <div class="muted" style="margin-top:-6px">想法：${esc(board.idea || "—")}</div>
+  `;
+}
+
+function objectionHtml(row) {
+  const tone = row.severity === "blocking" ? "blocking" : "";
+  const response = row.response
+    ? `<div class="response">↳ ${esc(roleName(row.response.role))} · ${esc(STANCE[row.response.position] || row.response.position)}：${esc(row.response.argument || "")}</div>`
+    : `<div class="response muted">↳ 未回应</div>`;
+  return `<div class="obj ${tone}">
+    <div><b>${esc(row.id)}</b> <span class="meta">${esc(row.severity || "")} · ${esc(row.status || "open")}</span></div>
+    <div>${esc(row.text || "")}</div>
+    ${row.consequence ? `<div class="meta">后果：${esc(row.consequence)}</div>` : ""}
+    ${response}
+  </div>`;
+}
+
+function renderRoles() {
+  const claims = board.claims || [];
+  const objections = board.objections || [];
+  const byTarget = {};
+  objections.forEach((row) => { (byTarget[row.target] ||= []).push(row); });
+
+  const roles = ROLE_ORDER.filter((id) => claims.some((c) => c.role === id))
+    .concat(Object.keys(countBy(claims, "role")).filter((id) => !ROLE_ORDER.includes(id)));
+
+  const html = roles.map((role) => {
+    const own = claims.filter((claim) => claim.role === role);
+    const cards = own.map((claim) => {
+      const linked = (byTarget[claim.id] || []).map(objectionHtml).join("");
+      const assumes = (claim.assumes || []).map((id) => `<span class="chip">${esc(id)}</span>`).join("");
+      return `<div class="claim">
+        <div class="claim-id">${esc(claim.id)} <span class="chip">${esc(EVIDENCE[claim.evidence] || claim.evidence || "")}</span></div>
+        <p>${esc(claim.text || "")}</p>
+        <div class="reason">${esc(claim.reason || "")}</div>
+        ${assumes ? `<div class="chips">${assumes}</div>` : ""}
+        ${linked}
+      </div>`;
+    }).join("");
+    return `<div class="role"><h3>${esc(roleName(role))} <small>${own.length} 条</small></h3>${cards || '<div class="empty">无主张</div>'}</div>`;
+  }).join("");
+
+  $("content").innerHTML = `<section><h2>角色主张 <span class="tag">谁提了什么，被谁反驳</span></h2>
+    <div class="roles">${html || '<div class="empty">没有主张</div>'}</div></section>
+    <div id="rest"></div>`;
+  renderRest();
+}
+
+function renderRest() {
+  const objections = board.objections || [];
+  const rows = objections.map((row) => `<tr>
+    <td>${esc(row.id)}</td>
+    <td>${esc(row.target)}</td>
+    <td>${esc(roleName(row.role))}</td>
+    <td>${esc(row.severity || "")}</td>
+    <td>${esc(row.text || "")}</td>
+    <td>${row.response ? `${esc(roleName(row.response.role))} · ${esc(STANCE[row.response.position] || row.response.position)}` : '<span class="muted">未回应</span>'}</td>
+  </tr>`).join("");
+
+  const options = board.options || [];
+  const stances = board.stances || {};
+  const optionHtml = options.map((option) => {
+    const reasons = option.stance_reasons || {};
+    const matrix = ROLE_ORDER.map((role) => {
+      const cell = reasons[role] || {};
+      const stance = cell.stance || (stances[role] || {})[option.id] || "unreviewed";
+      return `<tr><td>${esc(roleName(role))}</td>
+        <td class="stance ${esc(stance)}">${esc(STANCE[stance] || stance)}</td>
+        <td>${esc(cell.reason || "—")}</td>
+        <td>${esc(cell.condition || "—")}</td></tr>`;
+    }).join("");
+    return `<div class="option">
+      <h4>${esc(option.id)} · ${esc(option.name || "")}</h4>
+      <div class="chips">${(option.scope || []).map((item) => `<span class="chip">${esc(item)}</span>`).join("")}</div>
+      <div class="muted" style="margin:6px 0">成本 ${esc(option.cost_days || "—")} ｜ 风险 ${esc(option.risk || "—")} ｜ ${esc(option.tradeoffs || "")}</div>
+      <table><thead><tr><th>角色</th><th>立场</th><th>理由</th><th>条件</th></tr></thead><tbody>${matrix}</tbody></table>
+    </div>`;
+  }).join("");
+
+  const questions = (board.open_questions || []).map((row) => `<tr>
+    <td>${esc(row.id)}</td><td>${esc(row.text)}</td>
+    <td>${row.blocking ? "阻断" : "可延后"}</td>
+    <td>${esc(roleName(row.source))}</td>
+    <td>${esc(row.resolution || "未解决")}</td></tr>`).join("");
+
+  const reviews = board.reviews || [];
+  const verdicts = countBy(reviews, "verdict");
+  const reviewRows = reviews.filter((row) => row.verdict !== "preserved").map((row) => `<tr>
+    <td>${esc(roleName(row.role))}</td><td>${esc(row.claim)}</td>
+    <td>${esc(VERDICT[row.verdict] || row.verdict)}</td><td>${esc(row.note || "")}</td></tr>`).join("");
+
+  $("rest").innerHTML = `
+    <section><h2>异议与回应 <span class="tag">${objections.length} 条</span></h2>
+      ${rows ? `<table><thead><tr><th>异议</th><th>指向</th><th>提出者</th><th>严重度</th><th>内容</th><th>回应</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">没有异议</div>'}
+    </section>
+    <section><h2>候选方案与立场 <span class="tag">未评审不算支持</span></h2>
+      <div class="grid2"><div>${optionHtml || '<div class="empty">没有候选方案</div>'}</div>
+      <div><div class="option"><h4>待澄清</h4>${questions ? `<table><thead><tr><th>编号</th><th>问题</th><th>类型</th><th>来源</th><th>答复</th></tr></thead><tbody>${questions}</tbody></table>` : '<div class="empty">没有待澄清问题</div>'}</div></div></div>
+    </section>
+    <section><h2>整合复核 <span class="tag">${esc(Object.entries(verdicts).map(([k, v]) => `${VERDICT[k] || k} ${v}`).join(" · ") || "无记录")}</span></h2>
+      <details><summary>查看非“保留”的复核记录</summary>
+        ${reviewRows ? `<table><thead><tr><th>复核角色</th><th>主张</th><th>结论</th><th>说明</th></tr></thead><tbody>${reviewRows}</tbody></table>` : '<div class="empty">全部保留，或没有复核记录</div>'}
+      </details>
+    </section>
+    <section><h2>时间线 <span class="tag">${events.length ? events.length + " 条事件" : "未加载 events.jsonl"}</span></h2>
+      <div id="timeline">${events.length ? "" : '<div class="empty">把同一运行的 events.jsonl 一起拖进来，可看逐阶段事件。</div>'}</div>
+    </section>`;
+  renderTimeline();
+}
+
+function renderObjections() {}
+function renderOptions() {}
+function renderQuestions() {}
+function renderReviews() {}
+
+function renderTimeline() {
+  const holder = $("timeline");
+  if (!holder || !events.length) return;
+  const rows = events.slice(-200).map((event) => `<div class="event">
+    <span class="seq">#${esc(event.seq ?? "")}</span>
+    <span class="actor">${esc(roleName(event.actor))}</span>
+    <span>${esc(event.action || "")} · ${esc(event.detail || "")}</span>
+  </div>`).join("");
+  holder.innerHTML = `<div class="timeline">${rows}</div>`;
+}
+
+const drop = $("drop");
+drop.addEventListener("dragover", (event) => { event.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (event) => {
+  event.preventDefault(); drop.classList.remove("over");
+  if (event.dataTransfer.files.length) readFiles(event.dataTransfer.files);
+});
+$("files").addEventListener("change", (event) => {
+  if (event.target.files.length) readFiles(event.target.files);
+});
+
+$("demo").addEventListener("click", () => {
+  board = {
+    idea: "做一个校园二手书交易小程序，学生可以发布、搜索教材并线下交易",
+    round: 2, claims: [
+      { id: "CLM-001", role: "ba", evidence: "fact", text: "首版应只覆盖发布、搜索、线下交易三条主路径", reason: "原始描述没有运营与商业化需求" },
+      { id: "CLM-002", role: "user", evidence: "assumption", text: "学生更愿意按课程代码搜索教材", reason: "教材名称容易重名" },
+      { id: "CLM-003", role: "tech", evidence: "rule", text: "首版用现成后端与对象存储即可", reason: "无需自建推荐系统" },
+    ],
+    objections: [
+      { id: "OBJ-001", role: "skeptic", target: "CLM-002", severity: "major", status: "open", text: "没有证据表明学生按课程代码搜索", consequence: "搜索设计可能偏离真实习惯", response: { role: "user", position: "conditional", argument: "先做书名与课程代码双字段", evidence: "assumption" } },
+    ],
+    assumptions: [{ id: "ASM-001", text: "校内交易以线下为主" }],
+    options: [{ id: "OPT-A", name: "最小闭环", scope: ["发布", "搜索", "线下交易"], cost_days: "8-12", risk: "低", tradeoffs: "功能少，反馈快", stance_reasons: { ba: { stance: "agree", reason: "范围可控", condition: "" }, user: { stance: "conditional", reason: "需保留搜索", condition: "双字段搜索" }, tech: { stance: "agree", reason: "风险低", condition: "" }, innovation: { stance: "oppose", reason: "缺少差异化", condition: "" }, risk: { stance: "conditional", reason: "需合规检查", condition: "上线前完成" }, skeptic: { stance: "conditional", reason: "供给未验证", condition: "先访谈" } } }],
+    stances: {},
+    open_questions: [{ id: "Q-001", text: "由谁验收首版？", source: "ba", blocking: true, resolution: null }],
+    reviews: [{ role: "ba", claim: "CLM-001", verdict: "preserved", note: "已写入决策" }],
+    termination: { label: "存在 1 条价值分歧", reason: "value_conflict", stop: true },
+    consensus: { state: "no_consensus", label: "未达成共识", reason: "存在需要真人决定的价值取舍" },
+  };
+  events = [
+    { seq: 1, actor: "system", action: "run_created", detail: "实例创建" },
+    { seq: 2, actor: "ba", action: "clarify_questions", detail: "提出 1 个阻断问题" },
+    { seq: 3, actor: "skeptic", action: "objection_created", detail: "OBJ-001 指向 CLM-002" },
+  ];
+  render();
+});
+</script>
+</body>
+</html>
