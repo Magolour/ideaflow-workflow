@@ -5,24 +5,20 @@
     py -3 plan_adapter.py spec.json --out output/plan_sample --llm   # 调模型拆任务
 
 两种模式：
-- 默认：按模块确定性拆解，模块超过 3 天或含多个接口/验收项/写路径时拆成多个任务；
-- --llm：把规格交给模型，拆出更细的任务清单（仍必须覆盖所有模块、依赖合法、无环、工期不超预算）。
+- 默认：确定性映射，1 个模块 -> 1 个任务；
+- --llm：把规格交给模型，拆出更细的任务清单（仍必须覆盖所有模块、依赖合法、无环）。
 生成的 plan.json 可直接 POST 给编排器 /api/start。
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-
-MAX_TASK_DAYS = 3.0
-MIN_TASK_DAYS = 0.5
 
 FALLBACK_STATUS = {401, 403, 404, 408, 409, 429}
 
@@ -101,80 +97,194 @@ def _now() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
-def _interface_label(interface) -> str:
-    if isinstance(interface, dict):
-        for key in ("name", "id", "path", "summary"):
-            value = interface.get(key)
-            if value:
-                return str(value).strip()
-        return ""
-    return str(interface).strip()
+MAX_PART_DAYS = 3.0
+MIN_PART_DAYS = 0.5
 
 
-def _distribute_days(total: float, parts: int) -> list[float]:
-    if parts <= 1:
-        return [round(total, 2)]
-    base = round(total / parts, 2)
-    return [base] * (parts - 1) + [round(total - base * (parts - 1), 2)]
+# 触发拆分的最低阈值：接口数≥4 或 验收项≥4 或 写路径≥4，即使工期≤3d 也拆
+SPLIT_MIN_INTERFACES = 4
+SPLIT_MIN_ACCEPTANCE = 4
+SPLIT_MIN_WRITE_PATHS = 4
 
 
 def _split_parts(module: dict) -> list[dict]:
-    """把一个模块拆成若干任务片段，保证每段工期落在 [0.5, 3] 天。"""
-    name = str(module.get("name") or "模块")
-    days = module.get("estimate_days")
-    total = float(days) if isinstance(days, (int, float)) and days >= MIN_TASK_DAYS else None
-    acceptance = [str(item) for item in module.get("acceptance_items") or []
-                  if str(item).strip()]
-    paths = [str(item) for item in module.get("write_paths") or [] if str(item).strip()]
-    interfaces = [label for label in
-                  (_interface_label(item) for item in module.get("interfaces") or []) if label]
+    """把一个模块拆成若干段，每段 ≤ 3 天，接口数均分。
 
-    if total is None:
-        return [{"name": name, "acceptance_items": acceptance or ["验收通过"],
-                 "write_paths": paths, "estimate_days": None}]
+    规则：
+      - 工期 > 3d → 强制拆分（每段 ≤ 3d）
+      - 接口 ≥ 4 → 按接口数均分（最多 4 段，每段 ≥ 0.5d）
+      - 验收 ≥ 4 / 路径 ≥ 4 → 同理
+      - 全部不满足 → 单段
+    """
+    total_days = float(module.get("estimate_days") or 1.0)
+    interfaces = module.get("interfaces") or []
+    acceptance = module.get("acceptance_items") or []
+    write_paths = module.get("write_paths") or []
 
-    days_parts = max(1, math.ceil(total / MAX_TASK_DAYS))
-    interface_parts = (len(interfaces) if len(interfaces) >= 2
-                       and total / len(interfaces) >= MIN_TASK_DAYS else 1)
-    acceptance_parts = (len(acceptance) if len(acceptance) >= 2
-                        and total / len(acceptance) >= MIN_TASK_DAYS else 1)
-    path_parts = (len(paths) if len(paths) >= 2
-                  and total / len(paths) >= MIN_TASK_DAYS else 1)
-    parts = max(days_parts, interface_parts, acceptance_parts, path_parts)
+    MAX_PARTS = 4  # 最多拆 4 段，再多没意义
+    PART_DAYS_MIN = 0.5
+    PART_DAYS_MAX = 3.0
 
-    if parts <= 1:
-        return [{"name": name, "acceptance_items": acceptance or ["验收通过"],
-                 "write_paths": paths, "estimate_days": total}]
+    big_by_days = total_days > PART_DAYS_MAX
+    big_by_if = len(interfaces) >= 4
+    big_by_ac = len(acceptance) >= 4
+    big_by_path = len(write_paths) >= 4
 
-    estimates = _distribute_days(total, parts)
-    if interface_parts == parts:
-        labels = [f"{name}：{item}" for item in interfaces]
-        part_acceptance = [list(acceptance or ["验收通过"]) for _ in range(parts)]
-        part_paths = [list(paths) for _ in range(parts)]
-    elif acceptance_parts == parts:
-        labels = [f"{name}：{item}" for item in acceptance]
-        part_acceptance = [[item] for item in acceptance]
-        part_paths = [list(paths) for _ in range(parts)]
-    elif path_parts == parts:
-        labels = [f"{name}：{Path(item).name or item}" for item in paths]
-        part_acceptance = [list(acceptance or ["验收通过"]) for _ in range(parts)]
-        part_paths = [[item] for item in paths]
-    else:
-        labels = [f"{name}（{index}/{parts}）" for index in range(1, parts + 1)]
-        part_acceptance = [list(acceptance or ["验收通过"]) for _ in range(parts)]
-        part_paths = [list(paths) for _ in range(parts)]
+    # 完全没触发 → 单段返回
+    if not (big_by_days or big_by_if or big_by_ac or big_by_path):
+        return [_make_part("", interfaces, acceptance, write_paths, total_days)]
 
-    return [{"name": labels[index], "acceptance_items": part_acceptance[index],
-             "write_paths": part_paths[index], "estimate_days": estimates[index]}
-            for index in range(parts)]
+    # 各维度各自建议的段数
+    # 工期约束：每段 ≤ 3d
+    parts_by_days = max(1, int((total_days + PART_DAYS_MAX - 0.1) / PART_DAYS_MAX))
+    parts_by_days = min(parts_by_days, MAX_PARTS)
+
+    # 接口约束：13 接口 → 4 段（每段 3-4 个），不是 13 段
+    parts_by_if = max(1, min(MAX_PARTS, len(interfaces) // 3 + (1 if len(interfaces) % 3 else 0))) if big_by_if else 1
+    parts_by_ac = max(1, min(MAX_PARTS, len(acceptance) // 3 + (1 if len(acceptance) % 3 else 0))) if big_by_ac else 1
+    parts_by_path = max(1, min(MAX_PARTS, len(write_paths) // 3 + (1 if len(write_paths) % 3 else 0))) if big_by_path else 1
+
+    # 组合：取所有触发条件里的最大值（接口多就多拆）
+    all = [parts_by_days, parts_by_if, parts_by_ac, parts_by_path]
+    needed = max(all)
+
+    # 硬约束：工期强制拆分时不超 parts_by_days
+    if big_by_days:
+        needed = min(needed, parts_by_days)
+
+    # 防碎：每段至少 0.5d
+    if total_days / needed < PART_DAYS_MIN:
+        needed = max(1, int(total_days / PART_DAYS_MIN))
+
+    # 兜底：needed 必须 ≤ 接口总数（否则没东西切）
+    if len(interfaces) >= needed:
+        return _chunk_interfaces(interfaces, acceptance, write_paths, needed, total_days)
+    if len(acceptance) >= needed:
+        return _chunk_acceptance(interfaces, acceptance, write_paths, needed, total_days)
+    if len(write_paths) >= needed:
+        return _chunk_paths(interfaces, acceptance, write_paths, needed, total_days)
+
+    # 兜底：按工期均分，label 用阶段号
+    return [{"label": f"阶段 {i + 1}", "interfaces": list(interfaces),
+             "acceptance_items": list(acceptance), "write_paths": list(write_paths),
+             "days": _distribute_days(total_days, needed, i)}
+            for i in range(needed)]
+
+
+def _make_part(label: str, interfaces: list, acceptance: list, write_paths: list,
+               days: float, reason: str | None = None) -> dict:
+    return {"label": label or "", "interfaces": list(interfaces),
+            "acceptance_items": list(acceptance), "write_paths": list(write_paths),
+            "days": float(days), "split_reason": reason}
+
+
+def _chunk_interfaces(interfaces: list, acceptance: list, write_paths: list,
+                      needed: int, total_days: float) -> list[dict]:
+    """按接口数均分，验收项和写路径全复用。"""
+    n = len(interfaces)
+    chunk_size = max(1, (n + needed - 1) // needed)  # 向上取整
+    parts = []
+    for i in range(0, n, chunk_size):
+        idx = len(parts)
+        segment = interfaces[i:i + chunk_size]
+        days = _distribute_days(total_days, needed, idx)
+        label = _interface_label(segment) if idx > 0 else ""
+        parts.append(_make_part(label, segment, acceptance, write_paths, days, "interfaces"))
+    # 如果接口数不够填满 needed（比如 needed=4 但接口分成 3 段），最后一段兜底补
+    while len(parts) < needed:
+        days = _distribute_days(total_days, needed, len(parts))
+        parts.append(_make_part(f"阶段 {len(parts) + 1}", [], acceptance, write_paths, days, "fallback"))
+    return parts[:needed]
+
+
+def _chunk_acceptance(interfaces: list, acceptance: list, write_paths: list,
+                      needed: int, total_days: float) -> list[dict]:
+    """按验收项均分，接口全复用。"""
+    n = len(acceptance)
+    chunk_size = max(1, (n + needed - 1) // needed)
+    parts = []
+    for i in range(0, n, chunk_size):
+        idx = len(parts)
+        segment = acceptance[i:i + chunk_size]
+        days = _distribute_days(total_days, needed, idx)
+        label = _interface_label(segment) if idx > 0 else ""
+        parts.append(_make_part(label, interfaces, segment, write_paths, days, "acceptance"))
+    return parts[:needed]
+
+
+def _chunk_paths(interfaces: list, acceptance: list, write_paths: list,
+                 needed: int, total_days: float) -> list[dict]:
+    """按写路径均分。"""
+    n = len(write_paths)
+    chunk_size = max(1, (n + needed - 1) // needed)
+    parts = []
+    for i in range(0, n, chunk_size):
+        idx = len(parts)
+        segment = write_paths[i:i + chunk_size]
+        days = _distribute_days(total_days, needed, idx)
+        label = _interface_label(segment) if idx > 0 else ""
+        parts.append(_make_part(label, interfaces, acceptance, segment, days, "paths"))
+    return parts[:needed]
+
+
+def _chunk_items(items: list, needed: int, total_days: float, kind: str) -> list[dict]:
+    """把 items 均分给 needed 段，每段 label 用首个元素。"""
+    n = len(items)
+    chunk = max(1, int(n / needed + 0.99))  # 向上取整每段大小
+    # 先均分 chunk 数，再调整
+    actual_count = max(1, int((n + chunk - 1) / chunk))
+    parts = []
+    for i in range(0, n, chunk):
+        segment = items[i:i + chunk]
+        idx = i // chunk
+        days = _distribute_days(total_days, actual_count, idx)
+        parts.append({"label": _interface_label(segment),
+                      "interfaces": segment if kind == "接口" else [],
+                      "acceptance_items": segment if kind == "验收" else [],
+                      "write_paths": segment if kind == "写路径" else [],
+                      "days": days})
+    return parts
+
+
+def _interface_label(items: list) -> str:
+    if not items:
+        return ""
+    first = items[0]
+    if isinstance(first, dict):
+        name = first.get("name") or first.get("acceptance") or first
+        return str(name)[:18]
+    return str(first)[:18]
+
+
+def _interface_acceptance(itf) -> str:
+    """把 {name, caller, input, output} 接口描述转成可读验收项。"""
+    if not isinstance(itf, dict):
+        return str(itf)
+    name = itf.get("name") or "接口"
+    caller = itf.get("caller") or "调用方"
+    output = itf.get("output") or "正确返回"
+    return f"{caller} 调用 {name} → {output}"
+
+
+def _distribute_days(total: float, count: int, index: int) -> float:
+    """把 total 均匀分给 count 段，落在 [MIN_PART_DAYS, MAX_PART_DAYS]。"""
+    if count <= 0:
+        return min(MAX_PART_DAYS, max(MIN_PART_DAYS, total))
+    base = total / count
+    # 用 round 避免 1.33333333 这种浮点数尾巴
+    base = round(base * 2) / 2
+    base = min(MAX_PART_DAYS, max(MIN_PART_DAYS, base))
+    # 最后一段吃掉剩余误差
+    if index == count - 1:
+        return round(total - base * (count - 1), 2)
+    return base
 
 
 def plan_from_spec(spec: dict, *, plan_id: str | None = None,
                    max_parallel: int = 2, created_at: str | None = None) -> dict:
     """spec.json -> plan.json。
 
-    只做确定性映射，不调用模型；任务以模块为输入源，超过 3 天或含多个
-    接口/验收项/写路径时拆成多个任务，并通过 depends_on 保持模块内顺序。
+    做确定性映射 + 模块内拆分：estimate_days > 3 的模块按接口/验收项/写路径/工期上限拆。
     """
     modules = spec.get("modules") or []
     if not modules:
@@ -184,46 +294,79 @@ def plan_from_spec(spec: dict, *, plan_id: str | None = None,
     if not spec_id or not isinstance(version, int):
         raise ValueError("设计规格缺少 spec_id 或 version")
 
-    module_parts = []
-    module_tasks: dict[str, list[str]] = {}
-    next_index = 1
-    for module in modules:
-        parts = _split_parts(module)
-        task_ids = [f"T{next_index + offset}" for offset in range(len(parts))]
-        next_index += len(parts)
-        module_parts.append((module, task_ids, parts))
-        if module.get("id"):
-            module_tasks[str(module["id"])] = task_ids
-
     tasks = []
-    for module, task_ids, parts in module_parts:
+    # module_id -> [task_id, ...]，用于跨模块依赖取最后一段
+    module_task_map: dict[str, list[str]] = {}
+    next_idx = 1
+
+    for module in modules:
+        module_id = module.get("id")
+        if module_id:
+            module_task_map[module_id] = []
+
+    for m_idx, module in enumerate(modules):
+        name = module.get("name") or f"模块 {m_idx + 1}"
         role = module.get("suggested_role") or "ai"
-        depends_on = []
+        module_id = module.get("id")
+        parts = _split_parts(module)
+        part_days = [p["days"] for p in parts]
+
+        # 模块外依赖：每个新段依赖被依赖模块的最后一段
+        outer_deps = []
         for ref in module.get("depends_on") or []:
-            ref = str(ref)
-            if ref not in module_tasks:
-                raise ValueError(f"模块 {module.get('id') or module.get('name')} "
-                                 f"依赖了不存在的模块：{ref}")
-            depends_on.append(module_tasks[ref][-1])
-        design_refs = [module.get("id")] if module.get("id") else []
-        for index, (task_id, part) in enumerate(zip(task_ids, parts)):
+            if ref not in module_task_map:
+                raise ValueError(f"模块 {module_id or name} 依赖了不存在的模块：{ref}")
+            segs = module_task_map[ref]
+            if segs:
+                outer_deps.append(segs[-1])
+
+        module_task_ids = []
+        for p_idx, part in enumerate(parts):
+            task_id = f"T{next_idx}"
+            next_idx += 1
+            module_task_ids.append(task_id)
+
+            # 第一段依赖模块外依赖；后续段依赖前一段
+            deps = list(outer_deps) if p_idx == 0 else [module_task_ids[p_idx - 1]]
+
+            task_name = f"{name}" if p_idx == 0 else f"{name} · {part['label'] or f'阶段 {p_idx + 1}'}"
+
+            # 验收项：优先用 part 里拆分出的验收项，其次把接口转成可读描述，最后兜底
+            acceptance = part.get("acceptance_items") or []
+            if not acceptance and part.get("interfaces"):
+                acceptance = [_interface_acceptance(itf) for itf in part["interfaces"]]
+            if not acceptance and p_idx == 0:
+                acceptance = list(module.get("acceptance_items") or ["验收通过"])
+            if not acceptance:
+                acceptance = [f"阶段 {p_idx + 1} 功能验收通过"]
+
+            # 写路径：每段带上自己拆分的路径，没有就兜底模块路径
+            write_paths = list(part.get("write_paths") or module.get("write_paths") or [])
+
+            # 把 part 里的接口信息挂到任务上（不是契约字段，作为注释性补充）
+            part_interfaces = part.get("interfaces") or []
+            interfaces_payload = [{"name": _if.get("name"), "caller": _if.get("caller"),
+                                   "input": _if.get("input"), "output": _if.get("output")}
+                                  for _if in part_interfaces if isinstance(_if, dict)]
+
             task = {
                 "task_id": task_id,
-                "name": part["name"],
-                "deliverable": module.get("deliverable")
-                or f"{module.get('name') or '模块'}交付物",
-                "acceptance_items": part["acceptance_items"],
+                "name": task_name,
+                "deliverable": module.get("deliverable") or f"{name}交付物",
+                "acceptance_items": acceptance,
+                "interfaces": interfaces_payload,
                 "suggested_role": role,
                 "priority": "high",
                 "requirement_refs": list(module.get("requirement_ids") or []),
-                "design_refs": list(design_refs),
-                "depends_on": [task_ids[index - 1]] if index else list(depends_on),
-                "write_paths": part["write_paths"],
+                "design_refs": [module_id] if module_id else [],
+                "depends_on": deps,
+                "write_paths": write_paths,
                 "review_required": "human" in role,
+                "estimate_days": float(part["days"]),
             }
-            if part.get("estimate_days") is not None:
-                task["estimate_days"] = float(part["estimate_days"])
             tasks.append(task)
+            if module_id:
+                module_task_map[module_id].append(task_id)
 
     return {
         "plan_id": plan_id or f"PLAN-{spec_id}",
@@ -352,9 +495,8 @@ def _validate_plan_tasks(data: dict, spec: dict) -> list[dict]:
             if dep not in known:
                 raise ValueError(f"{task_id} 依赖了不存在的任务 {dep}")
         days = item.get("estimate_days")
-        if not isinstance(days, (int, float)) or days <= 0 or days > MAX_TASK_DAYS:
-            raise ValueError(f"{task_id} 的 estimate_days 必须在 "
-                             f"(0, {MAX_TASK_DAYS:g}] 之间")
+        if not isinstance(days, (int, float)) or days <= 0 or days > 3:
+            raise ValueError(f"{task_id} 的 estimate_days 必须在 (0, 3] 之间")
         design_refs = [str(ref) for ref in item.get("design_refs") or []]
         unknown = [ref for ref in design_refs if ref not in module_ids]
         if not design_refs or unknown:
