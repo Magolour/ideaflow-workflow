@@ -111,6 +111,17 @@
   .consensus.ok { border-color: #2f5d34; }
   .consensus.warn { border-color: #5c4a24; }
   .consensus.bad { border-color: #5c2b2b; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
+  .controls input[type=search], .controls select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 10px; font-size: 13px;
+  }
+  .controls input[type=search] { min-width: 240px; }
+  .claim { cursor: pointer; transition: border-color .15s, background .15s; }
+  .claim:hover { border-color: #3b4a66; }
+  .claim.selected { border-color: var(--accent); background: #1b2436; }
+  .obj { cursor: pointer; }
+  .obj.selected { border-left-color: var(--accent); background: #1b2436; }
   .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   details { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
   summary { cursor: pointer; color: var(--muted); }
@@ -185,9 +196,12 @@ function parseEvents(text) {
   }).filter(Boolean);
 }
 
+let filters = { q: "", role: "all", blocking: false };
+
 function render() {
   if (!board) return;
   renderSummary();
+  bindControls();
   renderRoles();
   renderObjections();
   renderOptions();
@@ -228,6 +242,15 @@ function renderSummary() {
       ${metric((board.open_questions || []).filter((q) => q.blocking).length, "阻断问题")}
       ${metric(Object.keys(roleCounts).length, "参与角色")}
     </div>
+    <div class="controls">
+      <input type="search" id="search" placeholder="搜索主张 / 异议 / 编号">
+      <select id="roleFilter">
+        <option value="all">全部角色</option>
+        ${ROLE_ORDER.map((id) => `<option value="${id}">${esc(roleName(id))}</option>`).join("")}
+      </select>
+      <label class="muted"><input type="checkbox" id="onlyBlocking"> 只看阻断异议</label>
+      <span class="muted" id="visibleCount"></span>
+    </div>
     <div class="muted" style="margin-top:-6px">想法：${esc(board.idea || "—")}</div>
   `;
 }
@@ -245,21 +268,59 @@ function objectionHtml(row) {
   </div>`;
 }
 
+function visibleObjections() {
+  return (board.objections || []).filter((row) => {
+    if (filters.blocking && row.severity !== "blocking") return false;
+    if (!filters.q) return true;
+    return [row.id, row.text, row.target, row.role, row.consequence]
+      .some((value) => String(value || "").toLowerCase().includes(filters.q));
+  });
+}
+
+function visibleClaims() {
+  return (board.claims || []).filter((claim) => {
+    if (filters.role !== "all" && claim.role !== filters.role) return false;
+    if (!filters.q) return true;
+    return [claim.id, claim.text, claim.reason, claim.role]
+      .some((value) => String(value || "").toLowerCase().includes(filters.q));
+  });
+}
+
+function bindControls() {
+  const search = $("search"), role = $("roleFilter"), blocking = $("onlyBlocking");
+  if (!search || !role || !blocking) return;
+  search.addEventListener("input", (event) => {
+    filters.q = event.target.value.trim().toLowerCase();
+    renderRoles();
+  });
+  role.addEventListener("change", (event) => {
+    filters.role = event.target.value;
+    renderRoles();
+  });
+  blocking.addEventListener("change", (event) => {
+    filters.blocking = event.target.checked;
+    renderRoles();
+  });
+}
+
 function renderRoles() {
-  const claims = board.claims || [];
+  const claims = visibleClaims();
+  const allClaims = board.claims || [];
   const objections = board.objections || [];
   const byTarget = {};
   objections.forEach((row) => { (byTarget[row.target] ||= []).push(row); });
 
-  const roles = ROLE_ORDER.filter((id) => claims.some((c) => c.role === id))
-    .concat(Object.keys(countBy(claims, "role")).filter((id) => !ROLE_ORDER.includes(id)));
+  const roles = ROLE_ORDER.filter((id) => allClaims.some((c) => c.role === id))
+    .concat(Object.keys(countBy(allClaims, "role")).filter((id) => !ROLE_ORDER.includes(id)));
 
   const html = roles.map((role) => {
     const own = claims.filter((claim) => claim.role === role);
     const cards = own.map((claim) => {
-      const linked = (byTarget[claim.id] || []).map(objectionHtml).join("");
+      const linked = (byTarget[claim.id] || [])
+        .filter((row) => !filters.blocking || row.severity === "blocking")
+        .map(objectionHtml).join("");
       const assumes = (claim.assumes || []).map((id) => `<span class="chip">${esc(id)}</span>`).join("");
-      return `<div class="claim">
+      return `<div class="claim" data-claim="${esc(claim.id)}">
         <div class="claim-id">${esc(claim.id)} <span class="chip">${esc(EVIDENCE[claim.evidence] || claim.evidence || "")}</span></div>
         <p>${esc(claim.text || "")}</p>
         <div class="reason">${esc(claim.reason || "")}</div>
@@ -270,15 +331,18 @@ function renderRoles() {
     return `<div class="role"><h3>${esc(roleName(role))} <small>${own.length} 条</small></h3>${cards || '<div class="empty">无主张</div>'}</div>`;
   }).join("");
 
+  const count = $("visibleCount");
+  if (count) count.textContent = `显示 ${claims.length}/${allClaims.length} 条主张`;
+
   $("content").innerHTML = `<section><h2>角色主张 <span class="tag">谁提了什么，被谁反驳</span></h2>
-    <div class="roles">${html || '<div class="empty">没有主张</div>'}</div></section>
+    <div class="roles">${html || '<div class="empty">没有符合条件的主张</div>'}</div></section>
     <div id="rest"></div>`;
   renderRest();
 }
 
 function renderRest() {
-  const objections = board.objections || [];
-  const rows = objections.map((row) => `<tr>
+  const objections = visibleObjections();
+  const rows = objections.map((row) => `<tr data-obj="${esc(row.id)}">
     <td>${esc(row.id)}</td>
     <td>${esc(row.target)}</td>
     <td>${esc(roleName(row.role))}</td>
@@ -361,11 +425,23 @@ drop.addEventListener("drop", (event) => {
   event.preventDefault(); drop.classList.remove("over");
   if (event.dataTransfer.files.length) readFiles(event.dataTransfer.files);
 });
+document.addEventListener("click", (event) => {
+  const claim = event.target.closest(".claim");
+  if (claim) {
+    claim.classList.toggle("selected");
+    return;
+  }
+  const objection = event.target.closest(".obj");
+  if (objection) {
+    objection.classList.toggle("selected");
+  }
+});
+
 $("files").addEventListener("change", (event) => {
   if (event.target.files.length) readFiles(event.target.files);
 });
 
-$("demo").addEventListener("click", () => {
+function loadDemo() {
   board = {
     idea: "做一个校园二手书交易小程序，学生可以发布、搜索教材并线下交易",
     round: 2, claims: [
@@ -390,7 +466,9 @@ $("demo").addEventListener("click", () => {
     { seq: 3, actor: "skeptic", action: "objection_created", detail: "OBJ-001 指向 CLM-002" },
   ];
   render();
-});
+}
+$("demo").addEventListener("click", loadDemo);
+if (new URLSearchParams(location.search).has("demo")) loadDemo();
 </script>
 </body>
 </html>
