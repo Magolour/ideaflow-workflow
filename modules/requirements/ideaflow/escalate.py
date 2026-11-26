@@ -150,7 +150,10 @@ def build_question(spec: Spec, snapshot: Snapshot,
     blocking = _blocking(audit)
     if not blocking:
         return None
-    issue = next((row for row in blocking if row["type"] == "REQUIREMENT_OVERRIDDEN"), blocking[0])
+    priority = ("REQUIREMENT_OVERRIDDEN", "CONSTRAINT_CONFLICT",
+                "CONSTRAINT_VIOLATION")
+    issue = next((row for kind in priority for row in blocking
+                  if row["type"] == kind), blocking[0])
     if issue["type"] not in ESCALATION_TYPES:
         return None
     if issue["type"] == "REQUIREMENT_OVERRIDDEN" and issue["requirement_ids"]:

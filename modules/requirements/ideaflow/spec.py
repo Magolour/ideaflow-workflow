@@ -25,6 +25,21 @@ MAX_MODULES = 12
 VALUE_ORDER = ("搜索", "支付", "发布", "收藏", "评价", "自提")
 FEATURE_ALIASES = {"支付": ("支付", "付款", "结算"), "搜索": ("搜索", "检索"),
                    "发布": ("发布", "上传"), "收藏": ("收藏", "关注")}
+FEATURE_KEYWORD_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("录入", "发布", "新建", "创建", "登记", "上传"),
+    ("检索", "搜索", "查找", "查询", "筛选", "列表"),
+    ("详情", "查看", "浏览", "预览"),
+    ("提交", "审批", "审核", "通过", "驳回"),
+    ("通知", "提醒", "消息", "推送"),
+    ("统计", "导出", "报表", "汇总", "记录"),
+    ("支付", "付款", "结算", "成交"),
+    ("收藏", "关注", "订阅"),
+    ("自提", "约见", "线下", "面交"),
+    ("签到", "扫码"),
+    ("报名", "组队", "团队", "协作"),
+    ("时长", "认定"),
+    ("活动",),
+)
 
 INTERFACES: dict[str, list[dict[str, str]]] = {
     "发布": [{"name": "publishBook", "caller": "发布页",
@@ -187,11 +202,22 @@ class Spec:
 
 def effort_for(modules: list[dict[str, Any]]) -> dict[str, Any]:
     """按模块估算重算 PERT；修订后必须走这里，避免手改总工期。"""
-    packages = [{"name": module["name"],
-                 "optimistic": round(module["estimate_days"] * 0.8, 1),
-                 "likely": module["estimate_days"],
-                 "pessimistic": round(module["estimate_days"] * 1.6, 1)}
-                for module in modules]
+    packages = []
+    missing = 0
+    for module in modules:
+        estimate = module.get("estimate_days")
+        if not isinstance(estimate, (int, float)):
+            missing += 1
+            continue
+        packages.append({"name": module["name"],
+                         "optimistic": round(estimate * 0.8, 1),
+                         "likely": estimate,
+                         "pessimistic": round(estimate * 1.6, 1)})
+    if missing:
+        packages.append({"name": f"{missing} 个模块估算待补",
+                         "optimistic": round(missing * 0.5, 1),
+                         "likely": float(missing),
+                         "pessimistic": round(missing * 2.0, 1)})
     packages.append({"name": "联调、验收与演示准备", "optimistic": 2.0,
                      "likely": 3.0, "pessimistic": 5.0})
     return pert(packages)
@@ -383,34 +409,80 @@ def _unique_module_name(name: str, used: set[str]) -> str:
     return unique
 
 
-def _feature_refs(feature: dict[str, Any], snapshot: Snapshot,
-                  claim_refs: dict[str, list[str]]) -> list[str]:
-    """功能 → 需求编号：显式 R、claim 反查、功能文本兜底、最后才用 F-id。"""
-    known = snapshot.ids("requirement")
-    refs: list[str] = []
-    for source in feature.get("source_refs") or []:
-        source = str(source)
-        if source in known:
-            refs.append(source)
-        else:
-            refs.extend(claim_refs.get(source, []))
-    refs = [item for item in dict.fromkeys(refs) if item in known]
-    if refs:
-        return refs
-
+def _feature_keyword_matches(feature: dict[str, Any],
+                             snapshot: Snapshot) -> list[str]:
+    """按功能名/描述里的动作词匹配快照需求，避免全部落到第一条。"""
     text = f"{feature.get('name') or ''} {feature.get('description') or ''}".strip()
+    if not text:
+        return []
+    scored: list[tuple[int, int, str]] = []
     for item in snapshot.requirements:
         requirement_text = str(item.get("text") or "")
-        if (text and requirement_text
-                and (shares_topic(text, requirement_text)
-                     or shares_topic(requirement_text, text))):
-            refs.append(item["id"])
-    return list(dict.fromkeys(refs))[:5]
+        if not requirement_text:
+            continue
+        score = 0
+        if (shares_topic(text, requirement_text)
+                or shares_topic(requirement_text, text)):
+            score += 2
+        for aliases in FEATURE_KEYWORD_GROUPS:
+            if (any(alias in text for alias in aliases)
+                    and any(alias in requirement_text for alias in aliases)):
+                score += 3
+        if score:
+            scored.append((score, len(requirement_text), item["id"]))
+    scored.sort(key=lambda row: (-row[0], row[1], row[2]))
+    return [row[2] for row in scored[:3]]
 
 
-def _feature_estimate(feature: dict[str, Any], refs: list[str], base: Draft,
-                      index: int, total: int) -> float:
-    """优先取草案工作包里对应需求的估算，其次取决策成本，最后才均摊。"""
+def _feature_refs(feature: dict[str, Any], snapshot: Snapshot,
+                  claim_refs: dict[str, list[str]]) -> list[str]:
+    """功能 → 需求编号：先按功能文本匹配，再用 claim 反查；不拿第一条顶替。"""
+    known = snapshot.ids("requirement")
+    matched = _feature_keyword_matches(feature, snapshot)
+    if matched:
+        return matched
+
+    claim_candidates: list[str] = []
+    for source in feature.get("source_refs") or []:
+        source = str(source)
+        if source not in known:
+            claim_candidates.extend(claim_refs.get(source, []))
+    claim_candidates = [item for item in dict.fromkeys(claim_candidates)
+                        if item in known]
+    return claim_candidates[:5]
+
+
+def _feature_criterion(name: str, description: str) -> str:
+    """每个功能一条自己的验收口径，不再共用同一句模板尾巴。"""
+    text = f"{name} {description}"
+    rules = (
+        (("检索", "搜索", "查找", "查询", "筛选"),
+         f"{name}：按书名或关键词检索，命中结果按相关度排序，空结果给出提示"),
+        (("录入", "发布", "新建", "创建", "登记", "上传"),
+         f"{name}：提交后 3 秒内生成记录，必填项缺失时定位到字段并提示"),
+        (("详情", "查看", "浏览", "预览"),
+         f"{name}：从列表进入详情不超过 2 步，返回后保留筛选条件"),
+        (("审批", "审核", "提交", "驳回", "通过"),
+         f"{name}：提交后生成待审批记录，通过/驳回状态可追溯"),
+        (("通知", "提醒", "消息", "推送"),
+         f"{name}：状态变更后 5 分钟内触达，同一事件只提醒一次"),
+        (("统计", "导出", "报表", "汇总"),
+         f"{name}：导出字段与列表一致，统计口径可复核"),
+        (("签到", "扫码"),
+         f"{name}：扫码后 5 秒内返回签到结果，重复扫码只记一次"),
+        (("报名", "组队", "团队", "协作"),
+         f"{name}：报名提交后状态即时可见，取消/候补状态可追溯"),
+        (("时长", "认定"),
+         f"{name}：签到记录自动累计时长，人工认定留痕可追溯"),
+    )
+    for keys, criterion in rules:
+        if any(key in text for key in keys):
+            return criterion
+    return f"{name}：3 个核心路径可用，输入输出与职责描述一致，重复操作结果一致"
+
+
+def _feature_estimate(feature: dict[str, Any], refs: list[str], base: Draft) -> float | None:
+    """只取草案工作包/决策里的真实估算；拿不到就返回 None，不做均摊。"""
     packages = [row for row in (base.packages or []) if isinstance(row, dict)]
     for requirement_id in refs:
         for package in packages:
@@ -431,14 +503,80 @@ def _feature_estimate(feature: dict[str, Any], refs: list[str], base: Draft,
             value = package.get("likely") or package.get("optimistic")
             if value:
                 return max(0.5, round(float(value), 1))
+    return None
 
-    packages = [row for row in packages if "联调" not in str(row.get("name") or "")]
-    if packages:
-        package = packages[(index - 1) % len(packages)]
-        value = package.get("likely") or package.get("optimistic")
-        if value:
-            return max(0.5, round(float(value), 1))
-    return max(0.5, round(base.commit_days / max(1, total), 1))
+
+DEPENDENCY_RULES: tuple[tuple[tuple[str, ...], tuple[tuple[str, ...], ...]], ...] = (
+    (("列表", "检索", "搜索", "查询", "筛选"),
+     (("录入", "发布", "新建", "创建", "登记", "上传"),)),
+    (("详情", "查看", "浏览", "预览"),
+     (("列表", "检索", "搜索"),)),
+    (("提交", "审批", "审核"),
+     (("详情", "查看"), ("录入", "发布"))),
+    (("通知", "提醒", "消息", "推送"),
+     (("提交", "审批", "审核"),)),
+    (("统计", "导出", "报表", "汇总"),
+     (("提交", "审批", "审核"), ("签到", "报名"))),
+    (("签到统计",),
+     (("签到", "扫码"),)),
+    (("扫码", "签到"),
+     (("报名", "组队"),)),
+    (("时长", "认定"),
+     (("签到",),)),
+    (("报名管理",),
+     (("报名", "组队"),)),
+    (("组队", "团队", "协作"),
+     (("报名",),)),
+    (("报名",),
+     (("活动", "发布"),)),
+    (("审核", "审批"),
+     (("活动", "发布"),)),
+)
+
+
+def _would_cycle(start: str, goal: str,
+                 graph: dict[str, list[str]]) -> bool:
+    stack = [start]
+    seen: set[str] = set()
+    while stack:
+        node = stack.pop()
+        if node == goal:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(graph.get(node, []))
+    return False
+
+
+def _assign_dependencies(modules: list[dict[str, Any]]) -> None:
+    """给功能之间补最小依赖，避免编排器把整张图退化成串行链。"""
+    graph: dict[str, list[str]] = {module["id"]: [] for module in modules}
+    for module in modules:
+        text = f"{module.get('name') or ''} {module.get('responsibility') or ''}"
+        chosen = None
+        for target_keys, dependency_groups in DEPENDENCY_RULES:
+            if not any(key in text for key in target_keys):
+                continue
+            for group in dependency_groups:
+                for other in modules:
+                    if other["id"] == module["id"]:
+                        continue
+                    other_text = f"{other.get('name') or ''} {other.get('responsibility') or ''}"
+                    if any(key in other_text for key in group):
+                        chosen = other["id"]
+                        break
+                if chosen:
+                    break
+            if chosen:
+                break
+        if not chosen:
+            continue
+        if _would_cycle(chosen, module["id"], graph):
+            continue
+        module["depends_on"] = [chosen]
+        graph[module["id"]].append(chosen)
+
 
 
 def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
@@ -459,6 +597,7 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
     used_names: set[str] = set()
     unresolved: list[dict[str, str]] = []
     inferred: list[dict[str, Any]] = []
+    missing_estimates: list[dict[str, str]] = []
 
     for index, feature in enumerate(rows, 1):
         name = _unique_module_name(str(feature.get("name") or f"功能 {index}").strip(),
@@ -472,9 +611,10 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
         elif feature.get("inferred"):
             inferred.append({"feature": feature_id, "name": name, "refs": refs})
 
-        estimate = _feature_estimate(feature, refs, base, index, len(rows))
-        criterion = (f"{name}：{description}；主流程 5 秒内返回结果，"
-                     "重复提交只记一次，验收时逐条演示")
+        estimate = _feature_estimate(feature, refs, base)
+        if estimate is None:
+            missing_estimates.append({"feature": feature_id, "name": name})
+        criterion = _feature_criterion(name, description)
         decision = {
             "id": f"DEC-{index:02d}",
             "scope": description,
@@ -508,8 +648,9 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
                             "decision_ids": [decision["id"]]})
         acceptance.append({"id": "", "requirement_id": refs[0],
                            "criterion": criterion,
-                           "verify": "按验收场景逐条演示，记录耗时与重复提交结果"})
+                           "verify": "按验收场景逐条演示，记录实际结果"})
 
+    _assign_dependencies(modules)
     for index, row in enumerate(acceptance, 1):
         row["id"] = f"ACC-{index:02d}"
 
@@ -530,6 +671,23 @@ def _spec_from_features(snapshot: Snapshot, payload: dict[str, Any],
             "question": ("以下功能由讨论推断，是否确认纳入首版："
                          + "、".join(row["name"] for row in inferred)),
             "impact": impacts, "blocking": False, "candidates": [],
+            "origin": "features", "resolution": None,
+        })
+    if missing_estimates:
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": ("以下功能缺少草案工作包估算，计划评审前需补齐："
+                         + "、".join(row["name"] for row in missing_estimates)),
+            "impact": [row["feature"] for row in missing_estimates],
+            "blocking": False, "candidates": [],
+            "origin": "features", "resolution": None,
+        })
+    if not any(module["depends_on"] for module in modules):
+        open_items.append({
+            "id": f"OPEN-{len(open_items) + 1:02d}",
+            "question": "未能推断功能间依赖，计划图可能退化为串行，是否补充依赖关系？",
+            "impact": [module["id"] for module in modules],
+            "blocking": False, "candidates": [],
             "origin": "features", "resolution": None,
         })
 
