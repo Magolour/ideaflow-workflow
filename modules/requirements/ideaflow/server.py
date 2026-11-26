@@ -377,6 +377,97 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------- HTTP 层
 
 
+
+def _safe_run_dir(base: Path, run_id: str) -> Path | None:
+    if not run_id or "/" in run_id or "\\" in run_id or run_id in (".", ".."):
+        return None
+    target = (base / run_id).resolve()
+    if target.parent != base.resolve() or not target.is_dir():
+        return None
+    return target
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _read_events(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def scan_runs(base: Path, *, limit: int = 60) -> list[dict[str, Any]]:
+    """列出运行目录，供控制台侧栏使用。"""
+    rows: list[dict[str, Any]] = []
+    for folder in sorted(base.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True):
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue
+        spec = _read_json(folder / "spec.json") or {}
+        snapshot = _read_json(folder / "snapshot.json") or {}
+        features = _read_json(folder / "features.json") or {}
+        proposal = folder / "proposal.md"
+        if not (spec or snapshot or proposal.exists()):
+            continue
+        idea = ((snapshot.get("source") or {}).get("raw_text")
+                or snapshot.get("raw_text") or "").strip().splitlines()
+        rows.append({
+            "id": folder.name,
+            "flow": "spec" if spec else "proposal",
+            "idea": (idea[0][:80] if idea else folder.name),
+            "status": spec.get("status") or ("done" if proposal.exists() else "unknown"),
+            "version": spec.get("version"),
+            "features": len(features.get("features") or []),
+            "modules": len(spec.get("modules") or []),
+            "updated": datetime.fromtimestamp(folder.stat().st_mtime, timezone.utc).isoformat(),
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def load_run(base: Path, run_id: str) -> dict[str, Any] | None:
+    """把一个运行目录聚合成控制台需要的单份 payload。"""
+    folder = _safe_run_dir(base, run_id)
+    if folder is None:
+        return None
+    board = features = spec = events = None
+    discussion_dir = None
+    for candidate in sorted(folder.glob("discussion/*")):
+        if candidate.is_dir() and (candidate / "blackboard.json").is_file():
+            discussion_dir = candidate
+            break
+    if discussion_dir is not None:
+        board = _read_json(discussion_dir / "blackboard.json")
+        events = _read_events(discussion_dir / "events.jsonl")
+    spec = _read_json(folder / "spec.json")
+    features = _read_json(folder / "features.json")
+    snapshot = _read_json(folder / "snapshot.json")
+    flow = _read_json(folder / "flow.json") or {}
+    audit = _read_json(folder / "audit.json")
+    return {
+        "id": folder.name,
+        "flow": flow,
+        "snapshot": snapshot,
+        "board": board,
+        "features": features,
+        "spec": spec,
+        "events": events or [],
+        "audit": audit,
+    }
+
+
 def make_server(host: str, port: int, runs_dir: str | Path, *,
                 quiet: bool = False) -> ThreadingHTTPServer:
     base = Path(runs_dir).resolve()
@@ -394,6 +485,8 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
             try:
                 if route.path in ("/", "/index.html"):
                     self._send_static("index.html")
+                elif route.path in ("/console", "/console.html"):
+                    self._send_static("console.html")
                 elif route.path.startswith("/static/"):
                     self._send_static(route.path[len("/static/"):])
                 elif route.path == "/api/health":
@@ -403,6 +496,15 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                     self._handle_case(parse_qs(route.query))
                 elif route.path == "/api/job":
                     self._handle_job(parse_qs(route.query))
+                elif route.path == "/api/runs":
+                    self._send_json(HTTPStatus.OK, {"runs": scan_runs(base)})
+                elif route.path == "/api/run":
+                    query = parse_qs(route.query)
+                    run_id = (query.get("id") or [""])[0]
+                    payload = load_run(base, run_id)
+                    if payload is None:
+                        raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行")
+                    self._send_json(HTTPStatus.OK, payload)
                 elif route.path == "/api/download":
                     self._handle_download(parse_qs(route.query))
                 else:
