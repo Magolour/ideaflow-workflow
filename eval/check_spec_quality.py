@@ -107,10 +107,16 @@ def check_estimates(spec: dict) -> None:
     if not values:
         report("估时", "WARN", "没有估时字段")
         return
-    if len(set(values)) == 1 and len(values) > 1:
-        report("估时", "WARN", f"所有模块估时相同（{values[0]}），疑似默认值")
+    missing = [value for value in values if not isinstance(value, (int, float))]
+    present = [value for value in values if isinstance(value, (int, float))]
+    if missing:
+        report("估时", "WARN",
+               f"{len(missing)}/{len(values)} 个模块估时缺失（应为 null 并在 open_items 登记）")
+        return
+    if len(set(present)) == 1 and len(present) > 1:
+        report("估时", "WARN", f"所有模块估时相同（{present[0]}），疑似默认值")
     else:
-        report("估时", "PASS", f"{len(set(values))} 种取值")
+        report("估时", "PASS", f"{len(set(present))} 种取值")
 
 
 def check_open_items(spec: dict) -> None:

@@ -168,6 +168,42 @@ class FeatureSynthesisTest(unittest.TestCase):
             self.assertEqual(result.spec.status, "awaiting_human")
             self.assertEqual(result.spec.revisions, [])
 
+    def test_tight_case_mapping_acceptance_estimates_and_dependencies(self):
+        """功能匹配需求、验收不重复、缺失估时为 null、依赖不为空，且仍过契约。"""
+        from ideaflow.specflow import load_case, run
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            result = run(load_case("campus-books-tight"), out_dir=folder,
+                         agent=None, discuss=True)
+            spec = result.spec.to_json()
+
+        modules = spec["modules"]
+        refs = [ref for module in modules for ref in module["requirement_ids"]]
+        self.assertGreater(len(set(refs)), 1, "功能不应全部映射到同一条需求")
+        self.assertTrue(any(ref.startswith("R-") for ref in refs),
+                        "应至少匹配到一条真实需求编号")
+
+        criteria = [row["criterion"] for row in spec["acceptance"]]
+        self.assertEqual(len(criteria), len(set(criteria)), "验收条件不应重复")
+
+        estimates = [module["estimate_days"] for module in modules]
+        self.assertTrue(any(value is None for value in estimates),
+                        "拿不到估算时应写 null，不得均摊")
+        known = {value for value in estimates if value is not None}
+        self.assertGreater(len(known), 1, "已知估时不应全部相同")
+
+        questions = " ".join(row["question"] for row in spec["open_items"])
+        self.assertIn("估算", questions, "缺失估时应进 open_items")
+        self.assertIn("未对应到明确需求", questions, "未匹配到需求的功能应进 open_items")
+
+        self.assertTrue(any(module["depends_on"] for module in modules),
+                        "功能之间应推断出最小依赖，避免计划退化成串行链")
+
+        by_file = {path.name: load_schema(path.name) for path in V2.glob("*.json")}
+        validator = Draft202012Validator(inline(load_schema("spec.schema.json"), by_file))
+        errors = sorted(validator.iter_errors(spec), key=str)
+        self.assertEqual([], [f"{list(e.absolute_path)} {e.message}" for e in errors])
+
     def test_plan_granularity(self):
         from plan_adapter import plan_from_spec
 
@@ -175,7 +211,7 @@ class FeatureSynthesisTest(unittest.TestCase):
         self.assertGreaterEqual(len(plan["tasks"]), 5)
         self.assertLessEqual(len(plan["tasks"]), 20)
         for task in plan["tasks"]:
-            self.assertLessEqual(task.get("estimate_days", 0), 3.0,
+            self.assertLessEqual(task.get("estimate_days") or 0, 3.0,
                                  f"{task['task_id']} 估时过长，需要拆分")
 
 
