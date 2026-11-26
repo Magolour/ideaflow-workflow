@@ -6,6 +6,23 @@
 from __future__ import annotations
 
 MAX_ESTIMATE_DAYS = 3.0
+SEVERITY_BY_CODE = {
+    "DEPENDENCY_CYCLE": "blocking",
+    "DEPENDENCY_INVALID": "blocking",
+    "MODULE_WITHOUT_TASK": "blocking",
+    "TASK_TOO_LARGE": "major",
+}
+SEVERITY_LEVELS = ("blocking", "major", "minor")
+
+
+def _issue(code: str, message: str, *, task_id: str | None = None, **extra) -> dict:
+    return {
+        "code": code,
+        "severity": SEVERITY_BY_CODE.get(code, "minor"),
+        "task_id": task_id,
+        "message": message,
+        **extra,
+    }
 
 
 def _cycles(task_ids: set[str], prerequisites: dict[str, list[str]]) -> list[list[str]]:
@@ -61,11 +78,11 @@ def review_plan(spec: dict, plan: dict) -> dict:
     for module in spec.get("modules") or []:
         module_id = module.get("id")
         if module_id and str(module_id) not in covered:
-            issues.append({
-                "code": "MODULE_WITHOUT_TASK",
-                "module_id": str(module_id),
-                "message": f"模块 {module_id}（{module.get('name') or '未命名'}）没有任何任务覆盖",
-            })
+            issues.append(_issue(
+                "MODULE_WITHOUT_TASK",
+                f"模块 {module_id}（{module.get('name') or '未命名'}）没有任何任务覆盖",
+                module_id=str(module_id),
+            ))
 
     prerequisites: dict[str, list[str]] = {}
     for task in tasks:
@@ -74,39 +91,44 @@ def review_plan(spec: dict, plan: dict) -> dict:
         for ref in task.get("depends_on") or []:
             source = str(ref)
             if source == task_id:
-                issues.append({
-                    "code": "DEPENDENCY_INVALID",
-                    "task_id": task_id,
-                    "depends_on": source,
-                    "message": f"任务 {task_id} 不能依赖自身",
-                })
+                issues.append(_issue(
+                    "DEPENDENCY_INVALID",
+                    f"任务 {task_id} 不能依赖自身",
+                    task_id=task_id,
+                    depends_on=source,
+                ))
             elif source not in task_ids:
-                issues.append({
-                    "code": "DEPENDENCY_INVALID",
-                    "task_id": task_id,
-                    "depends_on": source,
-                    "message": f"任务 {task_id} 依赖了不存在的任务 {source}",
-                })
+                issues.append(_issue(
+                    "DEPENDENCY_INVALID",
+                    f"任务 {task_id} 依赖了不存在的任务 {source}",
+                    task_id=task_id,
+                    depends_on=source,
+                ))
             else:
                 prerequisites[task_id].append(source)
         days = task.get("estimate_days")
         if isinstance(days, (int, float)) and days > MAX_ESTIMATE_DAYS:
-            issues.append({
-                "code": "TASK_TOO_LARGE",
-                "task_id": task_id,
-                "estimate_days": float(days),
-                "message": f"任务 {task_id} 预估 {days} 天，超过 {MAX_ESTIMATE_DAYS:g} 天上限",
-            })
+            issues.append(_issue(
+                "TASK_TOO_LARGE",
+                f"任务 {task_id} 预估 {days} 天，超过 {MAX_ESTIMATE_DAYS:g} 天上限",
+                task_id=task_id,
+                estimate_days=float(days),
+            ))
 
     for cycle in _cycles(task_ids, prerequisites):
-        issues.append({
-            "code": "DEPENDENCY_CYCLE",
-            "task_ids": cycle,
-            "message": "依赖成环：" + " → ".join(cycle + [cycle[0]]),
-        })
+        issues.append(_issue(
+            "DEPENDENCY_CYCLE",
+            "依赖成环：" + " → ".join(cycle + [cycle[0]]),
+            task_id=cycle[0],
+            task_ids=cycle,
+        ))
 
+    counts = {level: sum(1 for issue in issues if issue["severity"] == level)
+              for level in SEVERITY_LEVELS}
+    counts["total"] = len(issues)
     return {
         "plan_id": plan.get("plan_id"),
         "spec_ref": plan.get("spec_ref"),
+        "counts": counts,
         "issues": issues,
     }
