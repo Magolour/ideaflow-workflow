@@ -15,7 +15,7 @@ from .constraints import deadline_days
 from .contracts import ContractError
 from .drafts import SATISFIES
 from .snapshot import Snapshot
-from .spec import VALUE_ORDER, Spec, acceptance_for, effort_for, feature_of
+from .spec import VALUE_ORDER, Spec, effort_for, feature_of
 from .storage import now_iso, write_json
 
 SIMPLIFY = {
@@ -33,11 +33,14 @@ def _fingerprint(issue: dict[str, Any]) -> tuple[str, tuple[str, ...], tuple[str
             tuple(sorted(issue["constraint_ids"])))
 
 
-def _find_decision(spec: Spec, requirement_id: str) -> dict[str, Any]:
+def _find_decision(spec: Spec, reference: str) -> dict[str, Any]:
     for decision in spec.decisions:
-        if requirement_id in decision["requirement_ids"]:
+        if decision["id"] == reference:
             return decision
-    raise ContractError("UNKNOWN_REQUIREMENT", f"规格里没有需求 {requirement_id}",
+    for decision in spec.decisions:
+        if reference in decision["requirement_ids"]:
+            return decision
+    raise ContractError("UNKNOWN_REQUIREMENT", f"规格里没有需求 {reference}",
                         "requirement_id")
 
 
@@ -64,7 +67,8 @@ def apply_revision(spec: Spec, snapshot: Snapshot, audit: dict[str, Any],
         path = f"operations[{index}]"
         kind = op.get("op")
         if kind == "update_decision":
-            decision = _find_decision(revised, str(op.get("requirement_id", "")))
+            reference = str(op.get("decision_id") or op.get("requirement_id") or "")
+            decision = _find_decision(revised, reference)
             before = {"choice": decision["choice"],
                       "cost_days": decision["cost_days"],
                       "satisfies": decision["satisfies"]}
@@ -83,33 +87,41 @@ def apply_revision(spec: Spec, snapshot: Snapshot, audit: dict[str, Any],
                 "needs_human": satisfies != "full",
                 "reason": str(op.get("reason", decision["reason"])),
             })
+            decision_id = decision["id"]
             requirement_id = decision["requirement_ids"][0]
             for module in revised.modules:
-                if requirement_id in module["requirement_ids"]:
+                if (decision_id in (module.get("decision_ids") or [])
+                        or (not module.get("decision_ids")
+                            and requirement_id in module["requirement_ids"])):
                     module["responsibility"] = choice
                     module["estimate_days"] = cost
-            position = revised.decisions.index(decision) + 1
-            generated = acceptance_for(decision, position)
-            for row in revised.acceptance:
-                if row["requirement_id"] == requirement_id:
-                    row["criterion"] = op.get("criterion", generated["criterion"])
-                    row["verify"] = op.get("verify", generated["verify"])
-            changes.append({"op": kind, "requirement_id": requirement_id,
+            position = revised.decisions.index(decision)
+            row = (revised.acceptance[position]
+                   if position < len(revised.acceptance) else None)
+            if row is not None and ("criterion" in op or "verify" in op):
+                if "criterion" in op:
+                    row["criterion"] = str(op["criterion"]).strip() or row["criterion"]
+                if "verify" in op:
+                    row["verify"] = str(op["verify"]).strip() or row["verify"]
+            changes.append({"op": kind, "decision_id": decision_id,
+                            "requirement_id": requirement_id,
                             "before": before,
                             "after": {"choice": choice, "cost_days": cost,
                                       "satisfies": satisfies}})
         elif kind == "update_acceptance":
-            requirement_id = str(op.get("requirement_id", ""))
-            _find_decision(revised, requirement_id)
-            row = next((item for item in revised.acceptance
-                        if item["requirement_id"] == requirement_id), None)
+            reference = str(op.get("decision_id") or op.get("requirement_id") or "")
+            decision = _find_decision(revised, reference)
+            position = revised.decisions.index(decision)
+            row = (revised.acceptance[position]
+                   if position < len(revised.acceptance) else None)
             if row is None:
                 raise ContractError("UNKNOWN_ACCEPTANCE",
-                                    f"{requirement_id} 没有验收条件", f"{path}.requirement_id")
+                                    f"{reference} 没有验收条件", f"{path}.requirement_id")
             before = {"criterion": row["criterion"], "verify": row["verify"]}
             row["criterion"] = str(op.get("criterion", row["criterion"])).strip()
             row["verify"] = str(op.get("verify", row["verify"])).strip()
-            changes.append({"op": kind, "requirement_id": requirement_id,
+            changes.append({"op": kind, "decision_id": decision["id"],
+                            "requirement_id": decision["requirement_ids"][0],
                             "before": before,
                             "after": {"criterion": row["criterion"], "verify": row["verify"]}})
         else:
@@ -174,31 +186,38 @@ def scope_revision(spec: Spec, snapshot: Snapshot,
         feature = feature_of(module["name"]) or feature_of(module["responsibility"])
         return VALUE_ORDER.index(feature) if feature in VALUE_ORDER else 9
 
+    def estimate_value(module: dict[str, Any]) -> float:
+        value = module.get("estimate_days")
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
     # 价值越低越先裁剪：收藏、评价、自提在前，搜索最后
     ordered = sorted(spec.modules, key=lambda module: (-value_rank(module),
-                                                       -module["estimate_days"]))
+                                                       -estimate_value(module)))
 
     operations: list[dict[str, Any]] = []
     names: list[str] = []
     for module in ordered:
         if target <= 0:
             break
-        current = float(module["estimate_days"])
-        if current <= 0.6:
+        estimate = module.get("estimate_days")
+        if not isinstance(estimate, (int, float)) or float(estimate) <= 0.6:
             continue
+        current = float(estimate)
         refs = [str(item) for item in (module.get("requirement_ids") or [])
                 if str(item).startswith("R-")]
         if not refs:
             # 功能退化为 F 编号时没有可裁剪的真实需求，不静默改估算。
             continue
+        decision_id = (module.get("decision_ids") or [None])[0]
+        decision = _find_decision(spec, str(decision_id or refs[0]))
+        requirement_id = decision["requirement_ids"][0]
         new_cost = max(0.5, round(current * 0.5, 1))
         saving = current - new_cost
-        requirement_id = refs[0]
-        decision = _find_decision(spec, requirement_id)
         feature = feature_of(module["name"]) or feature_of(decision["scope"])
         choice = SIMPLIFY.get(feature, f"{decision['choice']}（首版只做最小实现）")
         operations.append({
-            "op": "update_decision", "requirement_id": requirement_id,
+            "op": "update_decision", "decision_id": decision["id"],
+            "requirement_id": requirement_id,
             "choice": choice, "cost_days": new_cost,
             "reason": f"期限 {deadline} 天：{module['name']} 首版只保留最小实现",
         })

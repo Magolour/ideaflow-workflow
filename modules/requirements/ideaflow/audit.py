@@ -30,6 +30,7 @@ TYPE_SEVERITY = {
     "ACCEPTANCE_NOT_MEASURABLE": "major",
     "MAPPING_INCONSISTENT": "major",
     "NON_GOAL_OVERLAP": "major",
+    "ESTIMATE_MISSING": "major",
 }
 TYPE_LABEL = {
     "COVERAGE_MISSING_DECISION": "需求没有对应决策",
@@ -43,6 +44,7 @@ TYPE_LABEL = {
     "ACCEPTANCE_NOT_MEASURABLE": "验收条件不可度量",
     "MAPPING_INCONSISTENT": "需求与模块映射不一致",
     "NON_GOAL_OVERLAP": "非目标与方案范围重叠",
+    "ESTIMATE_MISSING": "模块缺少估时",
 }
 
 MEASURABLE = re.compile(
@@ -163,6 +165,17 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
         _issue(issues, "MAPPING_INCONSISTENT",
                f"模块没有登记到任何需求：{', '.join(sorted(orphans))}",
                fix_hint="为模块补充 requirement_ids 并登记映射")
+
+    missing_estimates = [module for module in spec.modules
+                         if not isinstance(module.get("estimate_days"), (int, float))]
+    if missing_estimates:
+        _issue(issues, "ESTIMATE_MISSING",
+               "以下模块缺少估时："
+               + "、".join(f"{row['id']} {row['name']}" for row in missing_estimates),
+               requirement_ids=list(dict.fromkeys(
+                   ref for row in missing_estimates
+                   for ref in (row.get("requirement_ids") or []))),
+               fix_hint="补齐草案工作包估算后再确认规格")
 
     verified = 0
     active_rows = [*spec.decisions, *spec.modules]
