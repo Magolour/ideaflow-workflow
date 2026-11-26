@@ -4,7 +4,7 @@
 保留分歧记录的 Proposal。
 
 本项目按《IdeaFlow 多智能体人机协同工作流设计方案 V2 修订版》（第七组）实现，
-覆盖讨论闭环、规格链路与真实模型接入。所有能力默认离线可跑，不需要 API Key。
+**当前完成第一部分：讨论闭环**。所有能力默认离线可跑，不需要 API Key。
 
 ## 现在能做什么
 
@@ -26,22 +26,6 @@ python -m ideaflow.cli "做一个校园二手书交易小程序，学生可以�
 | `blackboard.json` | 黑板完整快照：论点、假设、异议、方案、立场、决策、版本 |
 | `events.jsonl` | 追加式事件流，`seq` 连续递增，可增量回放 |
 | `run.json` | 本次运行摘要：计数、共识状态、路径 |
-
-## 多 Agent 讨论：六个角色
-
-`pipeline.py` 按「澄清 → 发散 → 批判 → 回应 → 整合 → 签署 → 收敛」七阶段推进。
-六个讨论角色互不可见，编号与写入由代码控制：
-
-| ID | 角色 | 关注点 |
-| --- | --- | --- |
-| `ba` | 需求分析 | 用户、场景、问题与功能需求，指出信息缺口 |
-| `user` | 用户视角 | 用户画像、使用场景、痛点真实性、使用路径 |
-| `tech` | 技术专家 | 技术可行性、依赖、实现难点与技术风险 |
-| `innovation` | 创新顾问 | 替代方案、差异化能力、更小切口 |
-| `risk` | 风险评估 | 成本、进度、安全、数据与实施风险 |
-| `skeptic` | 质疑者 | 挑战关键假设、寻找逻辑跳跃与反例 |
-
-另有 `synthesizer`（记录员/整合者）与 `host`（主持人），由代码调度，不参与并行发散。
 
 ## Web 工作台：输入 → 生成 → 下载
 
@@ -156,30 +140,6 @@ python -m ideaflow.spec_cli escalate --dir runs/tight-demo   # 产出 1 个人�
 `human_question.json`、`manifest.json`。
 
 > `audit`、`revise` 在仍有阻断问题时返回 1，这是刻意设计的流水线信号，不是崩溃。
-
-### 功能归纳：从讨论结论到模块
-
-讨论完成后先产出一份功能清单，规格不再直接把原文句子当模块：
-
-```bash
-python -c "from ideaflow.specflow import run; run('我要做微信', out_dir='runs/feat', discuss=True)"
-```
-
-产物 `features.json` 受 `contracts/v2/features.schema.json` 约束：3–12 条，名称 2–24 字，
-每条至少一个真实来源（`CLM/OPT/R`），`inferred` 标明是否为推断。
-
-映射规则：
-
-| 规则 | 实现 |
-| --- | --- |
-| 功能 → 需求 | 按功能名/描述关键词匹配快照需求，覆盖多条 `R-xx` |
-| 匹配不到 | 保留 `F-xx` 写入 `open_items`，不再拿第一条需求顶替 |
-| 模块 | 一个功能一个模块，名称唯一，最多 12 个 |
-| 验收 | 每个功能独立判据，检索、录入、审批等分别生成 |
-| 估时 | 取草案工作包/决策的真实值；取不到写 `null`，并在 `open_items` 说明 |
-| 依赖 | 按功能语义补最小依赖；推不出时留空并在 `open_items` 提示串行风险 |
-
-`discuss=False` 时仍走原文需求逐条建模块的旧路径。
 
 ### 需求快照
 
@@ -462,7 +422,7 @@ python -m ideaflow.spec_cli escalate --dir runs/tight-demo
 ## 快速开始
 
 ```bash
-python -m unittest discover -s tests -v     # 199 项测试
+python -m unittest discover -s tests -v     # 187 项测试
 python -m ideaflow.cli --help
 python -m ideaflow.server --help
 ```
