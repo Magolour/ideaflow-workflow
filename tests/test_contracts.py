@@ -20,6 +20,8 @@ FILES = {
     "artifact": "artifact.schema.json",
     "delivery": "delivery.schema.json",
     "features": "features.schema.json",
+    "evidence": "evidence.schema.json",
+    "summary": "summary.schema.json",
 }
 
 NORMAL = {
@@ -33,6 +35,8 @@ NORMAL = {
     "artifact": "artifact.normal.json",
     "delivery": "delivery.normal.json",
     "features": "features.normal.json",
+    "evidence": "evidence.normal.json",
+    "summary": "summary.normal.json",
 }
 
 # 每份异常样例要触发的具体规则，避免 schema 松动后样例"因别的原因"误过
@@ -47,6 +51,8 @@ EXPECTED_FAILURE = {
     "artifact": "path",
     "delivery": "decided_by",
     "features": "source_refs",
+    "evidence": "required",
+    "summary": "minimum",
 }
 
 INVALID = {
@@ -60,6 +66,8 @@ INVALID = {
     "artifact": "artifact.invalid.json",
     "delivery": "delivery.invalid.json",
     "features": "features.invalid.json",
+    "evidence": "evidence.invalid.json",
+    "summary": "summary.invalid.json",
 }
 
 
@@ -131,6 +139,43 @@ class ContractTest(unittest.TestCase):
                 expected = EXPECTED_FAILURE[key]
                 self.assertTrue(any(expected in message for message in errors),
                                 f"应因 {expected} 失败，实际：{errors}")
+
+    def test_openapi_declares_new_paths_and_fields(self):
+        """v2.1 新增的接口与字段必须出现在契约里，不能只在文档里说。"""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 pyyaml")
+        api = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
+        for path in ("/api/spec/item", "/api/graph/edit", "/api/replay", "/api/summary"):
+            self.assertIn(path, api["paths"])
+        schemas = api["components"]["schemas"]
+        progress = schemas["Progress"]["properties"]
+        for field in ("edges", "mode", "phase", "plan_review", "spec"):
+            self.assertIn(field, progress, f"Progress 缺字段 {field}")
+        task = schemas["TaskState"]["properties"]
+        for field in ("kind", "started_at", "finished_at", "evidence"):
+            self.assertIn(field, task, f"TaskState 缺字段 {field}")
+
+    def test_enums_cover_kind_mode_and_unverified(self):
+        defs = self.schemas["enums"]["$defs"]
+        self.assertIn("unverified", defs["acceptanceResult"]["enum"])
+        self.assertEqual(["code", "test", "review", "doc"], defs["taskKind"]["enum"])
+        self.assertEqual(["mock", "live"], defs["runMode"]["enum"])
+
+    def test_plan_accepts_kind_and_test_task_id(self):
+        """测试任务用 T1T 这类后缀编号，且 kind 必须是四种类型之一。"""
+        plan = json.loads((EXAMPLES / "plan.normal.json").read_text(encoding="utf-8"))
+        plan["tasks"] = plan["tasks"][:1]
+        plan["tasks"][0].update({"task_id": "T1T", "kind": "test"})
+        plan["tasks"][0].pop("depends_on", None)
+        errors = [error.message for error in self.validator("plan").iter_errors(plan)]
+        self.assertEqual([], errors)
+
+        plan["tasks"][0]["kind"] = "build"
+        errors = [error.message for error in self.validator("plan").iter_errors(plan)]
+        self.assertTrue(any("is not one of" in message for message in errors),
+                        f"非法 kind 应被拒绝，实际：{errors}")
 
     def validator(self, key: str):
         return Draft202012Validator(self.inline(self.schemas[key]))
