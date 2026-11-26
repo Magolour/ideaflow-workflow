@@ -314,7 +314,7 @@ class RealtimeAgent:
     """按优先级处理数据包，维护实例状态并追加事件流。"""
 
     def __init__(self, out_dir: Path = ROOT / "output", mock: bool = False,
-                 upload_path: Path = UPLOAD_PATH) -> None:
+                 auto_exec: bool = False, upload_path: Path = UPLOAD_PATH) -> None:
         self.lock = threading.RLock()
         self.out_dir = out_dir
         self.upload_path = upload_path
@@ -323,6 +323,7 @@ class RealtimeAgent:
         self.decisions_path = out_dir / "decisions.jsonl"
         self.state_path = out_dir / "runtime_state.json"
         self.mock = mock
+        self.auto_exec = auto_exec
         self.instance_id = "INST-2026-0001"
         self.spec_version = "v1.0"
         self.list_version = "v1.0"
@@ -330,6 +331,7 @@ class RealtimeAgent:
         self.plan_id: str | None = None
         self.plan: dict | None = None
         self.spec: dict | None = None
+        self.plan_review: dict | None = None
         self.auto_execute = False
         self.analysis_summary = ""
         self.tasks: dict[str, dict] = {}
@@ -394,7 +396,7 @@ class RealtimeAgent:
             self.plan, self.spec = plan, spec_obj
             self.plan_id, self.list_version = plan_id, entry.list_version
             self.spec_version = spec_version
-            self.auto_execute = bool(requirement and self.mock)
+            self.auto_execute = self.auto_exec
 
             self.tasks = {task["task_id"]: {**task, "status": "pending", "attempts": 0}
                           for task in tasks}
@@ -432,6 +434,7 @@ class RealtimeAgent:
             for name in ("spec.json", f"spec.v{self.spec['version']}.json"):
                 (self.out_dir / name).write_text(spec_json, encoding="utf-8")
             review = review_plan(self.spec, self.plan)
+            self.plan_review = review
             (self.out_dir / "plan_review.json").write_text(
                 json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
             self.emit("system", "plan", self.plan_id, "plan_validated",
@@ -571,7 +574,7 @@ class RealtimeAgent:
                       f"计划 {self.plan_id} v{plan['version']} 已批准")
             self._dispatch_ready()
             if self.auto_execute:
-                self._start_mock_executor()
+                self._start_auto_executor()
             return
         if action != "return":
             raise ValueError("待批准计划只接受批准或定向退回")
@@ -938,8 +941,8 @@ class RealtimeAgent:
                   f"交付 {delivery['delivery_id']} 已确认" if approved
                   else f"交付 {delivery['delivery_id']} 已驳回：{reason}")
 
-    def _start_mock_executor(self) -> None:
-        """mock 模式下的自动执行器：把 running 的 AI 任务逐个收尾，用于全链路演示。"""
+    def _start_auto_executor(self) -> None:
+        """自动执行器：把 running 的 AI 任务逐个收尾，仅在 --auto-exec 时启用。"""
         if self._auto_thread is not None:
             return
 
@@ -957,7 +960,7 @@ class RealtimeAgent:
                         continue
                     try:
                         self._ai_report({"task_id": task["task_id"], "result": "done",
-                                         "detail": "mock 模式自动执行完成"})
+                                         "detail": "自动执行完成（--auto-exec）"})
                         self.save()
                     except Exception as exc:  # 自动执行失败留在 last_error，等人工介入
                         self.last_error = str(exc)
@@ -1018,6 +1021,7 @@ class RealtimeAgent:
             "spec_version": self.spec_version,
             "plan_id": self.plan_id,
             "plan_version": self.plan["version"] if self.plan else None,
+            "plan_review": self.plan_review,
             "can_return_spec": self.spec is not None and self._waiting_for_plan(),
             "list_version": self.list_version,
             "graph_id": self.graph_id,
@@ -1243,9 +1247,11 @@ def serve_cli(argv: list[str]) -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--out", type=Path, default=ROOT / "output")
     parser.add_argument("--mock", action="store_true", help="不调模型")
+    parser.add_argument("--auto-exec", dest="auto_exec", action="store_true",
+                        help="演示模式：计划批准后自动回报 AI 任务完成（默认关闭）")
     args = parser.parse_args(argv)
 
-    agent = RealtimeAgent(args.out, args.mock)
+    agent = RealtimeAgent(args.out, args.mock, args.auto_exec)
     AgentHandler.agent = agent
     server = AgentServer((args.host, args.port), AgentHandler)
     print(f"编排器已启动：http://{args.host}:{args.port}")
@@ -1262,7 +1268,7 @@ def serve_cli(argv: list[str]) -> int:
 
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] != "serve":
-        raise SystemExit("用法：py -3 python/agent.py serve [--host HOST] [--port PORT] [--out DIR] [--mock]")
+        raise SystemExit("用法：py -3 python/agent.py serve [--host HOST] [--port PORT] [--out DIR] [--mock] [--auto-exec]")
     return serve_cli(sys.argv[2:])
 
 

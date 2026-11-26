@@ -136,6 +136,19 @@
   .gate.done .t { color: #1F5F47; }
   .gate.done .m { color: #2C6D52; }
 
+  /* 计划评审 */
+  .review { margin-top: 8px; border-top: 1px dashed #E4CD9B; padding-top: 7px; }
+  .review .sum { font-size: 11.5px; color: #7A5A16; font-weight: 600; }
+  .review .list { margin-top: 5px; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
+  .review .item { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; line-height: 1.5; }
+  .review .sev { flex: 0 0 auto; border-radius: 999px; padding: 0 6px; font-size: 10.5px; font-weight: 700; }
+  .review .sev.blocking { background: #F6DEDA; color: #8C3B33; }
+  .review .sev.major { background: #F8E8C8; color: #7A5A16; }
+  .review .sev.minor { background: #E7EFE9; color: #4D6B5F; }
+  .review .code { font-family: Consolas, monospace; font-size: 10.5px; color: var(--muted); }
+  .review .tid { font-family: Consolas, monospace; font-size: 10.5px; color: var(--teal); font-weight: 700; }
+  .review .msg { flex: 1 1 auto; word-break: break-all; }
+
   .delivery-items { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow: auto; }
   .ditem { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; line-height: 1.5;
            border-bottom: 1px dashed #E7EFE9; padding-bottom: 4px; }
@@ -471,6 +484,7 @@ const GATE_LABEL = {
   plan_approval: "计划审批",
   task_execution: "人工节点执行", task_failed: "任务失败待接管", delivery_confirm: "交付确认"
 };
+const SEV_LABEL = { blocking: "阻断", major: "重大", minor: "轻微" };
 const ROLE_LABEL = { ai: "AI", human: "人工", "ai+human": "AI+人工" };
 const ACTION_LABEL = {
   created: "实例创建", requirement_parsed: "需求解析", dependency_confirmed: "依赖确认",
@@ -687,6 +701,24 @@ function renderStats() {
 }
 
 /* ---------- ② 待人工处理：等待原因 + 可执行操作 ---------- */
+function planReviewHtml(review) {
+  if (!review || !review.counts) return "";
+  const c = review.counts, issues = review.issues || [];
+  const sum = "计划质量：共 " + (c.total || 0) + " 条"
+    + " · 阻断 " + (c.blocking || 0) + " · 重大 " + (c.major || 0)
+    + " · 轻微 " + (c.minor || 0) + "（只告警，不拦截批准）";
+  const rows = issues.length
+    ? issues.map(row => '<div class="item">'
+        + '<span class="sev ' + esc(row.severity || "minor") + '">'
+        + esc(SEV_LABEL[row.severity] || row.severity || "提示") + '</span>'
+        + '<span class="code">' + esc(row.code || "") + '</span>'
+        + (row.task_id ? '<span class="tid">' + esc(row.task_id) + '</span>' : "")
+        + '<span class="msg">' + esc(row.message || "") + '</span></div>').join("")
+    : '<div class="item"><span class="msg">未发现问题。</span></div>';
+  return '<div class="review"><div class="sum">' + esc(sum) + '</div>'
+    + '<div class="list">' + rows + '</div></div>';
+}
+
 function renderGate() {
   const s = state || {};
   const gate = s.waiting_on;
@@ -712,7 +744,9 @@ function renderGate() {
   if (gate.gate_type === "plan_approval") {
     box.innerHTML = '<div class="gate"><div class="t">待批准 · '
       + esc(s.plan_id) + ' v' + esc(s.plan_version) + '</div>'
-      + '<div class="m">批准当前版本后开始派发任务。</div><div class="acts">'
+      + '<div class="m">批准当前版本后开始派发任务。</div>'
+      + planReviewHtml(s.plan_review)
+      + '<div class="acts">'
       + '<button class="gold tiny" data-plan-op="approve">批准计划</button>'
       + '<button class="warn tiny" data-plan-op="plan">退回计划</button>'
       + (s.can_return_spec ? '<button class="warn tiny" data-plan-op="spec">退回规格</button>' : '')
