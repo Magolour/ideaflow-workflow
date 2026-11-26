@@ -42,8 +42,8 @@ def inline(node, by_file):
 
 
 @contextlib.contextmanager
-def running_server(out_dir: Path):
-    agent = RealtimeAgent(out_dir=out_dir, mock=True,
+def running_server(out_dir: Path, auto_exec: bool = False):
+    agent = RealtimeAgent(out_dir=out_dir, mock=True, auto_exec=auto_exec,
                           upload_path=out_dir / "uploaded.json")
     handler = type("IsolatedHandler", (AgentHandler,), {"agent": agent})
     server = AgentServer(("127.0.0.1", 0), handler)
@@ -431,7 +431,7 @@ class ApiGapTest(unittest.TestCase):
         Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
 
     def test_full_chain_from_idea_to_delivery(self):
-        with running_server(self.out) as (base, _):
+        with running_server(self.out, auto_exec=True) as (base, _):
             body = post_json(f"{base}/api/start", {"requirement": (
                 "做一个校园二手书交易小程序。"
                 "学生可以发布二手教材。"

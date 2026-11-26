@@ -8,8 +8,22 @@
 
 from __future__ import annotations
 
+import re
+
 MAX_ESTIMATE_DAYS = 3.0
 DAYS_TOLERANCE = 0.05  # 工期合计容差 5%，因为浮点数均分可能产生微小误差
+
+_INTERFACE_CALL_RE = re.compile(r"调用\s+(\S+?)\s*→")
+
+
+def _task_interface_names(task: dict) -> list[str]:
+    """从验收项里的「… 调用 X → …」反解接口名（契约不允许任务带 interfaces 字段）。"""
+    names: list[str] = []
+    for item in task.get("acceptance_items") or []:
+        match = _INTERFACE_CALL_RE.search(str(item))
+        if match:
+            names.append(match.group(1))
+    return names
 
 SEVERITY_BY_CODE = {
     # 阻断级：任务引用了规格里根本不存在的东西
@@ -170,13 +184,8 @@ def review_plan(spec: dict, plan: dict) -> dict:
                     "message": f"任务 {task_id} 引用了规格里不存在的模块 {ref}",
                 })
 
-        # interfaces 里的接口名必须属于 design_refs 里的某个模块
-        for itf in task.get("interfaces") or []:
-            if not isinstance(itf, dict):
-                continue
-            itf_name = str(itf.get("name") or "")
-            if not itf_name:
-                continue
+        # 接口名必须属于 design_refs 里的某个模块；接口名从验收项反解
+        for itf_name in _task_interface_names(task):
             owner_modules = [str(r) for r in (task.get("design_refs") or [])]
             found = False
             for owner in owner_modules:

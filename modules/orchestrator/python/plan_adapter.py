@@ -331,10 +331,14 @@ def plan_from_spec(spec: dict, *, plan_id: str | None = None,
 
             task_name = f"{name}" if p_idx == 0 else f"{name} · {part['label'] or f'阶段 {p_idx + 1}'}"
 
-            # 验收项：优先用 part 里拆分出的验收项，其次把接口转成可读描述，最后兜底
-            acceptance = part.get("acceptance_items") or []
-            if not acceptance and part.get("interfaces"):
-                acceptance = [_interface_acceptance(itf) for itf in part["interfaces"]]
+            # 验收项：先用 part 里的验收项，再把该段接口转成可读描述追加，最后兜底
+            acceptance = list(part.get("acceptance_items") or [])
+            for itf in part.get("interfaces") or []:
+                if not isinstance(itf, dict):
+                    continue
+                line = _interface_acceptance(itf)
+                if line not in acceptance:
+                    acceptance.append(line)
             if not acceptance and p_idx == 0:
                 acceptance = list(module.get("acceptance_items") or ["验收通过"])
             if not acceptance:
@@ -343,18 +347,11 @@ def plan_from_spec(spec: dict, *, plan_id: str | None = None,
             # 写路径：每段带上自己拆分的路径，没有就兜底模块路径
             write_paths = list(part.get("write_paths") or module.get("write_paths") or [])
 
-            # 把 part 里的接口信息挂到任务上（不是契约字段，作为注释性补充）
-            part_interfaces = part.get("interfaces") or []
-            interfaces_payload = [{"name": _if.get("name"), "caller": _if.get("caller"),
-                                   "input": _if.get("input"), "output": _if.get("output")}
-                                  for _if in part_interfaces if isinstance(_if, dict)]
-
             task = {
                 "task_id": task_id,
                 "name": task_name,
                 "deliverable": module.get("deliverable") or f"{name}交付物",
                 "acceptance_items": acceptance,
-                "interfaces": interfaces_payload,
                 "suggested_role": role,
                 "priority": "high",
                 "requirement_refs": list(module.get("requirement_ids") or []),
