@@ -49,6 +49,7 @@
 18. `Progress` 新增只读字段 `mode`、`phase`、`plan_review`、`spec`（`edges` 已实现，本版补文档）；
     新增接口 `PATCH /api/spec/item`、`POST /api/graph/edit`、`GET /api/replay`、`GET /api/summary`，
     错误体统一为 `{error, message, details}`，错误码大写加下划线。
+19. `plan_review.issues` 的 `code` 目前是自由字符串，已知取值：`MODULE_WITHOUT_TASK`、`DEPENDENCY_INVALID`、`DEPENDENCY_CYCLE`、`OUT_OF_SPEC_REQUIREMENT`、`OUT_OF_SPEC_DESIGN_REF`、`OUT_OF_SPEC_INTERFACE`、`TASK_TOO_LARGE`、`MODULE_DAYS_EXCEEDED`；T-16 落地后新增 `TASK_SPLIT`（拆分发生时）与 `TEST_MISSING`（缺测试任务）。新增 code 先在这里登记。
 
 ## 校验
 

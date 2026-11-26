@@ -430,6 +430,34 @@ class ApiGapTest(unittest.TestCase):
         Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
         Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
 
+    def test_progress_exposes_plan_review(self):
+        """计划评审必须进 Progress，页面才能展开问题与任务号。"""
+        spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
+                          .read_text(encoding="utf-8"))
+        with running_server(self.out) as (base, _):
+            body = post_json(f"{base}/api/start", spec)
+        progress = body["progress"]
+        review = progress["plan_review"]
+        self.assertIsNotNone(review, "Progress 缺 plan_review")
+        self.assertEqual(review["plan_id"], progress["plan_id"])
+        self.assertEqual(review["counts"]["total"], len(review["issues"]))
+        for issue in review["issues"]:
+            self.assertIn(issue["severity"], {"blocking", "major", "minor"})
+            self.assertIn("code", issue)
+            self.assertIn("message", issue)
+
+    def test_mock_mode_does_not_auto_execute(self):
+        """--mock 只关模型；未加 --auto-exec 时批准后任务不应自动完成。"""
+        spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
+                          .read_text(encoding="utf-8"))
+        with running_server(self.out) as (base, _):   # auto_exec 默认 False
+            post_json(f"{base}/api/start", spec)
+            approve_plan(base)
+            time.sleep(1.5)
+            progress = get_json(f"{base}/api/progress")
+        self.assertGreaterEqual(progress["running"], 1, "批准后应有任务进入 running")
+        self.assertEqual(progress["done"], 0, "未开 --auto-exec 不应自动完成")
+
     def test_full_chain_from_idea_to_delivery(self):
         with running_server(self.out, auto_exec=True) as (base, _):
             body = post_json(f"{base}/api/start", {"requirement": (

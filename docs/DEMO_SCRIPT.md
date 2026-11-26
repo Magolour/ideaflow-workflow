@@ -101,7 +101,17 @@ PY
 | 成环 | 409，`error=GRAPH_CYCLE`，`details.cycle` 列出环节点 |
 | 完整性 | 事件流没有新增事件，计划版本不变 |
 
-2.3 展开审批面板：能看到计划评审问题（`plan_review.issues`），每条带 `code`、`task_id`、`message`；若缺测试任务，应出现 `TEST_MISSING`。
+2.3 展开审批面板：能看到计划评审问题（`plan_review.issues`），每条带 `code`、`task_id`、`message`。
+
+本步造问题用两种方式，不要再用 `TASK_TOO_LARGE`——超限任务会被自动拆分消解：
+
+| 造法 | 期望 code | 说明 |
+| --- | --- | --- |
+| 把模块估时改成 6 天以上 | `TASK_SPLIT`（major） | 写明原估时与拆后条数；拆出的任务验收项应与父任务不同 |
+| 计划里引用规格中不存在的接口或模块 | `OUT_OF_SPEC_INTERFACE` / `OUT_OF_SPEC_DESIGN_REF`（blocking） | 面板显示阻断项；当前口径只告警，不阻断派发 |
+| 缺测试任务（T-16 落地后） | `TEST_MISSING` | 可用手工构造计划注入 |
+
+检查点：`plan_review.counts.total` 等于 `issues` 长度；每条 issue 的任务号能在 `tasks` 里找到。
 
 ---
 
