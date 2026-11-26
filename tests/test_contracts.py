@@ -177,6 +177,68 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(any("is not one of" in message for message in errors),
                         f"非法 kind 应被拒绝，实际：{errors}")
 
+    def test_endpoint_examples_match_components(self):
+        """新接口的联调样例必须对得上 openapi 的组件 schema。"""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 pyyaml")
+        api = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
+        by_file = {path.name: load(path.name) for path in V2.glob("*.json")}
+        by_file.update(api["components"]["schemas"])
+        cases = {
+            "spec_item.request.json": "SpecItemPatch",
+            "graph_edit.request.json": "GraphEditRequest",
+            "graph_edit.invalid.json": "GraphEditRequest",
+            "graph_edit.result.json": "GraphEditResult",
+            "replay.result.json": "ReplayResult",
+        }
+        def resolve(node):
+            if isinstance(node, dict):
+                if "$ref" in node:
+                    ref = node["$ref"]
+                    if ref.startswith("#/components/schemas/"):
+                        return resolve(api["components"]["schemas"][ref.rsplit("/", 1)[-1]])
+                    file_name, _, fragment = ref.partition("#")
+                    target = by_file[file_name]
+                    for part in [p for p in fragment.split("/") if p]:
+                        target = target[part]
+                    return resolve(target)
+                return {key: resolve(value) for key, value in node.items()}
+            if isinstance(node, list):
+                return [resolve(item) for item in node]
+            return node
+
+        for filename, name in cases.items():
+            with self.subTest(example=filename):
+                data = json.loads((EXAMPLES / filename).read_text(encoding="utf-8"))
+                validator = Draft202012Validator(resolve(by_file[name]))
+                errors = [error.message for error in validator.iter_errors(data)]
+                if "invalid" in filename:
+                    self.assertTrue(errors, f"{filename} 必须被拒绝")
+                else:
+                    self.assertEqual([], errors, f"{filename}: {errors}")
+
+    def test_new_paths_declare_status_codes(self):
+        """四个新接口的状态码必须写清，防止实现时随手改。"""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 pyyaml")
+        api = yaml.safe_load((V2 / "openapi.yaml").read_text(encoding="utf-8"))
+        expected = {
+            "/api/spec/item": {"200", "400", "404", "409", "422"},
+            "/api/graph/edit": {"200", "400", "409", "422"},
+            "/api/replay": {"200", "400"},
+            "/api/summary": {"200", "409"},
+        }
+        for path, codes in expected.items():
+            with self.subTest(path=path):
+                item = api["paths"][path]
+                method = next(iter(item))
+                declared = set(item[method]["responses"])
+                self.assertTrue(codes <= declared, f"{path} 缺 {sorted(codes - declared)}")
+
     def validator(self, key: str):
         return Draft202012Validator(self.inline(self.schemas[key]))
 

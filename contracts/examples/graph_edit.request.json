@@ -1,0 +1,11 @@
+{
+  "plan_id": "PLAN-SPEC-001",
+  "plan_version": 1,
+  "actor": "human:web",
+  "reason": "把检索接到挂单之后",
+  "ops": [
+    { "op": "add_edge", "from": "T1", "to": "T2", "type": "force" },
+    { "op": "del_edge", "from": "T2", "to": "T3" },
+    { "op": "set_edge_type", "from": "T1", "to": "T2", "type": "data" }
+  ]
+}

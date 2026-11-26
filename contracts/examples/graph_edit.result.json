@@ -1,0 +1,13 @@
+{
+  "plan": {
+    "plan_id": "PLAN-SPEC-001",
+    "version": 2
+  },
+  "edges": [
+    { "from": "T1", "to": "T2", "type": "force", "reason": "计划自带依赖" }
+  ],
+  "layers": [
+    ["T1"],
+    ["T2"]
+  ]
+}

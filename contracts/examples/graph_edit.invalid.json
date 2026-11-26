@@ -1,0 +1,7 @@
+{
+  "plan_id": "PLAN-SPEC-001",
+  "plan_version": 0,
+  "ops": [
+    { "op": "rename_task", "task_id": "T1" }
+  ]
+}

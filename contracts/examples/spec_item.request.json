@@ -1,0 +1,8 @@
+{
+  "run_id": "20261126-100000-spec-campus-books",
+  "item_id": "R-02",
+  "text": "学生可以按书名或 ISBN 搜索教材",
+  "item_version": 1,
+  "actor": "human:web",
+  "reason": "补充 ISBN 检索"
+}
