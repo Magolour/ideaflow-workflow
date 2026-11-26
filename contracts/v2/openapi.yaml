@@ -80,6 +80,86 @@ paths:
       summary: 健康检查
       responses:
         "200": { description: OK }
+  /api/spec/item:
+    patch:
+      summary: 修改需求快照条目并重新出规格（成员 2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpecItemPatch" }
+      responses:
+        "200":
+          description: 已生成新版本规格与审计
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: ["spec", "audit"]
+                properties:
+                  spec: { $ref: "#/components/schemas/SpecSummary" }
+                  audit: { $ref: "#/components/schemas/SpecAudit" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: UNKNOWN_ITEM，条目不存在
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: STALE_ITEM，item_version 与当前不一致，状态保持不变
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: INVALID_TEXT，文本为空或超长
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /api/graph/edit:
+    post:
+      summary: 编辑依赖图并复校（成员 4）
+      description: >-
+        乐观锁：请求携带 plan_version，成功则版本 +1、写 plan_edited 与 graph_validated、
+        重新进入 waiting_human（gate_type=plan_approval）。失败不入队，事件流不新增。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphEditRequest" }
+      responses:
+        "200":
+          description: 已生成新版本计划
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphEditResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: PLAN_VERSION_STALE，或图不合法（GRAPH_CYCLE / GRAPH_DANGLING / GRAPH_SELF_DEP / GRAPH_DUP_ID / GRAPH_TASK_STARTED），details 带具体对象
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: INVALID_OP，操作不受支持或参数缺失
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /api/replay:
+    get:
+      summary: 回放到指定事件序号（成员 3）
+      parameters:
+        - { name: seq, in: query, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: 处理完第 seq 条事件后的状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReplayResult" }
+        "400":
+          description: SEQ_OUT_OF_RANGE，序号超出范围
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /api/summary:
+    get:
+      summary: 运行总结（成员 3）
+      responses:
+        "200":
+          description: 终态总结
+          content:
+            application/json:
+              schema: { $ref: "summary.schema.json" }
+        "409":
+          description: NOT_TERMINAL，实例未进入终态
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 components:
   responses:
     BadRequest:
@@ -148,6 +228,22 @@ components:
         can_return_spec:
           type: boolean
           description: 当前待批计划有可退回的规格正文
+        mode:
+          $ref: "enums.schema.json#/$defs/runMode"
+        phase:
+          type: string
+          description: 当前阶段，供时间线与回放分组
+          enum: [discussion, snapshot, draft, review, spec, plan, graph, execution, delivery]
+        plan_review:
+          description: 当前计划版本的质量检查结果；未生成计划时为 null
+          oneOf:
+            - $ref: "#/components/schemas/PlanReview"
+            - type: "null"
+        spec:
+          description: 规格摘要；任务清单入口或未启动时为 null
+          oneOf:
+            - $ref: "#/components/schemas/SpecSummary"
+            - type: "null"
         spec_version: { type: string }
         list_version: { type: string }
         graph_id: { type: string }
@@ -239,6 +335,22 @@ components:
           type: array
           description: 任务完成后登记的产物编号（ART-xx）
           items: { type: string }
+        kind:
+          $ref: "enums.schema.json#/$defs/taskKind"
+        started_at:
+          description: 进入 running 的时间；未开始为 null
+          oneOf:
+            - $ref: "enums.schema.json#/$defs/timestamp"
+            - type: "null"
+        finished_at:
+          description: 进入终态的时间；未结束为 null
+          oneOf:
+            - $ref: "enums.schema.json#/$defs/timestamp"
+            - type: "null"
+        evidence:
+          type: array
+          description: 该任务的证据摘要；passed 必须有证据支撑
+          items: { $ref: "#/components/schemas/EvidenceSummary" }
     Edge:
       type: object
       additionalProperties: false
@@ -249,3 +361,153 @@ components:
         type:
           $ref: "enums.schema.json#/$defs/edgeType"
         reason: { type: string }
+    EvidenceSummary:
+      type: object
+      additionalProperties: false
+      required: ["artifact_id", "exit_code"]
+      properties:
+        artifact_id: { type: string }
+        kind: { $ref: "enums.schema.json#/$defs/taskKind" }
+        exit_code: { type: integer }
+        duration_ms: { type: integer, minimum: 0 }
+    PlanReview:
+      type: object
+      additionalProperties: false
+      required: ["plan_id", "counts", "issues"]
+      properties:
+        plan_id: { type: string }
+        spec_ref:
+          type: [object, "null"]
+          additionalProperties: false
+          required: ["spec_id", "version", "hash"]
+          properties:
+            spec_id: { type: string }
+            version: { type: integer, minimum: 1 }
+            hash: { $ref: "enums.schema.json#/$defs/hash" }
+        counts:
+          type: object
+          additionalProperties: false
+          required: ["blocking", "major", "minor", "total"]
+          properties:
+            blocking: { type: integer, minimum: 0 }
+            major: { type: integer, minimum: 0 }
+            minor: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        issues:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            required: ["code", "severity", "message"]
+            properties:
+              code: { type: string }
+              severity: { type: string, enum: [blocking, major, minor] }
+              task_id: { type: string }
+              estimate_days: { type: number }
+              message: { type: string }
+    SpecSummary:
+      type: object
+      additionalProperties: false
+      required: ["spec_id", "version", "status"]
+      properties:
+        spec_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        hash: { $ref: "enums.schema.json#/$defs/hash" }
+        status: { $ref: "enums.schema.json#/$defs/specStatus" }
+        review_status: { type: string }
+        audit_counts:
+          type: object
+          additionalProperties: false
+          required: ["blocking", "major", "minor", "total"]
+          properties:
+            blocking: { type: integer, minimum: 0 }
+            major: { type: integer, minimum: 0 }
+            minor: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+    SpecAudit:
+      type: object
+      additionalProperties: true
+      required: ["counts", "passed"]
+      properties:
+        counts:
+          type: object
+          additionalProperties: false
+          required: ["blocking", "major", "minor", "total"]
+          properties:
+            blocking: { type: integer, minimum: 0 }
+            major: { type: integer, minimum: 0 }
+            minor: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        passed: { type: boolean }
+    SpecItemPatch:
+      type: object
+      additionalProperties: false
+      required: ["run_id", "item_id", "text", "actor"]
+      properties:
+        run_id: { type: string, minLength: 1 }
+        item_id:
+          type: string
+          description: 快照条目号，R/C/Q 前缀
+          pattern: '^[RCQ]-\d+$'
+        text: { type: string, minLength: 1, maxLength: 500 }
+        item_version: { type: integer, minimum: 1 }
+        actor: { type: string, minLength: 1 }
+        reason: { type: string }
+    GraphEditRequest:
+      type: object
+      additionalProperties: false
+      required: ["plan_id", "plan_version", "ops"]
+      properties:
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        actor: { type: string }
+        reason: { type: string }
+        ops:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/GraphEditOp" }
+    GraphEditOp:
+      type: object
+      additionalProperties: false
+      required: ["op"]
+      properties:
+        op:
+          type: string
+          enum: [add_edge, del_edge, set_edge_type, add_task, del_task, split_task]
+        from: { type: string }
+        to: { type: string }
+        type: { $ref: "enums.schema.json#/$defs/edgeType" }
+        task_id: { type: string }
+        name: { type: string }
+        kind: { $ref: "enums.schema.json#/$defs/taskKind" }
+        depends_on:
+          type: array
+          items: { type: string }
+        tasks:
+          type: array
+          items: { type: object, additionalProperties: true }
+    GraphEditResult:
+      type: object
+      additionalProperties: false
+      required: ["plan", "edges", "layers"]
+      properties:
+        plan:
+          type: object
+          additionalProperties: false
+          required: ["plan_id", "version"]
+          properties:
+            plan_id: { type: string }
+            version: { type: integer, minimum: 1 }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/Edge" }
+        layers:
+          type: array
+          items: { type: array, items: { type: string } }
+    ReplayResult:
+      type: object
+      additionalProperties: false
+      required: ["state", "at"]
+      properties:
+        state: { $ref: "#/components/schemas/Progress" }
+        at: { $ref: "enums.schema.json#/$defs/timestamp" }

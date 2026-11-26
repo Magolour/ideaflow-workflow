@@ -64,7 +64,8 @@
         "properties": {
           "task_id": {
             "type": "string",
-            "pattern": "^T-?\\d+$"
+            "pattern": "^T-?\\d+[A-Za-z]?$",
+            "description": "任务号；测试任务用 T{n}T、评审任务用 T{n}R 后缀"
           },
           "name": {
             "type": "string"
@@ -115,6 +116,10 @@
           },
           "review_required": {
             "type": "boolean"
+          },
+          "kind": {
+            "$ref": "enums.schema.json#/$defs/taskKind",
+            "description": "任务类型；缺省按 code 处理。计划生成时自动追加 test / review 任务"
           }
         }
       }

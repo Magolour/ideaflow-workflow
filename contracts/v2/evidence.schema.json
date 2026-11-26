@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/evidence.schema.json",
+  "title": "任务执行证据",
+  "description": "每个产物一份，写在 artifacts/ART-xxxx/evidence.json；passed 必须有证据支撑",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_id", "task_id", "command", "exit_code"],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^ART-[A-Za-z0-9-]+$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^T-?\\d+[A-Za-z]?$"
+    },
+    "kind": {
+      "$ref": "enums.schema.json#/$defs/taskKind"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "实际执行的命令；未真正执行时写 manual"
+    },
+    "exit_code": {
+      "type": "integer",
+      "description": "0 成功；-1 表示未能执行（环境缺失或超时）"
+    },
+    "stdout_tail": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "输出末尾若干行，超长截断"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "environment": {
+      "type": "string",
+      "description": "解释器、系统与关键依赖版本"
+    },
+    "content_hash": {
+      "$ref": "enums.schema.json#/$defs/hash"
+    }
+  }
+}

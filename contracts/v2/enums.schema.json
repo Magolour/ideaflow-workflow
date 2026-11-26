@@ -56,6 +56,23 @@
         "skipped"
       ]
     },
+    "taskKind": {
+      "type": "string",
+      "description": "任务类型：code 编码、test 测试、review 评审、doc 文档。缺省按 code 处理",
+      "enum": [
+        "code",
+        "test",
+        "review",
+        "doc"
+      ]
+    },
+    "runMode": {
+      "type": "string",
+      "enum": [
+        "mock",
+        "live"
+      ]
+    },
     "instanceStatus": {
       "type": "string",
       "enum": [
@@ -184,6 +201,7 @@
       "enum": [
         "passed",
         "failed",
+        "unverified",
         "skipped"
       ]
     },

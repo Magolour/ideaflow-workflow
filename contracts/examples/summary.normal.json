@@ -1,0 +1,43 @@
+{
+  "run_id": "INST-2026-0001",
+  "status": "completed",
+  "duration": {
+    "start": "2026-11-26T10:00:00+08:00",
+    "end": "2026-11-26T10:13:32+08:00",
+    "seconds": 812
+  },
+  "gate_waits": [
+    {
+      "gate_type": "plan_approval",
+      "object_id": "PLAN-SPEC-001",
+      "seconds": 96,
+      "actor": "human:web",
+      "decision_id": "DEC-0001"
+    }
+  ],
+  "rework": {
+    "retries": 1,
+    "returns": 0,
+    "changes": 2
+  },
+  "failures": [
+    {
+      "task_id": "T4",
+      "code": "TEST_FAILED",
+      "detail": "3 failed"
+    }
+  ],
+  "coverage": {
+    "requirements": 8,
+    "with_module": 8,
+    "with_acceptance": 8,
+    "with_evidence": 5
+  },
+  "open_items": [
+    {
+      "id": "OPEN-01",
+      "question": "两个模块缺少草案估算，是否按 2 天补齐",
+      "blocking": false
+    }
+  ]
+}
