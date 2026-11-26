@@ -407,7 +407,11 @@
 <div class="drawer" id="reasonBox">
   <div class="panel" style="width:min(480px,100%)">
     <header><strong id="reasonTitle">填写理由</strong><div class="hint" id="reasonHint">理由为必填项。</div></header>
-    <div class="body"><textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea></div>
+    <div class="body">
+      <textarea id="reasonText" rows="3" placeholder="请输入理由"></textarea>
+      <textarea id="reviewedSpec" rows="6" hidden aria-label="已复审规格 JSON"
+        placeholder="粘贴已复审通过的下一版规格 JSON"></textarea>
+    </div>
     <footer>
       <button class="ghost" id="reasonCancel">取消</button>
       <button id="reasonOk">确认</button>
@@ -464,6 +468,7 @@ const INSTANCE_LABEL = {
   delivery_pending: "待交付确认", completed: "已完成", blocked: "阻塞", aborted: "已终止"
 };
 const GATE_LABEL = {
+  plan_approval: "计划审批",
   task_execution: "人工节点执行", task_failed: "任务失败待接管", delivery_confirm: "交付确认"
 };
 const ROLE_LABEL = { ai: "AI", human: "人工", "ai+human": "AI+人工" };
@@ -522,13 +527,18 @@ async function api(path, options) {
   const text = await response.text();
   let body;
   try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text }; }
-  if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
+  if (!response.ok) {
+    const question = body.details?.question?.question;
+    throw new Error([body.message || body.error || ("HTTP " + response.status), question]
+      .filter(Boolean).join("。"));
+  }
   return body;
 }
-const post = (path, data) => api(path, {
+const postJson = (path, body) => api(path, {
   method: "POST", headers: { "Content-Type": "application/json; charset=utf-8" },
-  body: JSON.stringify(data)
+  body
 });
+const post = (path, data) => postJson(path, JSON.stringify(data));
 
 let toastTimer = null;
 function toast(message, kind) {
@@ -625,12 +635,16 @@ function renderHeader() {
   const s = state || {};
   const plan = $("bPlan").querySelector("b");
   const hasPlan = s.plan_id && String(s.plan_id).trim();
-  plan.textContent = hasPlan ? s.plan_id : "无计划号";
+  const pending = s.waiting_on?.gate_type === "plan_approval";
+  const approved = (decisions() || []).some(row => row.target_type === "plan"
+    && row.target_id === s.plan_id && row.target_version === s.plan_version && row.action === "approve");
+  const planStatus = pending ? "待批准 v" + s.plan_version : approved ? "已批准 v" + s.plan_version : "";
+  plan.textContent = hasPlan ? s.plan_id + (planStatus ? " · " + planStatus : "") : "无计划号";
   $("bPlan").classList.toggle("plan", !!hasPlan);
   $("bPlan").classList.toggle("muted", !hasPlan);
   $("bPlan").title = hasPlan
-    ? "计划号 " + s.plan_id + "（来自 plan.json 或 spec 入口）"
-    : "任务清单入口没有计划号（契约允许 plan_id 为 null）";
+    ? "计划号 " + s.plan_id
+    : "尚未生成计划";
   $("bSpec").querySelector("b").textContent = s.spec_version || "—";
   $("bGraph").querySelector("b").textContent = s.graph_id || "—";
   $("bList").querySelector("b").textContent = s.list_version || "—";
@@ -695,6 +709,16 @@ function renderGate() {
   const since = gate.since ? new Date(gate.since) : null;
   const waited = since ? Math.max(0, Math.round((Date.now() - since.getTime()) / 1000)) : null;
   const waitedText = waited == null ? "" : (waited < 60 ? waited + " 秒" : Math.round(waited / 60) + " 分钟");
+  if (gate.gate_type === "plan_approval") {
+    box.innerHTML = '<div class="gate"><div class="t">待批准 · '
+      + esc(s.plan_id) + ' v' + esc(s.plan_version) + '</div>'
+      + '<div class="m">批准当前版本后开始派发任务。</div><div class="acts">'
+      + '<button class="gold tiny" data-plan-op="approve">批准计划</button>'
+      + '<button class="warn tiny" data-plan-op="plan">退回计划</button>'
+      + (s.can_return_spec ? '<button class="warn tiny" data-plan-op="spec">退回规格</button>' : '')
+      + '</div></div>';
+    return;
+  }
   if (gate.gate_type === "delivery_confirm") {
     box.innerHTML = '<div class="gate">'
       + '<div class="t">等待交付确认 · ' + esc(gate.object_id) + "</div>"
@@ -730,6 +754,14 @@ function renderDelivery() {
   if (!s.total) {
     box.innerHTML = '<div class="gate idle"><div class="t">未到交付阶段</div>'
       + '<div class="m">全部任务进入终态后，实例转入 <span class="mono">delivery_pending</span>，这里出现交付清单与确认按钮。</div></div>';
+    return;
+  }
+  if (dlv?.status === "rejected") {
+    const decision = (decisions() || []).find(row => row.decision_id === dlv.decision_id);
+    $("deliveryTag").textContent = "已驳回";
+    box.innerHTML = '<div class="gate"><div class="t">交付已驳回 · '
+      + esc(dlv.delivery_id) + '</div><div class="m">'
+      + esc(decision?.reason || "原因见决策记录") + '</div></div>';
     return;
   }
   if (status === "completed") {
@@ -1259,10 +1291,9 @@ async function startRun() {
   if (info.kind === "bad") return toast("粘贴的内容不是合法 JSON", "bad");
   busy = true; refreshEntryTag();
   try {
-    let payload;
-    if (info.kind === "idea") payload = { requirement: text };
-    else payload = JSON.parse(text);
-    const result = await post("/api/start", payload);
+    // Parsing for entry detection is safe; reserializing can change a reviewed spec's number types.
+    const result = info.kind === "idea" ? await post("/api/start", { requirement: text })
+      : await postJson("/api/start", text);
     events = []; cursor = 0; selected = null;
     localStorage.removeItem(LS.sel);
     await pull(true);
@@ -1281,11 +1312,17 @@ function humanOp(action, reason) {
   return sendEvent(packet);
 }
 
-async function sendEvent(packet) {
+async function sendEvent(packet, reviewedSpecText = "") {
   if (busy) return;
   busy = true;
   try {
-    await post("/api/events", packet);
+    if (reviewedSpecText) {
+      // The pasted object was validated in the dialog. Keep its numeric tokens in the request.
+      const envelope = JSON.stringify(packet);
+      await postJson("/api/events", envelope.slice(0, -1) + ',"spec":' + reviewedSpecText + "}");
+    } else {
+      await post("/api/events", packet);
+    }
     await pulled();
     toast("已提交：" + (ACTION_LABEL[packet.action] || packet.type || ""), "ok");
   } catch (error) {
@@ -1304,17 +1341,19 @@ function confirmDelivery(ok) {
   if (ok) {
     sendEvent({ type: "human_op", action: "approve", operator: "web", priority: "high" });
   } else {
-    openReason("退回交付", "退回必须写明原因，实例会停留在待交付并记录决策。", value => {
+    openReason("退回交付", "写明原因后，实例进入阻塞并记录决策。", value => {
       sendEvent({ type: "human_op", action: "reject", reason: value, operator: "web", priority: "high" });
     });
   }
 }
 
 let reasonCallback = null;
-function openReason(title, hint, callback) {
+function openReason(title, hint, callback, needsReviewedSpec = false) {
   $("reasonTitle").textContent = title;
   $("reasonHint").textContent = hint;
   $("reasonText").value = "";
+  $("reviewedSpec").value = "";
+  $("reviewedSpec").hidden = !needsReviewedSpec;
   reasonCallback = callback;
   $("reasonBox").classList.add("open");
   $("reasonText").focus();
@@ -1328,6 +1367,21 @@ function gateAction(action) {
       ? "跳过会结束该任务，依赖它的下游不再推进；请说明原因。"
       : "驳回会把该任务及其下游未开始任务置为 blocked；请说明原因。",
     value => humanOp(action, value));
+}
+
+function planAction(action) {
+  const s = state;
+  if (!s || s.waiting_on?.gate_type !== "plan_approval") return;
+  const packet = {type: "human_op", plan_id: s.plan_id, plan_version: s.plan_version,
+    operator: "web", priority: "high"};
+  if (action === "approve") return sendEvent({...packet, action});
+  const target = action === "spec" ? "规格" : "计划";
+  const needsReviewedSpec = action === "spec";
+  const hint = needsReviewedSpec ? "填写理由并粘贴已复审通过的下一版规格。" : "填写理由后重新生成待批准计划。";
+  openReason("退回" + target, hint, (reason, specText) => {
+    const command = {...packet, action: "return", return_to: action, reason};
+    sendEvent(command, specText);
+  }, needsReviewedSpec);
 }
 
 function exportPlan() {
@@ -1471,6 +1525,8 @@ function renderTabs() {
 }
 
 document.addEventListener("click", ev => {
+  const planButton = ev.target.closest("[data-plan-op]");
+  if (planButton) { planAction(planButton.dataset.planOp); return; }
   const opButton = ev.target.closest("[data-op]");
   if (opButton) { gateAction(opButton.dataset.op || "approve"); return; }
   const aiButton = ev.target.closest("[data-ai]");
@@ -1544,10 +1600,20 @@ $("reasonCancel").addEventListener("click", () => $("reasonBox").classList.remov
 $("reasonOk").addEventListener("click", () => {
   const value = $("reasonText").value.trim();
   if (!value) return toast("理由不能为空", "bad");
+  let specText = "";
+  if (!$("reviewedSpec").hidden) {
+    specText = $("reviewedSpec").value.trim();
+    try {
+      const spec = JSON.parse(specText);
+      if (!spec?.spec_id || !Array.isArray(spec.modules)) throw new Error();
+    } catch {
+      return toast("请粘贴有效的已复审规格 JSON", "bad");
+    }
+  }
   const callback = reasonCallback;
   $("reasonBox").classList.remove("open");
   reasonCallback = null;
-  if (callback) callback(value);
+  if (callback) callback(value, specText);
 });
 $("changeCancel").addEventListener("click", () => $("changeBox").classList.remove("open"));
 $("changeSubmit").addEventListener("click", submitChange);

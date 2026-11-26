@@ -15,7 +15,6 @@ from .agents import MockAgent
 from .artifacts import deliver
 from .audit import audit_spec, save_audit
 from .contracts import ContractError
-from .escalate import escalate, save_question
 from .features import claim_requirements, synthesize
 from .pipeline import run as run_discussion
 from .pipeline import slugify
@@ -25,6 +24,7 @@ from .revisions import save_revisions, scope_revision
 from .snapshot import build, save
 from .spec import build_spec, save_spec
 from .spec_doc import export_spec
+from .spec_review import finalize_review, save_reviewed_spec
 from .render_html import render_markdown
 from .storage import now_iso, read_json, write_json
 from .tradeoffs import build_tradeoffs
@@ -161,18 +161,11 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
             say(f"自动修订 {record['id']}：承诺 {record['before']['commit_days']} → "
                 f"{record['after']['commit_days']} 天")
 
-    question = None
-    if not audit["passed"]:
-        try:
-            spec, question = escalate(spec, snapshot, audit)
-        except ContractError as error:
-            if error.code != "NO_ESCALATION":
-                raise
-        else:
-            save_spec(spec, target)
-            save_question(question, target)
-            export_spec(spec, snapshot, target)
-            say(f"人工问题 {question['id']}：{question['question']}")
+    spec = finalize_review(spec, snapshot, audit, run_id)
+    question = spec.escalation
+    saved = save_reviewed_spec(spec, snapshot, target)
+    if question:
+        say(f"人工问题 {question['id']}：{question['question']}")
 
     files = {
         "json": f"spec.v{spec.version}.json",
@@ -180,7 +173,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         "question": "human_question.json" if question else "",
         "manifest": "manifest.json",
     }
-    markdown = (target / files["markdown"]).read_text(encoding="utf-8")
+    markdown = saved["markdown_text"]
     log = target / "ai_calls.jsonl"
     ai_calls = 0
     if log.exists():
@@ -209,6 +202,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
             target / f"revision.v{spec.version}.json")
     if question:
         extras["human_question.json"] = question
+        extras[f"human_question.v{spec.version}.json"] = question
     deliver(target, snapshot, race.drafts, extras=extras,
             texts={files["markdown"]: markdown, "spec.md": markdown})
 
@@ -262,7 +256,7 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
         "status": spec.status,
         "ai_calls": ai_calls,
         "status_label": {"draft": "草稿", "awaiting_human": "待人工决策",
-                         "confirmed": "已确认"}.get(spec.status, spec.status),
+                         "confirmed": "审查通过", "blocked": "有阻断"}.get(spec.status, spec.status),
         "snapshot": {"id": snapshot.snapshot_id, "version": snapshot.version,
                      "hash": snapshot.hash, "counts": snapshot.counts(), "items": items},
         "drafts": drafts,

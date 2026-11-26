@@ -67,9 +67,50 @@
     "buffer_low": 2.5,
     "buffer_high": 4.5
   },
-  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "status": "draft",
+  "hash": "3a4ad657e4956199a0cf46966ff5cd6d9b3dc1281095d2f849c5ab11bba9d739",
+  "status": "confirmed",
   "created_at": "2026-11-20T10:10:00+08:00",
   "revisions": [],
-  "escalation": null
+  "escalation": null,
+  "review": {
+    "status": "approved",
+    "spec_ref": {
+      "spec_id": "SPEC-2026-001",
+      "version": 1,
+      "hash": "3a4ad657e4956199a0cf46966ff5cd6d9b3dc1281095d2f849c5ab11bba9d739"
+    },
+    "snapshot_ref": {
+      "snapshot_id": "REQSET-001",
+      "version": 1,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "audit": {
+      "spec_ref": {
+        "spec_id": "SPEC-2026-001",
+        "version": 1,
+        "hash": "3a4ad657e4956199a0cf46966ff5cd6d9b3dc1281095d2f849c5ab11bba9d739"
+      },
+      "snapshot_ref": {
+        "snapshot_id": "REQSET-001",
+        "version": 1,
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "issues": [],
+      "counts": {
+        "blocking": 0,
+        "major": 0,
+        "minor": 0,
+        "total": 0
+      },
+      "checks": {
+        "coverage": {
+          "requirements": 1,
+          "with_module": 1
+        }
+      },
+      "passed": true,
+      "hash": "d06298ed0ea73c0610980d922b805356267057a415a86f7b4c1abf00e7c68929"
+    },
+    "question": null
+  }
 }

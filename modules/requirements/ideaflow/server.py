@@ -29,7 +29,9 @@ from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, SEVERITY_LABEL,
                         STANCE_LABEL, ContractError)
 from .pipeline import run
 from .render_html import PAPER_CSS, document_html, render_markdown
+from .resolutions import answer_question
 from .roles import ALL_ROLES, DISCUSSION_ROLES
+from .spec import load_spec
 from .specflow import CASE_NAMES, load_case, run as run_spec
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -138,7 +140,13 @@ class JobStore:
 
     def run_dir(self, run_id: str) -> Path | None:
         with self.lock:
-            return self._runs.get(run_id)
+            known = self._runs.get(run_id)
+        if known is not None:
+            return known
+        candidate = (self.runs_dir / run_id).resolve()
+        if candidate.parent == self.runs_dir and (candidate / "flow.json").is_file():
+            return candidate
+        return None
 
     def submit(self, job: Job) -> None:
         threading.Thread(target=self._execute, args=(job,), daemon=True).start()
@@ -196,7 +204,7 @@ class JobStore:
         try:
             raw = load_case(job.case) if job.case else job.idea
             result = run_spec(raw, job.constraints, out_dir=self.runs_dir,
-                              case_name=job.case, progress=progress, agent=agent)
+                              case_name=job.case, progress=progress, agent=agent, discuss=True)
         except ContractError as error:
             self._fail(job, error.code, error.message, error.path)
             return
@@ -405,9 +413,12 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
         def do_POST(self) -> None:  # noqa: N802
             route = urlparse(self.path)
             try:
-                if route.path != "/api/generate":
+                if route.path not in ("/api/generate", "/api/spec/answer"):
                     raise ApiError(404, "NOT_FOUND", f"找不到 {route.path}")
                 payload = self._read_json()
+                if route.path == "/api/spec/answer":
+                    self._handle_spec_answer(payload)
+                    return
                 options = _parse_generate(payload)
                 job = store.create(**options)
                 store.submit(job)
@@ -417,6 +428,24 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                 self._send_error(error)
 
         # ---------- 处理函数 ----------
+
+        def _handle_spec_answer(self, payload: Any) -> None:
+            run_id = payload.get("run_id") if isinstance(payload, dict) else None
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise ApiError(400, "INVALID_BODY", "请指定规格运行编号")
+            directory = store.run_dir(run_id)
+            if directory is None or not (directory / "spec.json").is_file():
+                raise ApiError(404, "UNKNOWN_RUN", "找不到该次规格运行")
+            try:
+                result = answer_question(directory, **{
+                    key: payload.get(key) for key in
+                    ("spec_ref", "question_id", "option", "answer", "actor")
+                })
+            except ContractError as error:
+                status = {"INVALID_BODY": 400, "UNKNOWN_RUN": 404, "NO_AUTO_FIX": 422,
+                          "MANUAL_REVISION_REQUIRED": 422}.get(error.code, 409)
+                raise ApiError(status, error.code, error.message) from error
+            self._send_json(HTTPStatus.OK, result)
 
         def _handle_case(self, query: dict[str, list[str]]) -> None:
             name = (query.get("name") or [""])[0]
@@ -466,10 +495,15 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
             self._send_file(body, content_type, f"{run_id}.{fmt}", f"design-document.{fmt}")
 
         def _send_artifact(self, run_dir: Path, artifact: str, run_id: str) -> None:
-            if artifact not in ("spec-md", "spec-json", "question"):
-                raise ApiError(400, "INVALID_ARTIFACT", "artifact 只支持 spec-md、spec-json、question")
+            if artifact not in ("spec-md", "spec-json", "spec-input", "question"):
+                raise ApiError(400, "INVALID_ARTIFACT", "artifact 只支持 spec-md、spec-json、spec-input、question")
             if artifact == "question":
-                target = (run_dir / "human_question.json").resolve()
+                spec = load_spec(run_dir)
+                if not spec.escalation:
+                    raise ApiError(404, "NO_OPEN_QUESTION", "该规格当前没有人工问题")
+                target = (run_dir / f"human_question.v{spec.version}.json").resolve()
+                if not target.exists():
+                    target = (run_dir / "human_question.json").resolve()
                 content_type = "application/json; charset=utf-8"
                 fallback, suffix = "human-question.json", "question.json"
             else:
@@ -480,7 +514,7 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                     raise ApiError(404, "UNKNOWN_SPEC", "该次运行没有规格文件")
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 artifacts = meta.get("artifacts", {})
-                key = "markdown" if artifact == "spec-md" else "bundle"
+                key = {"spec-md": "markdown", "spec-json": "bundle", "spec-input": "json"}[artifact]
                 name = artifacts.get(key) or artifacts.get("json")
                 if not name:
                     raise ApiError(404, "UNKNOWN_SPEC", "规格缺少导出记录")

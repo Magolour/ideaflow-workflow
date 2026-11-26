@@ -17,6 +17,7 @@ V2 = ROOT / "contracts" / "v2"
 sys.path.insert(0, str(ROOT / "modules" / "orchestrator" / "python"))
 
 from agent import AgentHandler, AgentServer, RealtimeAgent  # noqa: E402
+from spec_gate import _digest, spec_body_hash  # noqa: E402
 
 
 def load_schema(name: str) -> dict:
@@ -66,6 +67,22 @@ def post_json(url: str, payload) -> dict:
 def get_json(url: str) -> dict:
     with _OPENER.open(url, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def wait_for_progress(base, predicate):
+    for _ in range(100):
+        progress = get_json(f"{base}/api/progress?since=0")
+        if predicate(progress):
+            return progress
+        time.sleep(0.05)
+    raise AssertionError(f"运行未达到预期状态：{progress}")
+
+
+def approve_plan(base):
+    post_json(f"{base}/api/events", {"type": "human_op", "action": "approve"})
+    wait_for_progress(base, lambda progress: any(
+        row["target_type"] == "plan" and row["action"] == "approve"
+        for row in progress["decisions"]))
 
 
 class RuntimeProgressContractTest(unittest.TestCase):
@@ -172,11 +189,124 @@ class ApiGapTest(unittest.TestCase):
         self.assertTrue(task.get("requirement_refs"), "任务应保留对需求条款的引用")
         self.assertTrue(task.get("design_refs"), "任务应保留对设计模块的引用")
 
+    def test_spec_and_tasks_wait_for_plan_approval(self):
+        spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
+                          .read_text(encoding="utf-8"))
+        tasks = {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]}
+        for label, payload in (("spec", spec), ("tasks", tasks)):
+            with self.subTest(entry=label), running_server(self.out / label) as (base, _):
+                pending = post_json(f"{base}/api/start", payload)["progress"]
+                self.assertEqual(pending["status"], "waiting_human")
+                self.assertEqual(pending["running"], 0)
+                self.assertEqual(pending["pending"], pending["total"])
+                self.assertEqual(pending["waiting_on"]["gate_type"], "plan_approval")
+                self.assertEqual(pending["waiting_on"]["object_id"], pending["plan_id"])
+                self.assertEqual(pending["can_return_spec"], label == "spec")
+                self.assertFalse(pending["decisions"])
+
+                stored = json.loads((self.out / label / "plan.json").read_text(encoding="utf-8"))
+                files = {name: load_schema(name) for name in
+                         ("plan.schema.json", "enums.schema.json")}
+                Draft202012Validator(inline(files["plan.schema.json"], files)).validate(stored)
+                if label == "tasks":
+                    self.assertIsNone(stored["spec_ref"])
+
+                post_json(f"{base}/api/events", {"type": "change", "tasks": tasks["tasks"]})
+                blocked = wait_for_progress(base, lambda progress: bool(progress["last_error"]))
+                self.assertEqual(blocked["running"], 0)
+                self.assertEqual(blocked["plan_version"], pending["plan_version"])
+
+                approve_plan(base)
+                approved = get_json(f"{base}/api/progress")
+                decision, = approved["decisions"]
+                self.assertEqual((decision["target_type"], decision["target_id"],
+                                  decision["target_version"], decision["action"]),
+                                 ("plan", pending["plan_id"], pending["plan_version"], "approve"))
+                self.assertGreater(approved["running"], 0)
+                approved_plan = json.loads((self.out / label / "plan.json").read_text(encoding="utf-8"))
+                self.assertEqual(approved_plan["status"], "approved")
+
+    def test_returns_preserve_versions_and_require_new_approval(self):
+        spec = json.loads((ROOT / "contracts" / "examples" / "spec.normal.json")
+                          .read_text(encoding="utf-8"))
+        with running_server(self.out) as (base, _):
+            started = post_json(f"{base}/api/start", spec)["progress"]
+            plan_id = started["plan_id"]
+            op = {"type": "human_op", "plan_id": plan_id, "action": "return"}
+            plan_v1 = self.out / f"plan-{plan_id}-v1.json"
+            spec_v1 = self.out / f"spec.v{spec['version']}.json"
+            original_plan = plan_v1.read_bytes()
+            original_spec = spec_v1.read_bytes()
+
+            post_json(f"{base}/api/events", {**op, "return_to": "plan", "plan_version": 1})
+            rejected = wait_for_progress(base, lambda progress: bool(progress["last_error"]))
+            self.assertEqual(rejected["plan_version"], 1)
+            self.assertFalse(rejected["decisions"])
+
+            post_json(f"{base}/api/events", {**op, "return_to": "plan", "reason": "重新拆解",
+                                             "plan_version": 1})
+            rebuilt = wait_for_progress(base, lambda progress: progress["plan_version"] == 2)
+            self.assertEqual(rebuilt["status"], "waiting_human")
+            self.assertEqual(rebuilt["spec_version"], started["spec_version"])
+            self.assertEqual(rebuilt["running"], 0)
+            plan_v2 = self.out / f"plan-{plan_id}-v2.json"
+            rebuilt_plan = plan_v2.read_bytes()
+
+            post_json(f"{base}/api/events", {**op, "action": "approve", "plan_version": 1})
+            stale = wait_for_progress(base, lambda progress: bool(progress["last_error"]))
+            self.assertIn("版本已变更", stale["last_error"])
+            self.assertEqual(stale["running"], 0)
+
+            revised = {**spec, "version": spec["version"] + 1,
+                       "modules": [{**spec["modules"][0], "name": "修订后的模块"},
+                                   *spec["modules"][1:]]}
+            revised["hash"] = spec_body_hash(revised)
+            ref = {key: revised[key] for key in ("spec_id", "version", "hash")}
+            audit = {**spec["review"]["audit"], "spec_ref": ref}
+            audit["hash"] = _digest({key: audit[key] for key in ("spec_ref", "issues", "checks")})
+            revised["review"] = {**spec["review"], "spec_ref": ref, "audit": audit}
+            post_json(f"{base}/api/events", {**op, "return_to": "spec", "reason": "缺复审",
+                                             "plan_version": 2})
+            missing = wait_for_progress(base, lambda progress: "需要提交" in progress["last_error"])
+            self.assertEqual(missing["plan_version"], 2)
+            self.assertEqual(len(missing["decisions"]), 1)
+
+            post_json(f"{base}/api/events", {**op, "return_to": "spec", "reason": "修订模块",
+                                             "plan_version": 2, "spec": revised})
+            refreshed = wait_for_progress(base, lambda progress: progress["plan_version"] == 3)
+            self.assertEqual(refreshed["status"], "waiting_human")
+            self.assertEqual(refreshed["running"], 0)
+            self.assertEqual(refreshed["tasks"][0]["name"], "修订后的模块")
+            updated_spec = json.loads((self.out / "spec.json").read_text(encoding="utf-8"))
+            updated_plan = json.loads((self.out / "plan.json").read_text(encoding="utf-8"))
+            self.assertEqual(updated_spec["version"], spec["version"] + 1)
+            self.assertNotEqual(updated_spec["hash"], spec["hash"])
+            self.assertEqual(updated_plan["spec_ref"],
+                             {key: updated_spec[key] for key in ("spec_id", "version", "hash")})
+            self.assertEqual(plan_v1.read_bytes(), original_plan)
+            self.assertEqual(plan_v2.read_bytes(), rebuilt_plan)
+            self.assertEqual(spec_v1.read_bytes(), original_spec)
+            files = {name: load_schema(name) for name in
+                     ("decision.schema.json", "enums.schema.json")}
+            validator = Draft202012Validator(inline(files["decision.schema.json"], files))
+            returns = refreshed["decisions"]
+            self.assertEqual([(row["target_type"], row["target_version"], row["return_to"],
+                               row["reason"]) for row in returns],
+                             [("plan", 1, "plan", "重新拆解"),
+                              ("spec", spec["version"], "spec", "修订模块")])
+            for row in returns:
+                validator.validate(row)
+
+            post_json(f"{base}/api/events", {**op, "action": "approve", "plan_version": 3})
+            approved = wait_for_progress(base, lambda progress: progress["running"] > 0)
+            self.assertEqual(approved["decisions"][-1]["target_version"], 3)
+
     def test_task_completion_records_artifact(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
                       {"tasks": [{"task_id": "T1", "name": "写接口",
                                  "deliverable": "接口清单", "suggested_role": "ai"}]})
+            approve_plan(base)
             post_json(f"{base}/api/events",
                       {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
             for _ in range(20):
@@ -201,6 +331,7 @@ class ApiGapTest(unittest.TestCase):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
                       {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            approve_plan(base)
             post_json(f"{base}/api/events",
                       {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
             for _ in range(20):
@@ -215,12 +346,13 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual([item["task_id"] for item in delivery["items"]], ["T1"])
         self.assertEqual(delivery["items"][0]["artifact_ids"],
                          progress["tasks"][0]["artifact_ids"])
-        self.assertEqual(progress["decisions"], [])
+        self.assertEqual([row["target_type"] for row in progress["decisions"]], ["plan"])
 
     def test_delivery_confirm_completes_instance(self):
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start",
                       {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            approve_plan(base)
             post_json(f"{base}/api/events",
                       {"type": "ai_report", "task_id": "T1", "result": "done", "detail": "完成"})
             for _ in range(20):
@@ -240,15 +372,61 @@ class ApiGapTest(unittest.TestCase):
         self.assertEqual(delivery["decided_by"], "human:tester")
         self.assertEqual(json.loads((self.out / "delivery.json").read_text(encoding="utf-8")),
                          delivery)
-        self.assertEqual(len(progress["decisions"]), 1)
-        decision = progress["decisions"][0]
+        plan_decision, decision = progress["decisions"]
         self.assertEqual(decision["target_type"], "delivery")
         self.assertEqual(decision["target_id"], delivery["delivery_id"])
         self.assertEqual(decision["decision_id"], delivery["decision_id"])
         self.assertEqual(decision["action"], "approve")
         self.assertEqual([json.loads(line) for line in
                           (self.out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()],
-                         [decision])
+                         [plan_decision, decision])
+        files = {name: load_schema(name) for name in
+                 ("delivery.schema.json", "decision.schema.json", "enums.schema.json")}
+        Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
+        Draft202012Validator(inline(files["decision.schema.json"], files)).validate(decision)
+
+    def test_delivery_reject_requires_reason_and_blocks_instance(self):
+        reason = "交付物缺少验证记录"
+        with running_server(self.out) as (base, _):
+            post_json(f"{base}/api/start",
+                      {"tasks": [{"task_id": "T1", "name": "写接口", "suggested_role": "ai"}]})
+            approve_plan(base)
+            post_json(f"{base}/api/events",
+                      {"type": "ai_report", "task_id": "T1", "result": "done"})
+            wait_for_progress(base, lambda progress: progress["status"] == "delivery_pending")
+
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "reject", "reason": " "})
+            pending = wait_for_progress(base, lambda progress: bool(progress["last_error"]))
+            self.assertIn("必须填写理由", pending["last_error"])
+            self.assertEqual(pending["status"], "delivery_pending")
+            self.assertEqual(pending["delivery"]["status"], "draft")
+            self.assertEqual([row["target_type"] for row in pending["decisions"]], ["plan"])
+
+            post_json(f"{base}/api/events",
+                      {"type": "human_op", "action": "reject", "reason": reason,
+                       "operator": "tester"})
+            blocked = wait_for_progress(base, lambda progress: progress["status"] == "blocked")
+
+            post_json(f"{base}/api/events", {"type": "human_op", "action": "approve"})
+            replay = wait_for_progress(base, lambda progress: bool(progress["last_error"]))
+            self.assertEqual(replay["status"], "blocked")
+            self.assertEqual(replay["decisions"], blocked["decisions"])
+
+        delivery = blocked["delivery"]
+        self.assertEqual(delivery["status"], "rejected")
+        self.assertEqual(delivery["decided_by"], "human:tester")
+        plan_decision, decision = blocked["decisions"]
+        self.assertEqual((decision["target_type"], decision["action"], decision["reason"]),
+                         ("delivery", "reject", reason))
+        self.assertEqual(decision["target_id"], delivery["delivery_id"])
+        self.assertEqual(decision["decision_id"], delivery["decision_id"])
+        self.assertEqual(json.loads((self.out / "delivery.json").read_text(encoding="utf-8")),
+                         delivery)
+        self.assertEqual([json.loads(line) for line in
+                          (self.out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()],
+                         [plan_decision, decision])
+        self.assertIn("delivery_rejected", [row["action"] for row in blocked["event_log"]])
         files = {name: load_schema(name) for name in
                  ("delivery.schema.json", "decision.schema.json", "enums.schema.json")}
         Draft202012Validator(inline(files["delivery.schema.json"], files)).validate(delivery)
@@ -266,6 +444,7 @@ class ApiGapTest(unittest.TestCase):
             self.assertEqual(progress["spec_version"], "v1", "规格版本应来自需求模块")
             self.assertGreaterEqual(progress["total"], 3, "应拆出多个任务")
 
+            approve_plan(base)
             for _ in range(40):
                 time.sleep(0.25)
                 progress = get_json(f"{base}/api/progress")
@@ -289,12 +468,14 @@ class ApiGapTest(unittest.TestCase):
         tasks = {"tasks": [{"task_id": "T1", "name": "确认验收", "suggested_role": "human"}]}
         with running_server(self.out) as (base, _):
             post_json(f"{base}/api/start", tasks)
+            approve_plan(base)
             post_json(f"{base}/api/events",
                       {"type": "human_op", "action": "approve", "operator": "tester"})
             decisions = []
             for _ in range(20):
                 time.sleep(0.25)
-                decisions = get_json(f"{base}/api/progress").get("decisions") or []
+                decisions = [row for row in get_json(f"{base}/api/progress")["decisions"]
+                             if row["target_type"] == "task"]
                 if decisions:
                     break
         self.assertEqual(len(decisions), 1)

@@ -23,8 +23,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
+from entry import RequirementsUnavailable, normalize_tasks, parse_start, reviewed_replacement
 from plan_adapter import plan_from_spec
 from plan_review import review_plan
+from spec_gate import SpecGateError
 
 PYTHON_DIR = Path(__file__).resolve().parent
 ROOT = PYTHON_DIR.parent
@@ -54,49 +56,6 @@ load_env()
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
-# ---------- 输入 ----------
-
-def normalize_tasks(data) -> tuple[list[dict], str]:
-    spec_version = "v1.0"
-    if isinstance(data, dict) and "task_list_approved_v1.2" in data:
-        payload = data["task_list_approved_v1.2"]
-        tasks = payload["tasks"]
-        spec_version = payload.get("spec_version", spec_version)
-    elif isinstance(data, dict):
-        tasks = data.get("tasks", [])
-        spec_version = data.get("spec_version", spec_version)
-    elif isinstance(data, list):
-        tasks = data
-    else:
-        raise ValueError("输入格式无法识别：需要契约包、{\"tasks\": [...]} 或纯数组")
-
-    normalized, seen = [], set()
-    for index, item in enumerate(tasks):
-        task_id = str(item.get("task_id") or f"T{index + 1}").strip()
-        if task_id in seen:
-            raise ValueError(f"任务编号重复：{task_id}")
-        seen.add(task_id)
-        task = {
-            "task_id": task_id,
-            "name": str(item.get("name") or "").strip(),
-            "deliverable": str(item.get("deliverable") or "").strip(),
-            "acceptance_items": list(item.get("acceptance_items") or []),
-            "suggested_role": item.get("suggested_role", "ai"),
-            "priority": item.get("priority", "medium"),
-            "requirement_refs": list(item.get("requirement_refs") or []),
-            "design_refs": list(item.get("design_refs") or []),
-            "depends_on": [str(ref) for ref in item.get("depends_on") or []],
-            "write_paths": list(item.get("write_paths") or []),
-            "review_required": bool(item.get("review_required", False)),
-        }
-        if isinstance(item.get("estimate_days"), (int, float)):
-            task["estimate_days"] = float(item["estimate_days"])
-        normalized.append(task)
-    if not normalized:
-        raise ValueError("任务清单为空")
-    return normalized, spec_version
 
 
 # ---------- AI 分析 ----------
@@ -367,44 +326,6 @@ def pm_breakdown(requirement: str, mock: bool = False) -> tuple[list[dict], str]
     raise ValueError(f"需求拆解连续 2 次未通过校验：{last_error}")
 
 
-class RequirementsUnavailable(RuntimeError):
-    """需求模块不可用：HTTP 层转成 503，不静默降级成一句话直拆。"""
-
-
-def requirements_dir() -> Path:
-    configured = os.getenv("REQUIREMENTS_DIR")
-    if configured:
-        return Path(configured)
-    return ROOT.parent / "requirements"
-
-
-def requirement_to_spec(requirement: str, out_dir: Path) -> dict:
-    """一句话需求 -> 需求模块离线生成 spec.json。"""
-    source = requirements_dir()
-    if not (source / "ideaflow" / "specflow.py").exists():
-        raise RequirementsUnavailable(f"需求模块不可用：{source}")
-    if str(source) not in sys.path:
-        sys.path.insert(0, str(source))
-    try:
-        from ideaflow.specflow import run as run_specflow
-    except ImportError as exc:
-        raise RequirementsUnavailable(f"需求模块导入失败：{exc}") from None
-
-    agent = None
-    if os.getenv("REQUIREMENTS_LIVE", "").lower() in {"1", "true", "yes"}:
-        try:
-            from ideaflow.agents import LLMAgent
-            agent = LLMAgent()
-        except Exception as exc:
-            raise RequirementsUnavailable(f"需求模块模型初始化失败：{exc}") from None
-    try:
-        result = run_specflow(requirement, out_dir=out_dir, agent=agent, discuss=True)
-        spec_path = Path(result.out_dir) / "spec.json"
-        return json.loads(spec_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise RequirementsUnavailable(f"需求模块执行失败：{exc}") from exc
-
-
 class RealtimeAgent:
     """按优先级处理数据包，维护实例状态并追加事件流。"""
 
@@ -423,6 +344,9 @@ class RealtimeAgent:
         self.list_version = "v1.0"
         self.graph_id = "G-v1.0"
         self.plan_id: str | None = None
+        self.plan: dict | None = None
+        self.spec: dict | None = None
+        self.auto_execute = False
         self.analysis_summary = ""
         self.tasks: dict[str, dict] = {}
         self.edges: list[dict] = []
@@ -470,46 +394,23 @@ class RealtimeAgent:
         with self.lock:
             if self.started:
                 raise RuntimeError("实例已启动，不能重复输入任务清单")
-            pm_summary = ""
-            requirement = ""
-            plan = None
-            spec_obj = None
-            if (isinstance(data, dict) and data.get("spec_id") and data.get("modules")
-                    and not data.get("tasks")):
-                spec_obj = data
-                try:
-                    plan = plan_from_spec(data)
-                except ValueError as exc:
-                    raise ValueError(f"设计规格无法生成计划：{exc}") from None
-                tasks, spec_version = normalize_tasks(plan)
-            elif isinstance(data, dict) and not data.get("tasks") and str(data.get("requirement") or "").strip():
-                requirement = str(data["requirement"]).strip()
-                spec = requirement_to_spec(requirement, self.out_dir / "requirements")
-                spec_obj = spec
-                plan = plan_from_spec(spec)
-                tasks, spec_version = normalize_tasks(plan)
-                pm_summary = f"需求模块生成 {spec['spec_id']} v{spec['version']}"
-            else:
-                tasks, spec_version = normalize_tasks(data)
-            if plan is not None:
-                self.plan_id = str(plan["plan_id"])
-                spec_version = f"v{plan['spec_ref']['version']}"
-            elif isinstance(data, dict):
-                payload = data.get("task_list_approved_v1.2", data)
-                self.list_version = payload.get("list_version", self.list_version)
-                if payload.get("plan_id"):
-                    self.plan_id = str(payload["plan_id"])
-                spec_ref = payload.get("spec_ref")
-                if isinstance(spec_ref, dict) and isinstance(spec_ref.get("version"), int):
-                    spec_version = f"v{spec_ref['version']}"
-                if payload.get("plan_id") and payload.get("tasks"):
-                    plan = payload
+            entry = parse_start(data, self.out_dir / "requirements", self.list_version)
+            tasks, spec_obj = entry.tasks, entry.spec
+            spec_version, requirement, pm_summary = entry.spec_version, entry.requirement, entry.summary
+            plan_id = entry.plan_id or f"PLAN-{self.instance_id}"
+            if not re.fullmatch(r"PLAN-[A-Za-z0-9_-]+", plan_id):
+                raise ValueError("计划 ID 格式无效")
+            plan = entry.plan or {"spec_ref": None, "tasks": tasks, "created_at": now_iso()}
+            version = plan.get("version", 1)
+            if type(version) is not int or version < 1:
+                raise ValueError("计划版本必须是正整数")
+            plan = {**plan, "plan_id": plan_id, "version": version, "status": "validated"}
+            edges, summary, layers, order = self._build_plan_graph(tasks)
+
+            self.plan, self.spec = plan, spec_obj
+            self.plan_id, self.list_version = plan_id, entry.list_version
             self.spec_version = spec_version
-            try:
-                edges, summary = analyze(tasks, self.mock)
-            except SystemExit as exc:
-                raise RuntimeError(str(exc))
-            layers, order = topo_layers([task["task_id"] for task in tasks], edges)
+            self.auto_execute = bool(requirement and self.mock)
 
             self.tasks = {task["task_id"]: {**task, "status": "pending", "attempts": 0}
                           for task in tasks}
@@ -530,24 +431,45 @@ class RealtimeAgent:
                       f"确认 {len(edges)} 条依赖边（AI 分析：{summary or '无'}）")
             self.emit("system", "graph", self.graph_id, "graph_built",
                       f"建图完成：{len(tasks)} 个任务、{len(layers)} 个并行组、无环")
-            if plan is not None and spec_obj is not None:
-                review = review_plan(spec_obj, plan)
-                (self.out_dir / "plan_review.json").write_text(
-                    json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
-                self.emit("system", "plan", str(plan["plan_id"]), "plan_validated",
-                          f"计划质量检查：{len(review['issues'])} 个问题"
-                          if review["issues"] else "计划质量检查通过")
-            self._dispatch_ready()
-            self.save(update_graph=True)
-            if plan is not None:
-                self._write_plan_artifacts(plan)
-            if requirement and self.mock:
-                self._start_mock_executor()
+            self._publish_plan_for_approval()
             return self.snapshot()
+
+    def _build_plan_graph(self, tasks):
+        try:
+            edges, summary = analyze(tasks, self.mock)
+        except SystemExit as exc:
+            raise RuntimeError(str(exc)) from None
+        layers, order = topo_layers([task["task_id"] for task in tasks], edges)
+        return edges, summary, layers, order
+
+    def _publish_plan_for_approval(self) -> None:
+        if self.spec is not None:
+            spec_json = json.dumps(self.spec, ensure_ascii=False, indent=2)
+            for name in ("spec.json", f"spec.v{self.spec['version']}.json"):
+                (self.out_dir / name).write_text(spec_json, encoding="utf-8")
+            review = review_plan(self.spec, self.plan)
+            (self.out_dir / "plan_review.json").write_text(
+                json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.emit("system", "plan", self.plan_id, "plan_validated",
+                      f"计划质量检查：{len(review['issues'])} 个问题"
+                      if review["issues"] else "计划质量检查通过")
+        self._open_gate("plan_approval", self.plan_id,
+                        f"计划 {self.plan_id} v{self.plan['version']} 待批准")
+        self.save(update_graph=True)
+        self._write_plan_artifacts(self.plan)
+
+    def _waiting_for_plan(self) -> bool:
+        return bool(self.waiting_on and self.waiting_on["gate_type"] == "plan_approval")
 
     # ----- 队列与处理 -----
 
     def enqueue(self, packet: dict) -> int:
+        if (packet.get("type") == "human_op" and packet.get("action") == "approve"
+                and "plan_id" not in packet and "plan_version" not in packet):
+            with self.lock:
+                if self._waiting_for_plan():
+                    packet = {**packet, "plan_id": self.plan_id,
+                              "plan_version": self.plan["version"]}
         priority = PRIORITIES.get(str(packet.get("priority", "medium")), 1)
         self.queue.put((priority, next(self._tick), packet))
         return self.queue.qsize()
@@ -573,6 +495,8 @@ class RealtimeAgent:
         elif kind == "human_op":
             self._human_op(packet)
         elif kind == "change":
+            if self._waiting_for_plan():
+                raise ValueError("计划批准前不能变更或派发任务")
             self._apply_change(packet)
         else:
             raise ValueError(f"未知数据包类型：{kind}")
@@ -608,14 +532,19 @@ class RealtimeAgent:
 
     def _human_op(self, packet: dict) -> None:
         action = str(packet.get("action") or "")
+        if self._waiting_for_plan() or "plan_id" in packet or "plan_version" in packet or action == "return":
+            self._plan_op(packet)
+            return
         if action not in {"approve", "reject", "skip"}:
             raise ValueError(f"非法人工操作：{action}")
         reason = str(packet.get("reason") or "")
-        if action in {"reject", "skip"} and not reason:
+        if action in {"reject", "skip"} and not reason.strip():
             raise ValueError("驳回或跳过必须填写理由")
+        operator = str(packet.get("operator") or "demo")
         if not self.waiting_on:
-            if self.status == "delivery_pending" and action == "approve" and self.delivery:
-                self._confirm_delivery(str(packet.get("operator") or "demo"))
+            if (self.status == "delivery_pending" and self.delivery
+                    and self.delivery["status"] == "draft" and action in {"approve", "reject"}):
+                self._decide_delivery(action, reason, operator)
                 return
             raise ValueError("当前没有等待中的人工节点")
         task_id = self.waiting_on["object_id"]
@@ -625,21 +554,81 @@ class RealtimeAgent:
         if task:
             task["status"] = {"approve": "done", "reject": "blocked",
                               "skip": "skipped"}[action]
-        self._record_decision(action, task_id, reason,
-                              str(packet.get("operator") or "demo"))
-        self.emit(f"human:{packet.get('operator', 'demo')}", "instance",
+        self._record_decision(action, task_id, reason, operator)
+        self.emit(f"human:{operator}", "instance",
                   self.instance_id, "human_gate_exited",
                   f"{action} {task_id}" + (f"：{reason}" if reason else ""))
         if task and action == "approve":
-            self.emit(f"human:{packet.get('operator', 'demo')}", "task", task_id,
+            self.emit(f"human:{operator}", "task", task_id,
                       "task_done", f"人工确认完成 {task['name']}")
         if action == "reject":
             self._cascade_blocked(task_id)
         self._dispatch_ready()
 
+    def _plan_op(self, packet: dict) -> None:
+        if not self._waiting_for_plan():
+            raise ValueError("当前没有待批准的计划")
+        plan = self.plan
+        action = packet.get("action")
+        if action == "return" or "plan_id" in packet or "plan_version" in packet:
+            version = packet.get("plan_version")
+            if (packet.get("plan_id") != self.plan_id or type(version) is not int
+                    or version != plan["version"]):
+                raise ValueError("计划 ID 或版本已变更，请刷新后再操作")
+        operator = str(packet.get("operator") or "demo")
+        if action == "approve":
+            plan["status"] = "approved"
+            self._write_plan_artifacts(plan)
+            self._record_decision("approve", self.plan_id, "", operator,
+                                  target_type="plan", target_version=plan["version"])
+            self.waiting_on = None
+            self.status = "running"
+            self.emit(f"human:{operator}", "instance", self.instance_id, "human_gate_exited",
+                      f"计划 {self.plan_id} v{plan['version']} 已批准")
+            self._dispatch_ready()
+            if self.auto_execute:
+                self._start_mock_executor()
+            return
+        if action != "return":
+            raise ValueError("待批准计划只接受批准或定向退回")
+        self._return_plan(packet, operator)
+
+    def _return_plan(self, packet: dict, operator: str) -> None:
+        target = packet.get("return_to")
+        reason = str(packet.get("reason") or "").strip()
+        if target not in {"spec", "plan"} or not reason:
+            raise ValueError("退回必须指定 spec 或 plan 并填写理由")
+        old_plan, old_spec = self.plan, self.spec
+        spec = old_spec
+        if target == "spec":
+            if old_spec is None:
+                raise ValueError("本次运行没有可退回的规格正文")
+            spec = reviewed_replacement(old_spec, packet.get("spec"))
+
+        plan = (plan_from_spec(spec, plan_id=self.plan_id,
+                               max_parallel=old_plan.get("max_parallel", 2))
+                if spec is not None else {**old_plan, "created_at": now_iso()})
+        plan = {**plan, "version": old_plan["version"] + 1, "status": "validated"}
+        tasks, _ = normalize_tasks(plan)
+        edges, summary, layers, order = self._build_plan_graph(tasks)
+        artifact = old_spec if target == "spec" else old_plan
+        target_id = artifact["spec_id"] if target == "spec" else self.plan_id
+        self._record_decision("return", target_id, reason, operator, target_type=target,
+                              target_version=artifact["version"], return_to=target)
+        self.emit(f"human:{operator}", target, target_id, f"{target}_returned",
+                  f"{target_id} v{artifact['version']} 已退回：{reason}")
+        self.plan, self.spec = plan, spec
+        if spec is not None:
+            self.spec_version = f"v{spec['version']}"
+        self.tasks = {task["task_id"]: {**task, "status": "pending", "attempts": 0} for task in tasks}
+        self.edges, self.layers, self.order = edges, layers, order
+        self.analysis_summary = summary
+        self.graph_id = self._bump(self.graph_id, "G-v")
+        self._publish_plan_for_approval()
+
     def _record_decision(self, action: str, target_id: str, reason: str,
                          operator: str, target_type: str = "task",
-                         target_version: int = 1) -> dict:
+                         target_version: int = 1, return_to: str | None = None) -> dict:
         decision = {
             "decision_id": f"DEC-{len(self.decisions) + 1:04d}",
             "target_type": target_type,
@@ -651,6 +640,8 @@ class RealtimeAgent:
         }
         if reason:
             decision["reason"] = reason
+        if return_to:
+            decision["return_to"] = return_to
         self.decisions.append(decision)
         with self.decisions_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(decision, ensure_ascii=False) + "\n")
@@ -842,7 +833,7 @@ class RealtimeAgent:
                    if edge["to"] == task_id and edge.get("type") in BLOCKING_EDGE_TYPES)
 
     def _dispatch_ready(self) -> None:
-        if not self.started:
+        if not self.started or self._waiting_for_plan():
             return
         progressed = True
         while progressed:
@@ -879,8 +870,11 @@ class RealtimeAgent:
             if all_terminal:
                 if self.delivery is None:
                     self._create_delivery()
-                self.status = ("completed" if self.delivery["status"] == "confirmed"
-                               else "delivery_pending")
+                self.status = {
+                    "draft": "delivery_pending",
+                    "confirmed": "completed",
+                    "rejected": "blocked",
+                }[self.delivery["status"]]
             elif self.waiting_on:
                 self.status = "waiting_human"
             else:
@@ -942,20 +936,23 @@ class RealtimeAgent:
         (self.out_dir / "delivery.json").write_text(
             json.dumps(self.delivery, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _confirm_delivery(self, operator: str) -> None:
+    def _decide_delivery(self, action: str, reason: str, operator: str) -> None:
         delivery = self.delivery
-        decision = self._record_decision("approve", str(delivery["delivery_id"]), "",
+        approved = action == "approve"
+        decision = self._record_decision(action, delivery["delivery_id"], reason,
                                          operator, target_type="delivery")
         delivery.update({
-            "status": "confirmed",
-            "decided_by": f"human:{operator}",
-            "decided_at": now_iso(),
+            "status": "confirmed" if approved else "rejected",
+            "decided_by": decision["actor"],
+            "decided_at": decision["created_at"],
             "decision_id": decision["decision_id"],
         })
         self._write_delivery()
-        self.status = "completed"
-        self.emit(f"human:{operator}", "delivery", delivery["delivery_id"],
-                  "delivery_confirmed", f"交付 {delivery['delivery_id']} 已确认")
+        self.status = "completed" if approved else "blocked"
+        self.emit(decision["actor"], "delivery", delivery["delivery_id"],
+                  "delivery_confirmed" if approved else "delivery_rejected",
+                  f"交付 {delivery['delivery_id']} 已确认" if approved
+                  else f"交付 {delivery['delivery_id']} 已驳回：{reason}")
 
     def _start_mock_executor(self) -> None:
         """mock 模式下的自动执行器：把 running 的 AI 任务逐个收尾，用于全链路演示。"""
@@ -1036,6 +1033,8 @@ class RealtimeAgent:
             "waiting_on": self.waiting_on,
             "spec_version": self.spec_version,
             "plan_id": self.plan_id,
+            "plan_version": self.plan["version"] if self.plan else None,
+            "can_return_spec": self.spec is not None and self._waiting_for_plan(),
             "list_version": self.list_version,
             "graph_id": self.graph_id,
             "total": total,
@@ -1227,6 +1226,8 @@ class AgentHandler(BaseHTTPRequestHandler):
                                  "progress": self.agent.snapshot()})
             else:
                 self._send(404, {"error": "not found"})
+        except SpecGateError as exc:
+            self._send(exc.status, {"error": exc.code, "message": str(exc), "details": exc.details})
         except RequirementsUnavailable as exc:
             self._send(503, {"error": str(exc)})
         except RuntimeError as exc:

@@ -57,6 +57,12 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
     if spec.escalation:
         parts += [">", f"> ⚠ 存在未决人工问题 `{spec.escalation['id']}`，"
                        f"确认前不能作为开发依据。"]
+    if spec.review:
+        review = spec.review
+        counts = review["audit"]["counts"]
+        label = {"approved": "通过", "awaiting_human": "待人工决策", "blocked": "有阻断"}[review["status"]]
+        parts += [">", f"> 规格审查：{label} ｜ 阻断 {counts['blocking']} 条 ｜ "
+                       f"审查记录 `audit.v{spec.version}.json`"]
     parts += [""]
 
     parts += ["## 1 概述", "", spec.architecture, ""]
@@ -156,7 +162,8 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def export_spec(spec: Spec, snapshot: Snapshot, directory: str | Path) -> dict[str, Any]:
+def export_spec(spec: Spec, snapshot: Snapshot, directory: str | Path,
+                *, publish: bool = True) -> dict[str, Any]:
     """写出同版 JSON 与 Markdown，并返回可核对的摘要。
 
     `spec.v{n}.json` / `spec.json` 只保留 spec 契约内的字段；导出元数据
@@ -174,9 +181,10 @@ def export_spec(spec: Spec, snapshot: Snapshot, directory: str | Path) -> dict[s
                             "bundle": bundle_name, "content_hash": spec.hash}}
     write_json(root / json_name, pure)
     write_text(root / md_name, markdown)
-    write_json(root / "spec.json", pure)
-    write_text(root / "spec.md", markdown)
-    write_json(root / bundle_name, bundle)
+    if publish:
+        write_text(root / "spec.md", markdown)
+        write_json(root / bundle_name, bundle)
+        write_json(root / "spec.json", pure)
     return {
         "spec_id": spec.spec_id,
         "version": spec.version,

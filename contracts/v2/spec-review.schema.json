@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideaflow.local/contracts/v2/spec-review.schema.json",
+  "title": "规格审查结论",
+  "type": "object",
+  "required": ["status", "spec_ref", "snapshot_ref", "audit", "question"],
+  "additionalProperties": false,
+  "properties": {
+    "status": {"enum": ["draft", "approved", "awaiting_human", "blocked"]},
+    "spec_ref": {"$ref": "spec-review.schema.json#/$defs/specRef"},
+    "snapshot_ref": {"$ref": "spec-review.schema.json#/$defs/snapshotRef"},
+    "audit": {
+      "type": "object",
+      "required": ["spec_ref", "snapshot_ref", "counts", "issues", "checks", "passed", "hash"],
+      "properties": {
+        "spec_ref": {"$ref": "spec-review.schema.json#/$defs/specRef"},
+        "snapshot_ref": {"$ref": "spec-review.schema.json#/$defs/snapshotRef"},
+        "counts": {
+          "type": "object",
+          "required": ["blocking", "major", "minor", "total"],
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity"],
+            "properties": {"severity": {"enum": ["blocking", "major", "minor"]}}
+          }
+        },
+        "checks": {"type": "object"},
+        "passed": {"type": "boolean"},
+        "hash": {"$ref": "enums.schema.json#/$defs/hash"}
+      }
+    },
+    "question": {
+      "type": ["object", "null"],
+      "required": ["id", "question", "spec_ref", "snapshot_ref"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "question": {"type": "string", "minLength": 1},
+        "spec_ref": {"$ref": "spec-review.schema.json#/$defs/specRef"},
+        "snapshot_ref": {"$ref": "spec-review.schema.json#/$defs/snapshotRef"}
+      }
+    }
+  },
+  "$defs": {
+    "specRef": {
+      "type": "object",
+      "required": ["spec_id", "version", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1},
+        "hash": {"$ref": "enums.schema.json#/$defs/hash"}
+      }
+    },
+    "snapshotRef": {
+      "type": "object",
+      "required": ["snapshot_id", "version", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1},
+        "hash": {"$ref": "enums.schema.json#/$defs/hash"}
+      }
+    }
+  }
+}

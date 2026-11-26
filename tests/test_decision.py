@@ -51,6 +51,7 @@ class DecisionRecordTest(unittest.TestCase):
         self.agent = RealtimeAgent(out_dir=self.out, mock=True,
                                    upload_path=self.out / "uploaded.json")
         self.agent.start(TASKS, json.dumps(TASKS).encode("utf-8"))
+        self.agent.process({"type": "human_op", "action": "approve"})
         self.assertEqual(self.agent.waiting_on["object_id"], "T1")
 
     def tearDown(self):
@@ -60,7 +61,8 @@ class DecisionRecordTest(unittest.TestCase):
         path = self.out / "decisions.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+        return [row for row in records if row["target_type"] == "task"]
 
     def test_approve_records_valid_decision(self):
         self.agent._human_op({"action": "approve", "operator": "tester"})

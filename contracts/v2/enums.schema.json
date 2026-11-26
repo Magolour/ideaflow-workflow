@@ -30,6 +30,7 @@
         "draft",
         "awaiting_human",
         "confirmed",
+        "blocked",
         "superseded"
       ]
     },
@@ -206,6 +207,7 @@
     "gateType": {
       "type": "string",
       "enum": [
+        "plan_approval",
         "task_execution",
         "task_failed",
         "delivery_confirm"
