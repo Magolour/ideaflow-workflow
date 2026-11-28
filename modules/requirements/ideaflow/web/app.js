@@ -12,6 +12,7 @@ const state = {
   case: null,
   loadedCaseText: "",
   spec: null,
+  clarifyAnswers: {},
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -35,6 +36,8 @@ const els = {
   threshold: $("#threshold"),
   thresholdOut: $("#thresholdOut"),
   generate: $("#btnGenerate"),
+  clarify: $("#btnClarify"),
+  clarifyPanel: $("#clarifyPanel"),
   generateLabel: $(".btn-generate .btn-label"),
   status: $("#serverStatus"),
   empty: $("#emptyState"),
@@ -407,7 +410,8 @@ async function generate() {
 
   const live = Boolean(els.liveModel && els.liveModel.checked);
   const body = state.mode === "spec"
-    ? { flow: "spec", idea, constraints: state.constraints, case: state.case, live }
+    ? { flow: "spec", idea, constraints: state.constraints, case: state.case, live,
+        answers: state.clarifyAnswers }
     : {
       flow: "proposal",
       idea,
@@ -521,6 +525,8 @@ function setMode(mode) {
   els.generateLabel.textContent = text.label;
   els.advancedOptions.hidden = state.mode !== "proposal";
   els.caseField.hidden = state.mode !== "spec";
+  if (els.clarify) els.clarify.hidden = state.mode !== "spec";
+  if (state.mode !== "spec" && els.clarifyPanel) els.clarifyPanel.hidden = true;
   els.emptyTitle.textContent = text.emptyTitle;
   els.emptySub.textContent = text.emptySub;
   if (state.mode === "spec") {
@@ -743,7 +749,8 @@ function renderDiscussionPanel(data) {
 
   els.panelDiscussion.innerHTML = `
     <div class="subsection"><h3>讨论过程</h3>
-      <span>${escapeHtml(consensus.label || consensus.state || "—")} ｜ 轮次 ${disc.round} ｜ 事件 ${events.length}</span></div>
+      <span>${escapeHtml(consensus.label || consensus.state || "—")} ｜ 轮次 ${disc.round} ｜ 事件 ${events.length}
+        ｜ <a href="#panelSpecDoc" data-goto="doc">查看最终设计规格 →</a></span></div>
     <div class="disc-banner">${escapeHtml(consensus.reason || "")}<br>
       <span>停止原因：${escapeHtml(termination.label || termination.reason || "未记录")}</span></div>
     <div class="disc-stages">${stageHtml}</div>
@@ -1031,6 +1038,57 @@ async function submitSpecAnswer(event) {
 
 /* ------------------------------ 事件绑定 ------------------------------ */
 
+
+async function clarifySpec() {
+  const idea = els.idea.value.trim();
+  if (!idea) {
+    els.ideaError.hidden = false;
+    els.idea.classList.add("invalid");
+    return;
+  }
+  els.clarify.disabled = true;
+  els.clarify.textContent = "正在澄清…";
+  try {
+    const response = await fetch("/api/clarify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        idea, constraints: state.constraints,
+        live: Boolean(els.liveModel && els.liveModel.checked),
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error?.message || `服务返回 ${response.status}`);
+    const questions = payload.questions || [];
+    state.clarifyAnswers = {};
+    if (!questions.length) {
+      els.clarifyPanel.hidden = false;
+      els.clarifyPanel.innerHTML = '<p class="clarify-empty">没有必须由人回答的阻断问题，可以直接生成。</p>';
+      return;
+    }
+    els.clarifyPanel.hidden = false;
+    els.clarifyPanel.innerHTML = `<div class="clarify-head"><b>生成前澄清</b>
+      <span>不填也可以生成，未答问题会标记为“按假设继续”。</span></div>
+      ${questions.map((question) => `<label class="clarify-row">
+        <span class="tag-mono">${escapeHtml(question.id)}</span>
+        <span class="clarify-text">${escapeHtml(question.text)}</span>
+        <input data-qid="${escapeHtml(question.id)}" placeholder="你的答复（可留空）">
+      </label>`).join("")}`;
+    els.clarifyPanel.querySelectorAll("input[data-qid]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const value = input.value.trim();
+        if (value) state.clarifyAnswers[input.dataset.qid] = value;
+        else delete state.clarifyAnswers[input.dataset.qid];
+      });
+    });
+  } catch (error) {
+    toast(`澄清失败：${error.message}`);
+  } finally {
+    els.clarify.disabled = false;
+    els.clarify.textContent = "先澄清（可选）";
+  }
+}
+
 function bind() {
   els.panelAudit.addEventListener("submit", submitSpecAnswer);
   els.idea.addEventListener("input", () => {
@@ -1043,6 +1101,8 @@ function bind() {
       clearCaseSelection();
     }
   });
+
+  if (els.clarify) els.clarify.addEventListener("click", clarifySpec);
 
   els.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1093,7 +1153,7 @@ function bind() {
     if (tab) switchSpecTab(tab.dataset.stab);
   });
 
-  els.specBanner.addEventListener("click", (event) => {
+  els.specResult.addEventListener("click", (event) => {
     const link = event.target.closest("[data-goto]");
     if (link) switchSpecTab(link.dataset.goto);
   });

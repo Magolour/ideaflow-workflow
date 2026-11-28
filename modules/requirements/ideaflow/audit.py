@@ -30,6 +30,10 @@ TYPE_SEVERITY = {
     "ACCEPTANCE_NOT_MEASURABLE": "major",
     "MAPPING_INCONSISTENT": "major",
     "NON_GOAL_OVERLAP": "major",
+    "DECISION_NO_REASON": "blocking",
+    "DECISION_NO_SOURCE": "blocking",
+    "INTERFACE_INCOMPLETE": "major",
+    "ESTIMATE_MISSING": "major",
     "ESTIMATE_MISSING": "major",
 }
 TYPE_LABEL = {
@@ -44,6 +48,10 @@ TYPE_LABEL = {
     "ACCEPTANCE_NOT_MEASURABLE": "验收条件不可度量",
     "MAPPING_INCONSISTENT": "需求与模块映射不一致",
     "NON_GOAL_OVERLAP": "非目标与方案范围重叠",
+    "DECISION_NO_REASON": "决策缺少理由",
+    "DECISION_NO_SOURCE": "决策缺少来源",
+    "INTERFACE_INCOMPLETE": "接口缺少输入或输出",
+    "ESTIMATE_MISSING": "模块缺少估算",
     "ESTIMATE_MISSING": "模块缺少估时",
 }
 
@@ -176,6 +184,34 @@ def audit_spec(spec: Spec, snapshot: Snapshot) -> dict[str, Any]:
                    ref for row in missing_estimates
                    for ref in (row.get("requirement_ids") or []))),
                fix_hint="补齐草案工作包估算后再确认规格")
+
+    for decision in spec.decisions:
+        if not str(decision.get("reason") or "").strip():
+            _issue(issues, "DECISION_NO_REASON",
+                   f"{decision['id']} 没有写决策理由",
+                   requirement_ids=list(decision.get("requirement_ids") or []),
+                   fix_hint="补充选择该方案的理由与约束依据")
+        if not (decision.get("requirement_ids") or decision.get("claim_ids")
+                or decision.get("draft_ids")):
+            _issue(issues, "DECISION_NO_SOURCE",
+                   f"{decision['id']} 没有可追溯的需求、观点或方案来源",
+                   fix_hint="补充 requirement_ids / claim_ids / draft_ids")
+    for module in spec.modules:
+        for index, row in enumerate(module.get("interfaces") or []):
+            if not str(row.get("input") or "").strip() or not str(row.get("output") or "").strip():
+                _issue(issues, "INTERFACE_INCOMPLETE",
+                       f"{module['id']} 接口 {row.get('name') or index + 1} 缺少输入或输出",
+                       fix_hint="补齐接口入参与出参")
+        if module.get("estimate_days") is None:
+            name = str(module.get("name") or "")
+            covered = any("估算" in str(row.get("question") or "")
+                          and (name in str(row.get("question") or "")
+                               or module["id"] in (row.get("impact") or []))
+                          for row in spec.open_items)
+            if not covered:
+                _issue(issues, "ESTIMATE_MISSING",
+                       f"{module['id']} {name} 缺少估算，且没有待确认记录",
+                       fix_hint="补充估算或在 open_items 标记待补")
 
     verified = 0
     active_rows = [*spec.decisions, *spec.modules]

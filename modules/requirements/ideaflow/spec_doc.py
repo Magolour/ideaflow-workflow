@@ -65,13 +65,26 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
                        f"审查记录 `audit.v{spec.version}.json`"]
     parts += [""]
 
-    parts += ["## 1 概述", "", spec.architecture, ""]
+    parts += ["## 1 概述", ""]
+    parts += ["### 1.1 背景与问题定义", ""]
+    summary = next((row["text"] for row in snapshot.requirements), _title(snapshot))
+    parts += [f"输入想法：{summary}", "",
+              "问题：原始描述只给出目标，缺少可直接开发的边界、验收与取舍；"
+              "本规格把讨论结论固化为可执行的设计基线。", ""]
+    parts += ["### 1.2 目标用户与使用场景", ""]
+    users = [f"- {row['text']}" for row in snapshot.requirements[:4]]
+    parts += users or ["- 使用原始需求描述中的直接用户。"]
+    parts += ["", "场景：用户从触发需求到完成目标的主路径，对应第 2 章需求与第 5 章验收。", ""]
+    parts += ["### 1.3 项目目标与非目标", ""]
+    parts += [f"- 目标：交付 {len(spec.modules)} 个模块，覆盖 {len(snapshot.requirements)} 条明确需求。"]
+    parts += [f"- 非目标：{row['item']}（{row['reason']}）" for row in spec.non_goals] or ["- 非目标：未记录。"]
+    parts += ["", spec.architecture, ""]
     parts += [f"本规格以 {spec.base_draft} 为基线，整合两份草案后共 "
               f"{len(spec.decisions)} 条决策、{len(spec.modules)} 个模块；"
               f"未采纳 {len(spec.not_adopted)} 项差异，保留 "
               f"{len(spec.open_items)} 个待决问题。", ""]
 
-    parts += ["## 2 需求追溯", ""]
+    parts += ["## 2 需求追溯", "", "### 2.1 功能需求与优先级", ""]
     rows = []
     for requirement in snapshot.requirements:
         rid = requirement["id"]
@@ -86,7 +99,7 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
         ])
     parts += [_table(["需求", "内容", "决策", "模块", "验收", "满足程度"], rows), ""]
 
-    parts += ["## 3 设计决策", ""]
+    parts += ["## 3 设计决策", "", "### 3.1 业务流程与规则", ""]
     for decision in spec.decisions:
         requirement_id = (decision["requirement_ids"][0]
                           if decision.get("requirement_ids") else "未映射需求")
@@ -99,7 +112,15 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
                   f"- **满足程度**：{SATISFIES_LABEL[decision['satisfies']]}" +
                   ("（待人工确认）" if decision["needs_human"] else ""), ""]
 
-    parts += ["## 4 模块与接口", ""]
+    parts += ["## 4 模块与接口", "", "### 4.1 总体架构", ""]
+    parts += [spec.architecture, ""]
+    parts += ["### 4.2 模块职责", ""]
+    parts += [_table(["模块", "职责", "需求", "估算"],
+                     [[row["id"], row["responsibility"],
+                       "、".join(row["requirement_ids"]) or "未映射",
+                       row.get("estimate_days") if row.get("estimate_days") is not None else "待补"]
+                      for row in spec.modules]), ""]
+    parts += ["### 4.3 接口、输入输出与数据", ""]
     for module in spec.modules:
         estimate = module.get("estimate_days")
         estimate_text = (f"估算 {estimate} 天" if isinstance(estimate, (int, float))
@@ -112,6 +133,10 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
         parts += [_table(["接口", "调用方", "入参", "出参"],
                          [[row["name"], row["caller"], row["input"], row["output"]]
                           for row in module["interfaces"]])]
+    parts += ["### 4.4 非功能需求与技术约束", ""]
+    nfr = [f"- {row['text']}" for row in snapshot.constraints]
+    parts += nfr or ["- 未声明额外非功能约束。"]
+    parts += ["- 接口统一返回 result | error；错误必须带错误码与可定位字段。", ""]
 
     parts += ["## 5 验收条件", ""]
     parts += [_table(["编号", "需求", "验收条件", "验证方式"],

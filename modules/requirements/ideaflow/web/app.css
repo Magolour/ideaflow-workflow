@@ -1145,3 +1145,17 @@ table.spec-table { min-width: 640px; }
 .disc-option { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--paper); }
 .disc-option header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
 .disc-option header span { color: var(--muted); font-size: 12px; }
+
+/* 生成前澄清 */
+.btn-clarify { width: 100%; margin: 6px 0; padding: 8px 10px; border-radius: 7px;
+  border: 1px dashed var(--rail-line); background: transparent; color: var(--rail-muted);
+  font-size: 12px; cursor: pointer; }
+.btn-clarify:hover { color: var(--rail-text); border-color: var(--brass); }
+.clarify-panel { margin: 6px 0 10px; padding: 10px; border: 1px solid var(--rail-line);
+  border-radius: 8px; background: rgba(255,255,255,.03); color: var(--rail-text); }
+.clarify-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.clarify-head span, .clarify-empty { color: var(--rail-muted); font-size: 11.5px; }
+.clarify-row { display: grid; grid-template-columns: 54px 1fr; gap: 4px 8px; margin-bottom: 8px; }
+.clarify-text { font-size: 12px; color: var(--rail-text); }
+.clarify-row input { grid-column: 2; width: 100%; padding: 5px 7px; border-radius: 6px;
+  border: 1px solid var(--rail-line); background: var(--rail-2); color: var(--rail-text); font-size: 12px; }

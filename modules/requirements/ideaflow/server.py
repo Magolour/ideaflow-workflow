@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from .agents import LLMAgent
 from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, SEVERITY_LABEL,
                         STANCE_LABEL, ContractError)
-from .pipeline import run
+from .pipeline import clarify_questions, run
 from .render_html import PAPER_CSS, document_html, render_markdown
 from .resolutions import answer_question
 from .roles import ALL_ROLES, DISCUSSION_ROLES
@@ -204,7 +204,8 @@ class JobStore:
         try:
             raw = load_case(job.case) if job.case else job.idea
             result = run_spec(raw, job.constraints, out_dir=self.runs_dir,
-                              case_name=job.case, progress=progress, agent=agent, discuss=True)
+                              case_name=job.case, progress=progress, agent=agent,
+                              discuss=True, answers=job.answers)
         except ContractError as error:
             self._fail(job, error.code, error.message, error.path)
             return
@@ -515,11 +516,14 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
         def do_POST(self) -> None:  # noqa: N802
             route = urlparse(self.path)
             try:
-                if route.path not in ("/api/generate", "/api/spec/answer"):
+                if route.path not in ("/api/generate", "/api/spec/answer", "/api/clarify"):
                     raise ApiError(404, "NOT_FOUND", f"找不到 {route.path}")
                 payload = self._read_json()
                 if route.path == "/api/spec/answer":
                     self._handle_spec_answer(payload)
+                    return
+                if route.path == "/api/clarify":
+                    self._handle_clarify(payload)
                     return
                 options = _parse_generate(payload)
                 job = store.create(**options)
@@ -530,6 +534,31 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                 self._send_error(error)
 
         # ---------- 处理函数 ----------
+
+        def _handle_clarify(self, payload: Any) -> None:
+            if not isinstance(payload, dict):
+                raise ApiError(400, "INVALID_BODY", "请求体必须是对象")
+            idea = str(payload.get("idea") or "").strip()
+            if not idea:
+                raise ApiError(400, "EMPTY_IDEA", "想法不能为空")
+            constraints = payload.get("constraints") or []
+            if not isinstance(constraints, list):
+                raise ApiError(400, "INVALID_FIELD", "约束必须是数组")
+            agent = None
+            if payload.get("live"):
+                try:
+                    agent = LLMAgent()
+                except ContractError as error:
+                    raise ApiError(400, error.code, error.message) from error
+            try:
+                rows = clarify_questions(idea, [str(item) for item in constraints],
+                                         agent=agent)
+            except ContractError as error:
+                raise ApiError(422, error.code, error.message) from error
+            self._send_json(HTTPStatus.OK, {"questions": [
+                {"id": row["id"], "text": row["text"], "blocking": row.get("blocking", True)}
+                for row in rows
+            ]})
 
         def _handle_spec_answer(self, payload: Any) -> None:
             run_id = payload.get("run_id") if isinstance(payload, dict) else None

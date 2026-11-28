@@ -73,7 +73,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         out_dir: str | Path = "runs", confirm: str = "产品经理",
         case_name: str | None = None, progress: Progress | None = None,
         agent: Any | None = None, discuss: bool = False,
-        discuss_rounds: int = 2) -> SpecFlowResult:
+        discuss_rounds: int = 2, answers: dict[str, str] | None = None) -> SpecFlowResult:
     say = progress or (lambda message: None)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     slug = slugify(raw_text, limit=16)
@@ -94,7 +94,8 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         say("先跑讨论：澄清 → 六角色发散 → 批判/回应 → 整合 → 签署")
         discussion = run_discussion(raw_text, constraints=constraints,
                                     out_dir=target / "discussion", agent=agent,
-                                    max_rounds=discuss_rounds, progress=progress)
+                                    max_rounds=discuss_rounds, progress=progress,
+                                    answers=answers)
         board = discussion.board
         _merge_ai_calls(discussion.out_dir, target / "ai_calls.jsonl")
         if agent is not None and hasattr(agent, "bind_run"):

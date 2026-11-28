@@ -60,6 +60,21 @@ def _dedupe_objections(raw: dict[str, Any], board: Blackboard) -> dict[str, Any]
     return {**raw, "objections": fresh}
 
 
+
+def clarify_questions(idea: str, constraints: list[str] | None = None,
+                      agent: Agent | None = None) -> list[dict[str, Any]]:
+    """只跑需求分析的首轮澄清，供 Web 端在正式生成前收集人工答复。"""
+    if not idea.strip():
+        raise ContractError("EMPTY_IDEA", "想法不能为空", "idea")
+    agent = agent or MockAgent()
+    board = Blackboard(idea, constraints)
+    raw = agent.respond("clarify", role_card("ba"), isolated_context(idea, board.constraints))
+    board.add_role_output(raw, role_id="ba", stage="clarify")
+    for row in board.open_questions:
+        row["blocking"] = True
+    return list(board.open_questions)
+
+
 def run(idea: str, *, constraints: list[str] | None = None,
         out_dir: str | Path = "runs", agent: Agent | None = None,
         answers: dict[str, str] | None = None,
