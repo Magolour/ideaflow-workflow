@@ -696,6 +696,20 @@ function renderDiscussionPanel(data) {
       <span>立场 ${role.stances}</span></div>
   </article>`).join("");
 
+  const assumptionRows = (disc.assumptions || []).map((row) => `<tr>
+    <td class="tag-mono">${escapeHtml(row.id)}</td>
+    <td>${escapeHtml(row.text || row.assumption || "")}</td>
+    <td class="src">${escapeHtml(row.reason || row.source || "")}</td>
+  </tr>`).join("");
+
+  const decisionRows = (disc.decisions || []).map((row) => `<tr>
+    <td class="tag-mono">${escapeHtml(row.id)}</td>
+    <td>${escapeHtml(row.scope || "")}</td>
+    <td>${escapeHtml(row.choice || "")}</td>
+    <td>${escapeHtml(row.reason || "")}</td>
+    <td>${escapeHtml((row.requirement_ids || []).join("、") || "未映射")}</td>
+  </tr>`).join("");
+
   const claimRows = claims.map((claim) => `<tr>
     <td class="tag-mono">${escapeHtml(claim.id)}</td>
     <td>${escapeHtml(roleName(claim.role))}</td>
@@ -764,12 +778,18 @@ function renderDiscussionPanel(data) {
       <span id="discReplayState" class="src"></span>
     </div>
     <div class="disc-timeline" id="discTimeline">${eventRows}</div>
+    <h3 class="disc-h">假设 ASM</h3>
+    <table class="spec-table"><thead><tr><th>编号</th><th>假设</th><th>依据/说明</th></tr></thead>
+      <tbody>${assumptionRows || '<tr><td colspan="3">没有假设</td></tr>'}</tbody></table>
     <h3 class="disc-h">观点 CLM</h3>
     <table class="spec-table"><thead><tr><th>编号</th><th>角色</th><th>依据</th><th>主张</th><th>理由</th></tr></thead><tbody>${claimRows}</tbody></table>
     <h3 class="disc-h">异议 OBJ 与回应</h3>
     <table class="spec-table"><thead><tr><th>编号</th><th>指向</th><th>提出者</th><th>严重度</th><th>分歧</th><th>内容</th><th>回应</th><th>状态</th></tr></thead><tbody>${objectionRows}</tbody></table>
     <h3 class="disc-h">候选方案与立场矩阵</h3>
     <div class="disc-options">${optionCards || '<p class="src">没有候选方案</p>'}</div>
+    <h3 class="disc-h">决策 DEC</h3>
+    <table class="spec-table"><thead><tr><th>编号</th><th>范围</th><th>选择</th><th>理由</th><th>需求</th></tr></thead>
+      <tbody>${decisionRows || '<tr><td colspan="5">没有决策</td></tr>'}</tbody></table>
     <h3 class="disc-h">关键意见处理</h3>
     <table class="spec-table"><thead><tr><th>主张</th><th>角色</th><th>内容</th><th>回应</th><th>处理</th><th>理由</th></tr></thead><tbody>${opinionRows}</tbody></table>`;
 
