@@ -208,12 +208,14 @@
 
         <div class="tabs" id="specTabs" role="tablist">
           <button class="tab" role="tab" data-stab="snapshot" aria-selected="true">需求快照</button>
+          <button class="tab" role="tab" data-stab="discussion" aria-selected="false">讨论过程</button>
           <button class="tab" role="tab" data-stab="drafts" aria-selected="false">A/B 草案<span class="count" id="countDrafts">0</span></button>
           <button class="tab" role="tab" data-stab="doc" aria-selected="false">设计规格</button>
           <button class="tab" role="tab" data-stab="audit" aria-selected="false">审查与修订<span class="count" id="countIssues">0</span></button>
         </div>
 
         <div class="panel" data-spanel="snapshot" id="panelSnapshot"></div>
+        <div class="panel" data-spanel="discussion" id="panelDiscussion" hidden></div>
         <div class="panel" data-spanel="drafts" id="panelDrafts" hidden></div>
         <div class="panel doc-panel" data-spanel="doc" id="panelSpecDoc" hidden>
           <article class="paper" id="specPaper"></article>

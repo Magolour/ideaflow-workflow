@@ -119,6 +119,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
     # ---------- 阶段 1：首轮澄清 ----------
     board.stage = "clarify"
+    events.stage = "clarify"
     say("阶段 1/7 首轮澄清：需求分析角色提出只能由人回答的阻断问题")
     clarify = safe_respond("clarify", role_card("ba"),
                            isolated_context(idea, board.constraints))
@@ -154,6 +155,8 @@ def run(idea: str, *, constraints: list[str] | None = None,
     # ---------- 阶段 2：独立发散（互不可见） ----------
     board.stage = "diverge"
     board.round = 1
+    events.stage = "diverge"
+    events.round = 1
     say("阶段 2/7 独立发散：6 个角色并行、互不可见")
     for role in DISCUSSION_ROLES:
         # 每次都给一份全新上下文，只含原始输入，杜绝互相污染
@@ -179,6 +182,8 @@ def run(idea: str, *, constraints: list[str] | None = None,
     for round_no in range(1, max_rounds + 1):
         board.stage = "critique"
         board.round = round_no + 1
+        events.stage = "critique"
+        events.round = round_no + 1
         say(f"阶段 3/7 第 {round_no} 轮结构化批判：必须引用论点编号并表态")
         new_objections = 0
         for role in DISCUSSION_ROLES:
@@ -201,6 +206,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
         board.divergence = divergence_map(board)
         board.stage = "respond"
+        events.stage = "respond"
         pending = board.open_objections()
         for role in DISCUSSION_ROLES:
             mine = [row for row in pending
@@ -237,6 +243,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
     # ---------- 阶段 5：整合 ----------
     board.stage = "synthesize"
+    events.stage = "synthesize"
     say("阶段 4/7 方案整合：保留来源与少数意见，生成候选方案与估算")
     raw = agent.respond("synthesize", SYNTHESIZER,
                         deepcopy({"idea": idea, "constraints": board.constraints,
@@ -260,6 +267,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
     # ---------- 阶段 6：立场签署 ----------
     board.stage = "sign"
+    events.stage = "sign"
     say("阶段 5/7 立场签署：赞同／有条件赞同／反对／未评审")
     option_view = [{"id": row["id"], "key": row["key"], "name": row["name"]}
                    for row in board.options]
@@ -282,6 +290,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
 
     # ---------- 阶段 7：伪共识检查与整合复核 ----------
     board.stage = "guard"
+    events.stage = "review"
     if needs_counterexample(board):
         say("阶段 6/7 伪共识检查：全部立场一致，要求质疑者提出反例")
         raw = safe_respond("counterexample", role_card("skeptic"),

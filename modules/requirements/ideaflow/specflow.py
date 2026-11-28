@@ -14,12 +14,14 @@ from typing import Any, Callable
 from .agents import MockAgent
 from .artifacts import deliver
 from .audit import audit_spec, save_audit
-from .contracts import ContractError
+from .contracts import CONSENSUS_LABEL, ContractError
+from .convergence import key_opinions
 from .features import claim_requirements, synthesize
 from .pipeline import run as run_discussion
 from .pipeline import slugify
 from .race import run_race, save_race
 from .reviews import review_all
+from .roles import DISCUSSION_ROLES
 from .revisions import save_revisions, scope_revision
 from .snapshot import build, save
 from .spec import build_spec, save_spec
@@ -87,6 +89,7 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         agent.bind_run(target)
 
     board = None
+    discussion = None
     if discuss:
         say("先跑讨论：澄清 → 六角色发散 → 批判/回应 → 整合 → 签署")
         discussion = run_discussion(raw_text, constraints=constraints,
@@ -180,7 +183,8 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
         ai_calls = len([line for line in log.read_text(encoding="utf-8").splitlines()
                         if line.strip()])
     payload = _payload(run_id, snapshot, race, reviews, spec, audits, question, files,
-                       markdown, case_name, ai_calls=ai_calls)
+                       markdown, case_name, ai_calls=ai_calls, board=board,
+                       discussion=discussion)
     write_json(target / "flow.json", {
         "run_id": run_id, "flow": "spec", "case": case_name,
         "status": spec.status,
@@ -212,10 +216,58 @@ def run(raw_text: str, constraints: list[str] | None = None, *,
                           question=question, files=files, payload=payload)
 
 
+
+DISCUSSION_STAGES = (
+    ("clarify", "澄清"), ("diverge", "独立发散"), ("critique", "结构化批判"),
+    ("respond", "回应"), ("synthesize", "方案整合"), ("sign", "立场签署"),
+    ("review", "复核与收敛"),
+)
+
+
+def _discussion_payload(board: Any, discussion: Any) -> dict[str, Any] | None:
+    if board is None:
+        return None
+    events = list(getattr(getattr(discussion, "events", None), "events", []) or [])
+    seen = {row.get("stage") for row in events if row.get("stage")}
+    role_rows = []
+    for role in DISCUSSION_ROLES:
+        claims = [row for row in board.claims if row.get("role") == role.id]
+        objections = [row for row in board.objections if row.get("role") == role.id]
+        stance = board.stances.get(role.id, {})
+        role_rows.append({
+            "id": role.id, "name": role.name, "focus": role.focus,
+            "claims": len(claims), "objections": len(objections),
+            "stances": len(stance), "participated": bool(claims),
+        })
+    return {
+        "stage": board.stage,
+        "round": board.round,
+        "stages": [{"key": key, "label": label, "done": key in seen}
+                   for key, label in DISCUSSION_STAGES],
+        "roles": role_rows,
+        "claims": board.claims,
+        "assumptions": board.assumptions,
+        "objections": board.objections,
+        "options": board.options,
+        "stances": board.stances,
+        "decisions": board.decisions,
+        "open_questions": board.open_questions,
+        "reviews": board.reviews,
+        "divergence": board.divergence,
+        "key_opinions": key_opinions(board),
+        "termination": board.termination,
+        "consensus": {"state": board.consensus_state(),
+                      "label": CONSENSUS_LABEL.get(board.consensus_state(),
+                                                   board.consensus_state()),
+                      "reason": board.consensus_reason()},
+        "events": events,
+    }
+
 def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spec: Any,
              audits: list[dict[str, Any]], question: dict[str, Any] | None,
              files: dict[str, str], markdown: str,
-             case_name: str | None, *, ai_calls: int = 0) -> dict[str, Any]:
+             case_name: str | None, *, ai_calls: int = 0,
+             board: Any | None = None, discussion: Any | None = None) -> dict[str, Any]:
     items = [{
         "id": item["id"], "type": item["type"],
         "label": {"requirement": "明确要求", "constraint": "约束", "open": "待澄清"}[item["type"]],
@@ -276,6 +328,7 @@ def _payload(run_id: str, snapshot: Any, race: Any, reviews: dict[str, Any], spe
         "audits": audits,
         "revisions": spec.revisions,
         "question": question,
+        "discussion": _discussion_payload(board, discussion),
         "files": files,
         "markdown": markdown,
         "html": render_markdown(markdown),

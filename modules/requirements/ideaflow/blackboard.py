@@ -24,6 +24,8 @@ class EventLog:
 
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []
+        self.stage = ""
+        self.round = 0
 
     def emit(self, actor: str, action: str, detail: str, *, object_type: str = "blackboard",
              object_id: str = "", version: int = 0) -> dict[str, Any]:
@@ -36,6 +38,8 @@ class EventLog:
             "action": action,
             "detail": detail,
             "version": version,
+            "stage": self.stage,
+            "round": self.round,
         }
         self.events.append(event)
         return event

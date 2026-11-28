@@ -1111,3 +1111,37 @@ table.spec-table { min-width: 640px; }
   line-height: 1.65;
 }
 .warn-row + .warn-row { margin-top: 4px; }
+
+/* 讨论过程 */
+.disc-banner { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper); margin: 8px 0 12px; font-size: 13px; }
+.disc-banner span { color: var(--muted); font-size: 12px; }
+.disc-stages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 16px; }
+.disc-stage { padding: 4px 9px; border-radius: 999px; background: var(--line-soft);
+  color: var(--muted); font-size: 12px; border: 1px solid var(--line); }
+.disc-stage.done { color: var(--ink); border-color: var(--brass); background: var(--brass-soft); }
+.disc-arrow { color: var(--muted); font-style: normal; font-size: 12px; }
+.disc-h { margin: 18px 0 8px; font-size: 14px; }
+.disc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.disc-role { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--paper); }
+.disc-role.off { opacity: .55; }
+.disc-role header { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+.disc-role header span { color: var(--muted); font-size: 11px; }
+.disc-role p { color: var(--muted); font-size: 12px; margin: 6px 0; }
+.disc-role-stats { display: flex; gap: 8px; color: var(--muted); font-size: 11px; }
+.disc-filter { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 8px; }
+.disc-filter select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink); font-size: 12px; }
+.disc-timeline { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.disc-event { display: grid; grid-template-columns: 46px 86px 1fr 96px; gap: 8px;
+  padding: 6px 9px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.disc-event:last-child { border-bottom: none; }
+.disc-event .seq, .disc-event .when { color: var(--muted); }
+.disc-event .who { color: var(--brass); }
+.disc-event.playing { background: var(--brass-soft); }
+.stance-agree { color: #2f8f6b; } .stance-conditional { color: #a8791f; }
+.stance-oppose { color: #b5483f; } .stance-unreviewed { color: var(--muted); }
+.disc-options { display: grid; gap: 10px; }
+.disc-option { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--paper); }
+.disc-option header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.disc-option header span { color: var(--muted); font-size: 12px; }

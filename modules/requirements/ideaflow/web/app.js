@@ -81,6 +81,7 @@ const els = {
   specTabs: $("#specTabs"),
   specPaper: $("#specPaper"),
   panelSnapshot: $("#panelSnapshot"),
+  panelDiscussion: $("#panelDiscussion"),
   panelDrafts: $("#panelDrafts"),
   panelAudit: $("#panelAudit"),
   countDrafts: $("#countDrafts"),
@@ -504,7 +505,7 @@ const SPEC_TYPE_LABEL = { requirement: "明确要求", constraint: "约束", ope
 const SPEC_PRIORITY_LABEL = { must: "必须", should: "应当", could: "可选" };
 const SPEC_SATISFIES = { full: "完全满足", partial: "部分满足", declined: "不满足" };
 
-const specTabFromUrl = ["snapshot", "drafts", "doc", "audit"].includes(query.get("stab"))
+const specTabFromUrl = ["snapshot", "discussion", "drafts", "doc", "audit"].includes(query.get("stab"))
   ? query.get("stab")
   : "snapshot";
 
@@ -600,6 +601,7 @@ function renderSpecResult(data) {
   els.countIssues.textContent = latest.counts.total;
 
   renderSnapshotPanel(data);
+  renderDiscussionPanel(data);
   renderDraftsPanel(data);
   renderAuditPanel(data);
 
@@ -643,6 +645,161 @@ function specMetricBlock(data) {
       <span class="v">${data.tradeoffs.counts.total}</span>
       <p class="note">${data.tradeoffs.counts.requirement_vs_schedule} 条涉及需求</p>
     </div>`;
+}
+
+
+const DIVERGENCE_TEXT = { fact: "事实分歧", value: "价值分歧", tradeoff: "权衡分歧" };
+const ROLE_NAMES = {
+  ba: "需求分析", user: "用户视角", tech: "技术专家",
+  innovation: "创新顾问", risk: "风险评估", skeptic: "质疑者",
+  synthesizer: "记录员", host: "主持人", human: "人工",
+};
+const EVIDENCE_TEXT = { fact: "事实", rule: "规则", value: "价值", assumption: "假设" };
+const STANCE_TEXT = { agree: "赞同", conditional: "有条件赞同", oppose: "反对", unreviewed: "未评审" };
+function roleName(id) { return ROLE_NAMES[id] || id || "—"; }
+const DISPOSITION_TEXT = {
+  adopted: "已采纳", rejected: "已拒绝", deferred: "延期验证",
+  pending_evidence: "待证据", human_required: "待人工裁决",
+};
+
+function renderDiscussionPanel(data) {
+  const disc = data.discussion;
+  if (!disc) {
+    els.panelDiscussion.innerHTML = `<div class="subsection"><h3>讨论过程</h3>
+      <span>本次规格没有讨论记录（discuss=False）。</span></div>`;
+    return;
+  }
+  const roles = disc.roles || [];
+  const stages = disc.stages || [];
+  const events = disc.events || [];
+  const claims = disc.claims || [];
+  const objections = disc.objections || [];
+  const options = disc.options || [];
+  const keyOpinions = disc.key_opinions || [];
+  const consensus = disc.consensus || {};
+  const termination = disc.termination || {};
+  const divergence = disc.divergence || {};
+
+  const stageHtml = stages.map((stage) => `<span class="disc-stage ${stage.done ? "done" : ""}">
+    ${escapeHtml(stage.label)}</span>`).join('<i class="disc-arrow">→</i>');
+
+  const roleHtml = roles.map((role) => `<article class="disc-role ${role.participated ? "on" : "off"}">
+    <header><b>${escapeHtml(role.name)}</b><span>${role.participated ? "已参与" : "未发言"}</span></header>
+    <p>${escapeHtml(role.focus || "")}</p>
+    <div class="disc-role-stats"><span>主张 ${role.claims}</span><span>异议 ${role.objections}</span>
+      <span>立场 ${role.stances}</span></div>
+  </article>`).join("");
+
+  const claimRows = claims.map((claim) => `<tr>
+    <td class="tag-mono">${escapeHtml(claim.id)}</td>
+    <td>${escapeHtml(roleName(claim.role))}</td>
+    <td>${escapeHtml(EVIDENCE_TEXT[claim.evidence] || claim.evidence || "")}</td>
+    <td>${escapeHtml(claim.text)}</td>
+    <td class="src">${escapeHtml(claim.reason || "")}</td>
+  </tr>`).join("");
+
+  const objectionRows = objections.map((obj) => `<tr>
+    <td class="tag-mono">${escapeHtml(obj.id)}</td>
+    <td>${escapeHtml(obj.target)}</td>
+    <td>${escapeHtml(roleName(obj.role))}</td>
+    <td>${escapeHtml(obj.severity || "")}</td>
+    <td>${escapeHtml(DIVERGENCE_TEXT[divergence[obj.id]] || "—")}</td>
+    <td>${escapeHtml(obj.text || "")}</td>
+    <td>${obj.response
+      ? `${escapeHtml(roleName(obj.response.role))} · ${escapeHtml(STANCE_TEXT[obj.response.position] || obj.response.position)}：${escapeHtml(obj.response.argument || "")}`
+      : '<span class="mini-flag">未回应</span>'}</td>
+    <td>${escapeHtml(obj.status || "open")}</td>
+  </tr>`).join("");
+
+  const optionCards = options.map((option) => {
+    const reasons = option.stance_reasons || {};
+    const rows = roles.map((role) => {
+      const cell = reasons[role.id] || {};
+      const stance = cell.stance || (disc.stances?.[role.id] || {})[option.id] || "unreviewed";
+      return `<tr><td>${escapeHtml(role.name)}</td>
+        <td class="stance-${escapeHtml(stance)}">${escapeHtml(STANCE_TEXT[stance] || stance)}</td>
+        <td>${escapeHtml(cell.reason || "—")}</td>
+        <td>${escapeHtml(cell.condition || "—")}</td></tr>`;
+    }).join("");
+    return `<article class="disc-option"><header><b>${escapeHtml(option.id)} · ${escapeHtml(option.name)}</b>
+      <span>${escapeHtml(option.cost_days || "—")} 天 · 风险 ${escapeHtml(option.risk || "—")}</span></header>
+      <p>${(option.scope || []).map((x) => `<span class="tagtype">${escapeHtml(x)}</span>`).join(" ")}</p>
+      <table class="spec-table"><thead><tr><th>角色</th><th>立场</th><th>理由</th><th>条件</th></tr></thead>
+      <tbody>${rows}</tbody></table></article>`;
+  }).join("");
+
+  const opinionRows = keyOpinions.map((row) => `<tr>
+    <td class="tag-mono">${escapeHtml(row.claim)}</td><td>${escapeHtml(roleName(row.role))}</td>
+    <td>${escapeHtml(row.text)}</td><td>${escapeHtml(row.responses.join("；") || "—")}</td>
+    <td>${escapeHtml(DISPOSITION_TEXT[row.status] || row.label || row.status)}</td>
+    <td class="src">${escapeHtml(row.reason)}</td></tr>`).join("");
+
+  const rounds = [...new Set(events.map((event) => event.round).filter((x) => x !== undefined))];
+  const eventRows = events.map((event, index) => `<div class="disc-event" data-role="${escapeHtml(event.actor)}" data-round="${escapeHtml(event.round)}" data-index="${index}">
+    <span class="seq">#${escapeHtml(event.seq)}</span>
+    <span class="who">${escapeHtml(roleName(event.actor))}</span>
+    <span class="what"><b>${escapeHtml(event.action)}</b> ${escapeHtml(event.detail || "")}</span>
+    <span class="when">${escapeHtml(formatTime(event.ts))}</span></div>`).join("");
+
+  els.panelDiscussion.innerHTML = `
+    <div class="subsection"><h3>讨论过程</h3>
+      <span>${escapeHtml(consensus.label || consensus.state || "—")} ｜ 轮次 ${disc.round} ｜ 事件 ${events.length}</span></div>
+    <div class="disc-banner">${escapeHtml(consensus.reason || "")}<br>
+      <span>停止原因：${escapeHtml(termination.label || termination.reason || "未记录")}</span></div>
+    <div class="disc-stages">${stageHtml}</div>
+    <h3 class="disc-h">参与角色</h3>
+    <div class="disc-roles">${roleHtml}</div>
+    <h3 class="disc-h">讨论时间线</h3>
+    <div class="disc-filter">
+      <select id="discRole"><option value="">全部角色</option>${roles.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join("")}</select>
+      <select id="discRound"><option value="">全部轮次</option>${rounds.map((r) => `<option value="${r}">第 ${r} 轮</option>`).join("")}</select>
+      <button class="link-btn" id="discReplay" type="button">回放讨论</button>
+      <span id="discReplayState" class="src"></span>
+    </div>
+    <div class="disc-timeline" id="discTimeline">${eventRows}</div>
+    <h3 class="disc-h">观点 CLM</h3>
+    <table class="spec-table"><thead><tr><th>编号</th><th>角色</th><th>依据</th><th>主张</th><th>理由</th></tr></thead><tbody>${claimRows}</tbody></table>
+    <h3 class="disc-h">异议 OBJ 与回应</h3>
+    <table class="spec-table"><thead><tr><th>编号</th><th>指向</th><th>提出者</th><th>严重度</th><th>分歧</th><th>内容</th><th>回应</th><th>状态</th></tr></thead><tbody>${objectionRows}</tbody></table>
+    <h3 class="disc-h">候选方案与立场矩阵</h3>
+    <div class="disc-options">${optionCards || '<p class="src">没有候选方案</p>'}</div>
+    <h3 class="disc-h">关键意见处理</h3>
+    <table class="spec-table"><thead><tr><th>主张</th><th>角色</th><th>内容</th><th>回应</th><th>处理</th><th>理由</th></tr></thead><tbody>${opinionRows}</tbody></table>`;
+
+  const roleFilter = $("#discRole");
+  const roundFilter = $("#discRound");
+  const applyFilter = () => {
+    const role = roleFilter.value;
+    const round = roundFilter.value;
+    $$("#discTimeline .disc-event").forEach((node) => {
+      const matchRole = !role || node.dataset.role === role;
+      const matchRound = !round || node.dataset.round === round;
+      node.hidden = !(matchRole && matchRound);
+    });
+  };
+  roleFilter.addEventListener("change", applyFilter);
+  roundFilter.addEventListener("change", applyFilter);
+
+  let replayIndex = 0;
+  let replayTimer = null;
+  $("#discReplay").addEventListener("click", () => {
+    if (replayTimer) { clearInterval(replayTimer); replayTimer = null; return; }
+    const nodes = $$("#discTimeline .disc-event").filter((node) => !node.hidden);
+    replayIndex = 0;
+    replayTimer = setInterval(() => {
+      nodes.forEach((node) => node.classList.remove("playing"));
+      if (replayIndex >= nodes.length) {
+        clearInterval(replayTimer); replayTimer = null;
+        $("#discReplayState").textContent = "回放结束";
+        return;
+      }
+      const node = nodes[replayIndex];
+      node.classList.add("playing");
+      node.scrollIntoView({ block: "nearest" });
+      $("#discReplayState").textContent = `第 ${replayIndex + 1}/${nodes.length} 条`;
+      replayIndex += 1;
+    }, 700);
+  });
 }
 
 function renderSnapshotPanel(data) {
