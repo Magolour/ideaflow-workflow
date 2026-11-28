@@ -1664,3 +1664,40 @@ body { background: var(--bg); }
 @media (max-width: 640px) { .meta-grid { grid-template-columns: 1fr; } }
 .avatar { border: 0; cursor: pointer; }
 .avatar:hover { background: #E4EAFF; }
+
+/* 讨论时间线列宽与换行 */
+.disc-event {
+  grid-template-columns: 44px 108px minmax(0, 1fr) 116px;
+  align-items: start;
+  column-gap: 10px;
+}
+.disc-event .who {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.disc-event .what { min-width: 0; overflow-wrap: anywhere; }
+.disc-event .what b { margin-right: 4px; }
+.disc-event .when { white-space: nowrap; text-align: right; font-size: 11px; }
+
+/* 规格正文与表格：避免横向挤压、列错位 */
+.spec-result .paper { max-width: none; width: 100%; margin: 0; padding: 28px 32px 40px; }
+.spec-result .paper .table-wrap { overflow-x: auto; }
+.spec-result .paper table { table-layout: fixed; width: 100%; }
+.spec-result .paper th, .spec-result .paper td {
+  overflow-wrap: anywhere; word-break: break-word; white-space: normal;
+}
+.spec-result .paper th { white-space: normal; }
+
+/* 规格三栏：阻止文档表格把中栏撑宽 */
+.doc-layout { width: 100%; min-width: 0; }
+.doc-layout > * { min-width: 0; }
+.spec-result .doc-panel { overflow: hidden; }
+.spec-result .paper { overflow: hidden; }
+.spec-result .paper .table-wrap { width: 100%; max-width: 100%; }
+.spec-result .paper table { table-layout: auto; width: 100%; max-width: 100%; }
+.spec-result .paper th, .spec-result .paper td { padding: 6px 8px; }
+.spec-review { min-width: 0; }
+/* 规格文档容器必须可纵向滚动 */
+.spec-result .doc-panel { overflow-x: hidden; overflow-y: auto; }
+.api-test-result { margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; display: none; }
+.api-test-result.ok { display: block; background: #E8F7F1; color: #16A36A; border: 1px solid #B7E4D2; }
+.api-test-result.error { display: block; background: #FDECEC; color: #DC5252; border: 1px solid #F5C2C2; }

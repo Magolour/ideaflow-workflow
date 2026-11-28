@@ -13,6 +13,7 @@ const state = {
   loadedCaseText: "",
   spec: null,
   clarifyAnswers: {},
+  clarifyIdea: "",
   llm: { base_url: "", model: "", api_key: "" },
   jobLogs: [],
   jobSource: null,
@@ -71,8 +72,7 @@ const els = {
   countQuestions: $("#countQuestions"),
   btnCopy: $("#btnCopy"),
   dlMd: $("#dlMd"),
-  dlHtml: $("#dlHtml"),
-  btnPrint: $("#btnPrint"),
+
   btnHelp: $("#btnHelp"),
   help: $("#helpDialog"),
   toast: $("#toast"),
@@ -100,8 +100,7 @@ const els = {
   countIssues: $("#countIssues"),
   specDlMd: $("#specDlMd"),
   specDlJson: $("#specDlJson"),
-  specDlHtml: $("#specDlHtml"),
-  specPrint: $("#specPrint"),
+
   liveModel: $("#liveModel"),
   apiConfig: $("#apiConfig"),
   apiPreset: $("#apiPreset"),
@@ -347,7 +346,17 @@ function renderQuestions(data) {
     </li>`).join("")}</ul>`;
 }
 
+
+function rememberResult(flow, data) {
+  try {
+    sessionStorage.setItem("if5.lastResult", JSON.stringify({ flow, data }));
+  } catch {
+    // 文档过大或隐私模式禁用存储时忽略；不影响本次页面
+  }
+}
+
 function renderResult(data) {
+  rememberResult("proposal", data);
   setFlow(3, [1, 2]);
   state.result = data;
   const lines = data.markdown.split("\n");
@@ -374,7 +383,6 @@ function renderResult(data) {
 
   const runId = encodeURIComponent(data.run_id);
   els.dlMd.href = `/api/download?run_id=${runId}&format=md`;
-  els.dlHtml.href = `/api/download?run_id=${runId}&format=html`;
 
   switchTab(initialTab);
   showOnly(els.resultPanel);
@@ -429,12 +437,24 @@ function showError(error) {
 
 
 const LLM_PRESETS = {
-  "qwen-maas": { base_url: "https://maas.qianwenaiapi.com/compatible-mode/v1", model: "qwen-plus" },
-  dashscope: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  deepseek: { base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  zhipu: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus" },
+  "qwen-maas": { base_url: "https://maas.qianwenaiapi.com/compatible-mode/v1", model: "qwen4-max" },
+  deepseek: { base_url: "https://api.deepseek.com/v1", model: "deepseek-flash" },
   custom: { base_url: "", model: "" },
 };
+
+const MODEL_OPTIONS = {
+  "qwen-maas": ["qwen4-max", "qwen3.7-plus", "qwen3.8-flash", "qwen3-max",
+                "qwen-plus", "qwen-max", "qwen-turbo", "qwen-long"],
+  deepseek: ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+  custom: [],
+};
+
+function syncModelOptions(provider) {
+  const list = $("#apiModelList");
+  if (!list) return;
+  list.innerHTML = (MODEL_OPTIONS[provider] || [])
+    .map((model) => `<option value="${model}"></option>`).join("");
+}
 
 function syncLlmFields() {
   if (!els.apiBase) return;
@@ -720,6 +740,7 @@ function switchSpecTab(name) {
 
 function renderSpecResult(data) {
   state.spec = data;
+  rememberResult("spec", data);
   const spec = data.spec;
   const latest = data.audits[data.audits.length - 1];
 
@@ -1022,7 +1043,7 @@ function renderDiscussionPanel(data) {
     <table class="spec-table"><thead><tr><th>编号</th><th>问题</th><th>类型</th><th>处理人</th><th>结论</th></tr></thead>
       <tbody>${questionRows || '<tr><td colspan="5">没有澄清问题</td></tr>'}</tbody></table>
     ${unresolved.length ? `<div class="reprompt" id="repromptBox" hidden>
-      <div class="reprompt-head">补充澄清（未填的仍按假设继续）</div>
+      <div class="reprompt-head">补充澄清：填好后点下方「带答复重新生成」；未填的仍按假设继续。</div>
       ${unresolved.map((row) => `<label class="reprompt-row">
         <span class="tag-mono">${escapeHtml(row.id)}</span>
         <span>${escapeHtml(row.text)}</span>
@@ -1060,31 +1081,36 @@ function renderDiscussionPanel(data) {
   roundFilter.addEventListener("change", applyFilter);
 
   const reprompt = $("#btnReprompt");
+  const submitRepromptAnswers = () => {
+    if (!els.idea.value.trim()) {
+      toast("输入想法后再补充澄清");
+      return;
+    }
+    const answers = {};
+    $$("#repromptBox input[data-qid]").forEach((input) => {
+      const value = input.value.trim();
+      if (value) answers[input.dataset.qid] = value;
+    });
+    if (!Object.keys(answers).length) {
+      toast("没有填写新的答复");
+      return;
+    }
+    state.clarifyAnswers = { ...state.clarifyAnswers, ...answers };
+    generate();
+  };
   if (reprompt) {
     reprompt.addEventListener("click", () => {
       const box = $("#repromptBox");
-      if (box) box.hidden = !box.hidden;
+      if (!box) return;
+      if (box.hidden) {
+        box.hidden = false;
+        box.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      submitRepromptAnswers();
     });
     const submit = $("#btnRepromptSubmit");
-    if (submit) {
-      submit.addEventListener("click", () => {
-        if (!els.idea.value.trim()) {
-          toast("输入想法后再补充澄清");
-          return;
-        }
-        const answers = {};
-        $$("#repromptBox input[data-qid]").forEach((input) => {
-          const value = input.value.trim();
-          if (value) answers[input.dataset.qid] = value;
-        });
-        if (!Object.keys(answers).length) {
-          toast("没有填写新的答复");
-          return;
-        }
-        state.clarifyAnswers = answers;
-        generate();
-      });
-    }
+    if (submit) submit.addEventListener("click", submitRepromptAnswers);
   }
 
   els.panelDiscussion.addEventListener("click", (event) => {
@@ -1432,7 +1458,10 @@ async function clarifySpec() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error?.message || `服务返回 ${response.status}`);
     const questions = payload.questions || [];
-    state.clarifyAnswers = {};
+    if (state.clarifyIdea !== idea) {
+      state.clarifyAnswers = {};
+      state.clarifyIdea = idea;
+    }
     showOnly(els.clarifyStage);
     els.clarifyIdeaText.textContent = idea;
     setFlow(2, [1]);
@@ -1556,11 +1585,6 @@ function bind() {
       els.idea.focus();
     });
   }
-  if ($("#btnUserSettings")) {
-    $("#btnUserSettings").addEventListener("click", () => {
-      toast("当前为本地工作区；项目与产物保存在运行目录，不依赖云端账号");
-    });
-  }
   $$("#flowNav .flow-step").forEach((step) => {
     step.addEventListener("click", () => {
       const index = Number(step.dataset.step);
@@ -1602,14 +1626,17 @@ function bind() {
       });
     }
     els.apiPreset.addEventListener("change", () => {
-      const preset = LLM_PRESETS[els.apiPreset.value] || LLM_PRESETS.custom;
+      const provider = els.apiPreset.value;
+      const preset = LLM_PRESETS[provider] || LLM_PRESETS.custom;
       if (preset.base_url) els.apiBase.value = preset.base_url;
       if (preset.model) els.apiModel.value = preset.model;
+      syncModelOptions(provider);
     });
     $("#apiSave").addEventListener("click", () => {
       readLlmFields();
       localStorage.setItem("if5.llm.base", state.llm.base_url);
       localStorage.setItem("if5.llm.model", state.llm.model);
+      updateModeStatus(true);
       if (els.liveModel.checked) {
         toast(`已选择 ${state.llm.model || "服务端默认模型"}`);
       } else {
@@ -1634,9 +1661,22 @@ function bind() {
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body?.error?.message || `服务返回 ${response.status}`);
-        toast(`连接成功：${body.model || "模型"}，返回 ${body.questions} 个澄清问题`);
+        const msg = `✓ 连接成功：${body.model || "模型"}，返回 ${body.questions} 个澄清问题`;
+        const holder = $("#apiTestMsg");
+        if (holder) {
+          holder.textContent = msg;
+          holder.className = "api-test-result ok";
+          holder.scrollIntoView({ block: "nearest" });
+        }
+        toast(msg);
       } catch (error) {
-        toast(`连接失败：${error.message}`);
+        const msg = `✕ 连接失败：${error.message}`;
+        const holder = $("#apiTestMsg");
+        if (holder) {
+          holder.textContent = msg;
+          holder.className = "api-test-result error";
+        }
+        toast(msg);
       } finally {
         button.disabled = false;
         button.textContent = "测试连接";
@@ -1652,6 +1692,7 @@ function bind() {
       toast("已清除本地模型配置");
     });
     els.liveModel.addEventListener("change", () => {
+      updateModeStatus(true);
       if (els.liveModel.checked && !els.apiKey.value) {
         toast("真实 API 已开启：填写 Key，或留空使用服务端环境变量");
       }
@@ -1661,7 +1702,14 @@ function bind() {
   if (els.clarifyStage) {
     $("#btnClarifyBack").addEventListener("click", () => { showOnly(els.empty); setFlow(1); });
     $("#btnClarifySkip").addEventListener("click", () => { state.clarifyAnswers = {}; generate(); });
-    $("#btnClarifyGenerate").addEventListener("click", () => { generate(); });
+    $("#btnClarifyGenerate").addEventListener("click", () => {
+      $$("#clarifyQuestions input[data-qid]").forEach((input) => {
+        const value = input.value.trim();
+        if (value) state.clarifyAnswers[input.dataset.qid] = value;
+        else delete state.clarifyAnswers[input.dataset.qid];
+      });
+      generate();
+    });
   }
 
   els.form.addEventListener("submit", (event) => {
@@ -1719,10 +1767,7 @@ function bind() {
     if (event.target.closest("#btnConfirmSpec")) confirmSpec();
   });
 
-  els.specPrint.addEventListener("click", () => {
-    switchSpecTab("doc");
-    setTimeout(() => window.print(), 60);
-  });
+
 
   if (els.specReview) {
     els.specReview.addEventListener("click", (event) => {
@@ -1738,28 +1783,6 @@ function bind() {
       nodes[0].scrollIntoView({ behavior: "smooth", block: "center" });
       nodes[0].classList.add("issue-highlight");
       setTimeout(() => nodes[0].classList.remove("issue-highlight"), 1800);
-    });
-  }
-
-  if (els.specDlHtml) {
-    els.specDlHtml.addEventListener("click", (event) => {
-      event.preventDefault();
-      if (!state.spec) return;
-      const title = state.spec.title || "IdeaFlow 设计规格";
-      const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">`
-        + `<title>${escapeHtml(title)}</title><style>`
-        + `body{max-width:860px;margin:48px auto;padding:0 24px;font:15px/1.75 Inter,"PingFang SC","Microsoft YaHei",sans-serif;color:#20242C}`
-        + `h1{font-size:30px;line-height:1.25}h2{margin-top:36px;border-bottom:1px solid #E6E8EC;padding-bottom:8px;font-size:22px}`
-        + `h3{margin-top:24px;font-size:17px}table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}`
-        + `th,td{border:1px solid #E6E8EC;padding:7px 9px;text-align:left;vertical-align:top}th{background:#F7F8FA}`
-        + `code{background:#F1F3F7;border-radius:4px;padding:1px 4px}blockquote{border-left:3px solid #4F6EF7;margin:0;padding-left:14px;color:#737B88}`
-        + `</style></head><body>${state.spec.html || ""}</body></html>`;
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `${String(title).replace(/[\\/:*?"<>|]+/g, "-")}.html`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
   }
 
@@ -1795,23 +1818,31 @@ function bind() {
     }
   });
 
-  els.btnPrint.addEventListener("click", () => {
-    switchTab("doc");
-    setTimeout(() => window.print(), 60);
-  });
+
   els.retry.addEventListener("click", () => generate());
   els.btnHelp.addEventListener("click", () => els.help.showModal());
+}
+
+function updateModeStatus(ok = true) {
+  if (!els.status) return;
+  if (!ok) {
+    updateModeStatus(false);
+    return;
+  }
+  els.status.className = "status ok";
+  const model = (els.apiModel?.value || state.llm.model || "").trim();
+  els.status.innerHTML = els.liveModel?.checked
+    ? `<i></i>真实 API${model ? " · " + model : " · 服务端模型"}`
+    : "<i></i>本地运行 · 离线 Mock";
 }
 
 async function checkServer() {
   try {
     const response = await fetch("/api/health");
     if (!response.ok) throw new Error("bad status");
-    els.status.className = "status ok";
-    els.status.innerHTML = "<i></i>本地服务正常 · 离线 Mock";
+    updateModeStatus(true);
   } catch {
-    els.status.className = "status bad";
-    els.status.innerHTML = "<i></i>未连接到服务";
+    updateModeStatus(false);
     if (location.protocol === "file:") {
       showError({
         code: "NEED_SERVER",
@@ -1828,12 +1859,33 @@ const autoRun = query.get("auto") === "1";
 state.llm.base_url = localStorage.getItem("if5.llm.base") || "";
 state.llm.model = localStorage.getItem("if5.llm.model") || "";
 syncLlmFields();
+if (els.apiPreset) {
+  const provider = state.llm.base_url.includes("deepseek") ? "deepseek"
+    : state.llm.base_url.includes("qianwen") || state.llm.base_url.includes("dashscope")
+      ? "qwen-maas" : "custom";
+  els.apiPreset.value = provider;
+  syncModelOptions(provider);
+}
 
 setMode(query.get("mode") === "spec" ? "spec" : "proposal");
 if (query.get("live") === "1") els.liveModel.checked = true;
 bind();
 renderChips();
 checkServer();
+
+if (query.get("restore") === "last") {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("if5.lastResult") || "null");
+    if (saved?.data) {
+      if (saved.flow === "spec") renderSpecResult(saved.data);
+      else renderResult(saved.data);
+    } else {
+      toast("没有可恢复的上次项目，请重新输入想法");
+    }
+  } catch {
+    toast("上次项目已失效，请重新输入想法");
+  }
+}
 
 if (presetIdea) {
   els.idea.value = presetIdea.slice(0, 1200);

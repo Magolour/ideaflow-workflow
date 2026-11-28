@@ -16,8 +16,8 @@ class DiscussionPanelTest(unittest.TestCase):
         self.assertIn('id="btnClarify"', html)
         self.assertIn('id="clarifyPanel"', html)
         for anchor in ('id="flowNav"', 'id="clarifyStage"', 'id="specToc"',
-                       'id="specReview"', 'id="btnModelSettings"',
-                       'id="btnApiConfig"', 'id="apiBase"', 'id="apiModel"',
+                       'id="specReview"', 'id="btnOpenSettings"',
+                       'id="apiConfig"', 'id="apiBase"', 'id="apiModel"',
                        'id="apiKey"', 'id="apiPreset"'):
             self.assertIn(anchor, html)
 

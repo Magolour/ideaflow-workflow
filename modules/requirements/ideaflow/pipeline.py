@@ -149,7 +149,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
             events.emit("ba", "clarify_questions", f"提出 {len(blocking)} 个阻断问题",
                         object_type="blackboard", object_id=run_id, version=board.version)
 
-    for row in blocking:
+    for row in list(board.open_questions):
         answer = (answers or {}).get(row["id"], "").strip()
         if answer:
             board.resolve_question(row["id"], answer, owner="human")
@@ -157,7 +157,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
                                reason="人工答复", decider="human")
             events.emit("human", "question_answered", f"{row['id']}：{answer}",
                         object_type="question", object_id=row["id"], version=board.version)
-        else:
+        elif row.get("blocking"):
             board.resolve_question(row["id"], "未知，按假设继续", owner="human:assumed")
             board.add_decision(scope=f"澄清 {row['id']}", choice="未知，按假设继续",
                                reason="未答复，按文档约定标记为假设继续",
@@ -202,6 +202,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
         say(f"阶段 3/7 第 {round_no} 轮结构化批判：必须引用论点编号并表态")
         new_objections = 0
         for role in DISCUSSION_ROLES:
+            say(f"  · 批判：{role.name}（{round_no + 1} 轮）…")
             raw = safe_respond("critique", role,
                                deepcopy({"idea": idea, "constraints": board.constraints,
                                          "claims": view}))
@@ -287,6 +288,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
     option_view = [{"id": row["id"], "key": row["key"], "name": row["name"]}
                    for row in board.options]
     for role in DISCUSSION_ROLES:
+        say(f"  · 签署：{role.name}…")
         raw = safe_respond("sign", role, deepcopy({"idea": idea, "options": option_view}))
         if raw is None:
             continue
@@ -336,6 +338,7 @@ def run(idea: str, *, constraints: list[str] | None = None,
                for row in board.claims if row["role"] == role.id]
         if not own:
             continue
+        say(f"  · 复核：{role.name}…")
         raw = safe_respond("review", role,
                            deepcopy({"claims": own, "adopted": adopted,
                                      "not_adopted": not_adopted}))
@@ -367,6 +370,17 @@ def run(idea: str, *, constraints: list[str] | None = None,
         board.resolve_objection(objection_id, decision)
         events.emit("human", "objection_resolved", f"{objection_id} 由人工裁决：{decision}",
                     object_type="objection", object_id=objection_id, version=board.version)
+
+    # ---------- 收敛前补齐讨论中追加问题的答复 ----------
+    for row in board.open_questions:
+        answer = (answers or {}).get(row["id"], "").strip()
+        if not answer or row.get("resolution"):
+            continue
+        board.resolve_question(row["id"], answer, owner="human")
+        board.add_decision(scope=f"澄清 {row['id']}", choice=answer,
+                           reason="人工答复", decider="human")
+        events.emit("human", "question_answered", f"{row['id']}：{answer}",
+                    object_type="question", object_id=row["id"], version=board.version)
 
     # ---------- 收敛判定与 Proposal ----------
     board.divergence = divergence_map(board)

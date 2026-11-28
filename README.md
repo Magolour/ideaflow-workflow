@@ -34,6 +34,51 @@ Copy-Item python/.env.example python/.env
 真实模型：在本机 .env 填写自己的配置，去掉 --mock；不要提交密钥。
 详细接口见模块 README，协作规则见 CONTRIBUTING.md。
 
+## 运行需求分析与设计规格工作台
+
+需求模块只依赖 Python 标准库，不需要 Node.js。
+
+```powershell
+cd modules\requirements
+python -m ideaflow.server --port 8000 --out runs
+```
+
+打开：
+
+- 工作台：<http://127.0.0.1:8000/>
+- 运行控制台：<http://127.0.0.1:8000/console>
+- 健康检查：<http://127.0.0.1:8000/api/health>
+
+默认离线 Mock。需要使用真实模型时，在页面「模型与 API 设置」中填服务商、Base URL、模型和 Key；也可以在启动前设置环境变量：
+
+```powershell
+$env:AI_BASE_URL="https://maas.qianwenaiapi.com/compatible-mode/v1"
+$env:AI_API_KEY="<你的 Key>"
+$env:AI_MODEL="qwen-plus"
+python -m ideaflow.server --port 8000 --out runs
+```
+
+Key 不会写入运行产物；不要在提交中放密钥。
+
+命令行方式：
+
+```powershell
+# 讨论 + 提案
+python -m ideaflow.cli "做一个校园二手书交易小程序" -c "两周内出演示版" -o runs
+
+# 规格分步命令
+python -m ideaflow.spec_cli --help
+```
+
+自测：
+
+```powershell
+cd modules\requirements
+python -m unittest discover -s tests
+```
+
+成员 2 负责的接口说明见 `docs/MEMBER2_INTERFACES.md`。
+
 ## 当前要做的事
 
 1. 验收清单：`contracts/README.md` 的「待实现」表，共 11 条，每条对应

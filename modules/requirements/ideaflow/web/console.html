@@ -88,6 +88,13 @@
   .detail h4{margin:0 0 6px;font-size:13px}
   .pill{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;background:var(--chip);color:var(--muted)}
   .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+.run-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0}
+.run-tools label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+.run-tools button{padding:4px 8px;font-size:12px}
+.run{position:relative;padding-left:30px}
+.run-check{position:absolute;left:8px;top:9px}
+.run-check input{width:14px;height:14px}
+.newrun[hidden]{display:none}
 </style>
 <style>
   /* 与主工作台统一的浅色控制台主题 */
@@ -129,17 +136,23 @@
   .event{border-bottom-color:var(--line-soft)}.event .actor{color:var(--accent)}
   .chip{background:var(--chip);color:#596273}.chip.must{background:#FDECEC;color:#C33A3A}
 </style>
+
+
 </head>
 <body>
 <header>
   <h1>IdeaFlow · 运行历史</h1>
-  <div class="sub"><a href="/">← 返回工作台</a> · 拖入一次运行的 blackboard.json / features.json / spec.json / events.jsonl，按讨论、追溯、规格、时间线查看。</div>
+  <div class="sub"><a href="/?restore=last" onclick="try{if(document.referrer&&new URL(document.referrer).origin===location.origin){history.back();return false}}catch(e){}">← 返回工作台</a> · 拖入一次运行的 blackboard.json / features.json / spec.json / events.jsonl，按讨论、追溯、规格、时间线查看。</div>
 </header>
 <div class="app">
 <aside class="side">
   <div class="side-head"><b>运行记录</b><button id="refresh" style="padding:3px 8px">刷新</button></div>
+  <div class="run-tools">
+    <label><input type="checkbox" id="selectAll"> 全选</label>
+    <button type="button" id="deleteSelected" disabled>删除选中</button>
+  </div>
   <div id="runs" class="small muted">加载中…</div>
-  <form id="newRun" class="newrun">
+  <form id="newRun" class="newrun" hidden>
     <b class="small">新建运行</b>
     <textarea id="idea" placeholder="一句话想法，例如：我要做微信"></textarea>
     <select id="flow"><option value="spec">规格（含讨论+功能）</option><option value="proposal">讨论提案</option></select>
@@ -440,17 +453,59 @@ async function fetchJson(url, options){
   return body;
 }
 
+
+function selectedRunIds(){
+  return Array.from(document.querySelectorAll("#runs input[data-select]:checked"))
+    .map(box=>box.dataset.select);
+}
+
+function updateDeleteButton(){
+  const ids=selectedRunIds();
+  const button=$("deleteSelected");
+  if(button){ button.disabled=!ids.length; button.textContent=ids.length?`删除选中 (${ids.length})`:"删除选中"; }
+  const all=$("selectAll");
+  const boxes=Array.from(document.querySelectorAll("#runs input[data-select]"));
+  if(all){ all.checked=boxes.length>0 && boxes.every(box=>box.checked); }
+}
+
+async function deleteSelectedRuns(){
+  const ids=selectedRunIds();
+  if(!ids.length) return;
+  if(!confirm(`确认删除选中的 ${ids.length} 个运行？产物目录会一并删除，不能恢复。`)) return;
+  const active=document.querySelector(".run.active")?.dataset.id;
+  for(const id of ids){
+    try{
+      await fetchJson("/api/run?id="+encodeURIComponent(id),{method:"DELETE"});
+    }catch(err){ alert(`删除 ${id} 失败：${err.message}`); }
+  }
+  if(ids.includes(active)){
+    state.board=null; state.features=null; state.spec=null; state.events=[];
+    $("view").innerHTML='<div class="empty">运行已删除，请选择另一条记录。</div>';
+  }
+  await refreshRuns();
+  if(!state.board) {
+    const first=document.querySelector(".run");
+    if(first) openRun(first.dataset.id);
+  }
+}
+
 async function refreshRuns(){
   const holder=$("runs");
   try{
     const {runs}=await fetchJson("/api/runs");
     if(!runs.length){holder.innerHTML='<div class="empty">还没有运行记录</div>';return}
     holder.innerHTML=runs.map(r=>`<div class="run" data-id="${esc(r.id)}">
+      <label class="run-check" title="选择"><input type="checkbox" data-select="${esc(r.id)}"></label>
       <div class="idea">${esc(r.idea||r.id)}</div>
       <div class="rid">${esc(r.id)}</div>
       <div class="meta">${esc(r.flow)} ｜ ${esc(r.status)} ｜ 功能 ${r.features} ｜ 模块 ${r.modules}</div>
     </div>`).join("");
-    holder.querySelectorAll(".run").forEach(node=>node.addEventListener("click",()=>openRun(node.dataset.id)));
+    holder.querySelectorAll(".run").forEach(node=>node.addEventListener("click",(event)=>{
+      if(event.target.closest("input")) return;
+      openRun(node.dataset.id);
+    }));
+    holder.querySelectorAll("input[data-select]").forEach(box=>box.addEventListener("change",updateDeleteButton));
+    updateDeleteButton();
     if(!state.board) openRun(runs[0].id);
   }catch(err){holder.innerHTML=`<div class="empty">读取失败：${esc(err.message)}</div>`}
 }
@@ -465,6 +520,11 @@ async function openRun(id){
 }
 
 $("refresh").addEventListener("click",refreshRuns);
+$("selectAll")?.addEventListener("change",event=>{
+  document.querySelectorAll("#runs input[data-select]").forEach(box=>{box.checked=event.target.checked});
+  updateDeleteButton();
+});
+$("deleteSelected")?.addEventListener("click",deleteSelectedRuns);
 
 $("newRun").addEventListener("submit",async event=>{
   event.preventDefault();

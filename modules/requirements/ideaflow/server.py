@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -33,6 +34,7 @@ from .render_html import PAPER_CSS, document_html, render_markdown
 from .resolutions import answer_question
 from .roles import ALL_ROLES, DISCUSSION_ROLES
 from .spec import load_spec
+from .spec_edit import edit_spec_item
 from .specflow import CASE_NAMES, load_case, run as run_spec
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -237,6 +239,36 @@ class JobStore:
         job.state = "error"
 
 
+
+def _consensus_matrix(board: dict[str, Any], support: list[dict[str, Any]]) -> dict[str, Any]:
+    """角色 × 方案的立场矩阵；缺失理由/条件保留为空字符串。"""
+    options = [{"id": row["id"], "key": row.get("key", ""), "name": row.get("name", "")}
+               for row in board.get("options", [])]
+    role_ids = list(board.get("stances", {}))
+    cells = []
+    for role_id in role_ids:
+        for option in board.get("options", []):
+            reason = (option.get("stance_reasons") or {}).get(role_id) or {}
+            cells.append({
+                "role": role_id,
+                "role_name": ALL_ROLES[role_id].name if role_id in ALL_ROLES else role_id,
+                "option": option["id"],
+                "option_key": option.get("key", ""),
+                "stance": reason.get("stance")
+                or (board.get("stances", {}).get(role_id) or {}).get(option["id"], "unreviewed"),
+                "reason": reason.get("reason", ""),
+                "condition": reason.get("condition", ""),
+            })
+    return {
+        "options": options,
+        "roles": [{"id": role_id,
+                   "name": ALL_ROLES[role_id].name if role_id in ALL_ROLES else role_id}
+                  for role_id in role_ids],
+        "cells": cells,
+        "support": support,
+    }
+
+
 def _result_payload(result: Any) -> dict[str, Any]:
     markdown = result.proposal_path.read_text(encoding="utf-8")
     board = result.board.snapshot()
@@ -297,6 +329,7 @@ def _result_payload(result: Any) -> dict[str, Any]:
                       "reason": board["consensus"]["reason"]},
         "termination": result.report["termination"],
         "options": options,
+        "consensus_matrix": _consensus_matrix(board, result.report["support"]),
         "decisions": board["decisions"],
         "objections": objections,
         "questions": questions,
@@ -349,8 +382,11 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
         raise ApiError(400, "INVALID_BODY", "请求体必须是 JSON 对象")
 
     live = bool(payload.get("live"))
-    if live and not (os.getenv("AI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")):
-        raise ApiError(400, "LLM_NOT_CONFIGURED", "服务端未配置 AI_API_KEY，无法使用真实模型")
+    llm_config = _llm_options(payload)
+    if live and not (llm_config.get("api_key")
+                     or os.getenv("AI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")):
+        raise ApiError(400, "LLM_NOT_CONFIGURED",
+                       "未提供 API Key，且服务端未配置 AI_API_KEY，无法使用真实模型")
 
     flow = payload.get("flow", "proposal")
     if flow not in ("proposal", "spec"):
@@ -407,7 +443,7 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
 
     return {"idea": idea or case or "", "constraints": constraints, "answers": answers,
             "max_rounds": max_rounds, "threshold": round(threshold, 2),
-            "flow": flow, "case": case, "live": live, "llm": _llm_options(payload)}
+            "flow": flow, "case": case, "live": live, "llm": llm_config}
 
 
 # ---------------------------------------------------------------- HTTP 层
@@ -576,6 +612,58 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                                                       "state": job.state})
             except ApiError as error:
                 self._send_error(error)
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            route = urlparse(self.path)
+            try:
+                if route.path != "/api/run":
+                    raise ApiError(404, "NOT_FOUND", f"找不到 {route.path}")
+                query = parse_qs(route.query)
+                run_id = (query.get("id") or [""])[0]
+                target = _safe_run_dir(base, run_id)
+                if target is None:
+                    raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行")
+                shutil.rmtree(target)
+                self._send_json(HTTPStatus.OK, {"deleted": run_id})
+            except ApiError as error:
+                self._send_error(error)
+            except OSError as error:
+                self._send_error(ApiError(500, "DELETE_FAILED", str(error)))
+
+        def do_PATCH(self) -> None:  # noqa: N802
+            route = urlparse(self.path)
+            if route.path != "/api/spec/item":
+                self._send_error(ApiError(404, "NOT_FOUND", f"找不到 {route.path}"))
+                return
+            try:
+                payload = self._read_json()
+                if not isinstance(payload, dict):
+                    raise ApiError(400, "INVALID_BODY", "请求体必须是对象")
+                run_id = str(payload.get("run_id") or "").strip()
+                directory = store.run_dir(run_id)
+                if directory is None:
+                    raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行")
+                expected = payload.get("expected_version")
+                if expected is not None and type(expected) is not int:
+                    raise ApiError(400, "INVALID_FIELD", "expected_version 必须是整数")
+                result = edit_spec_item(
+                    directory, item_id=str(payload.get("item_id") or ""),
+                    text=str(payload.get("text") or ""),
+                    actor=str(payload.get("actor") or ""),
+                    expected_version=expected,
+                    expected_hash=(str(payload["expected_hash"]).strip()
+                                   if payload.get("expected_hash") else None),
+                )
+            except ApiError as error:
+                self._send_error(error)
+                return
+            except ContractError as error:
+                status = {"UNKNOWN_RUN": 404, "UNKNOWN_ITEM": 404,
+                          "STALE_VERSION": 409, "NOT_EDITABLE": 422,
+                          "INVALID_TEXT": 422}.get(error.code, 400)
+                self._send_error(ApiError(status, error.code, error.message))
+                return
+            self._send_json(HTTPStatus.OK, result)
 
         # ---------- 处理函数 ----------
 
