@@ -65,26 +65,23 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
                        f"审查记录 `audit.v{spec.version}.json`"]
     parts += [""]
 
-    parts += ["## 1 概述", ""]
-    parts += ["### 1.1 背景与问题定义", ""]
     summary = next((row["text"] for row in snapshot.requirements), _title(snapshot))
+    parts += ["## 1 背景与问题定义", ""]
     parts += [f"输入想法：{summary}", "",
-              "问题：原始描述只给出目标，缺少可直接开发的边界、验收与取舍；"
+              "原始描述只给出目标，缺少可直接开发的边界、验收与取舍；"
               "本规格把讨论结论固化为可执行的设计基线。", ""]
-    parts += ["### 1.2 目标用户与使用场景", ""]
+
+    parts += ["## 2 目标用户与使用场景", ""]
     users = [f"- {row['text']}" for row in snapshot.requirements[:4]]
     parts += users or ["- 使用原始需求描述中的直接用户。"]
-    parts += ["", "场景：用户从触发需求到完成目标的主路径，对应第 2 章需求与第 5 章验收。", ""]
-    parts += ["### 1.3 项目目标与非目标", ""]
+    parts += ["", "场景：用户从触发需求到完成目标的主路径，对应第 4 章需求与第 10 章验收。", ""]
+
+    parts += ["## 3 项目目标与非目标", ""]
     parts += [f"- 目标：交付 {len(spec.modules)} 个模块，覆盖 {len(snapshot.requirements)} 条明确需求。"]
     parts += [f"- 非目标：{row['item']}（{row['reason']}）" for row in spec.non_goals] or ["- 非目标：未记录。"]
-    parts += ["", spec.architecture, ""]
-    parts += [f"本规格以 {spec.base_draft} 为基线，整合两份草案后共 "
-              f"{len(spec.decisions)} 条决策、{len(spec.modules)} 个模块；"
-              f"未采纳 {len(spec.not_adopted)} 项差异，保留 "
-              f"{len(spec.open_items)} 个待决问题。", ""]
+    parts += [""]
 
-    parts += ["## 2 需求追溯", "", "### 2.1 功能需求与优先级", ""]
+    parts += ["## 4 功能需求与优先级", ""]
     rows = []
     for requirement in snapshot.requirements:
         rid = requirement["id"]
@@ -92,14 +89,14 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
         module = module_by_req.get(rid, {})
         acceptance = acceptance_by_req.get(rid, {})
         rows.append([
-            rid, requirement["text"],
+            rid, requirement["text"], requirement.get("priority", "—"),
             decision.get("id", "—"), module.get("id", "—"),
             acceptance.get("id", "—"),
             SATISFIES_LABEL.get(decision.get("satisfies", ""), "—"),
         ])
-    parts += [_table(["需求", "内容", "决策", "模块", "验收", "满足程度"], rows), ""]
+    parts += [_table(["需求", "内容", "优先级", "决策", "模块", "验收", "满足程度"], rows), ""]
 
-    parts += ["## 3 设计决策", "", "### 3.1 业务流程与规则", ""]
+    parts += ["## 5 业务流程与业务规则", ""]
     for decision in spec.decisions:
         requirement_id = (decision["requirement_ids"][0]
                           if decision.get("requirement_ids") else "未映射需求")
@@ -111,16 +108,20 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
                      if decision["claim_ids"] else ""),
                   f"- **满足程度**：{SATISFIES_LABEL[decision['satisfies']]}" +
                   ("（待人工确认）" if decision["needs_human"] else ""), ""]
+    parts += ["业务规则：每条决策的选择即为该需求的实现规则；"
+              "未采纳方案见第 3 章非目标，未决问题见第 11 章。", ""]
 
-    parts += ["## 4 模块与接口", "", "### 4.1 总体架构", ""]
+    parts += ["## 6 总体系统架构", ""]
     parts += [spec.architecture, ""]
-    parts += ["### 4.2 模块职责", ""]
+
+    parts += ["## 7 功能模块及职责", ""]
     parts += [_table(["模块", "职责", "需求", "估算"],
                      [[row["id"], row["responsibility"],
                        "、".join(row["requirement_ids"]) or "未映射",
                        row.get("estimate_days") if row.get("estimate_days") is not None else "待补"]
                       for row in spec.modules]), ""]
-    parts += ["### 4.3 接口、输入输出与数据", ""]
+
+    parts += ["## 8 模块接口、输入输出与数据结构", ""]
     for module in spec.modules:
         estimate = module.get("estimate_days")
         estimate_text = (f"估算 {estimate} 天" if isinstance(estimate, (int, float))
@@ -133,30 +134,28 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
         parts += [_table(["接口", "调用方", "入参", "出参"],
                          [[row["name"], row["caller"], row["input"], row["output"]]
                           for row in module["interfaces"]])]
-    parts += ["### 4.4 非功能需求与技术约束", ""]
+    parts += ["数据结构：模块间只传结构化对象；接口统一返回 result | error，"
+              "错误对象包含 code / message / path。", ""]
+
+    parts += ["## 9 非功能需求与技术约束", ""]
     nfr = [f"- {row['text']}" for row in snapshot.constraints]
     parts += nfr or ["- 未声明额外非功能约束。"]
-    parts += ["- 接口统一返回 result | error；错误必须带错误码与可定位字段。", ""]
+    parts += ["- 单次运行不写入未知估算，缺失值保留为 null 并进入待确认。", ""]
 
-    parts += ["## 5 验收条件", ""]
+    parts += ["## 10 可验证的验收标准", ""]
     parts += [_table(["编号", "需求", "验收条件", "验证方式"],
                      [[row["id"], row["requirement_id"], row["criterion"], row["verify"]]
                       for row in spec.acceptance])]
 
-    parts += ["## 6 明确不做", ""]
-    parts += [_table(["需求", "被否方案", "理由"],
-                     [[row["item"], row.get("choice", "—"), row["reason"]]
-                      for row in spec.non_goals])]
-
-    parts += ["## 7 待决问题", ""]
+    parts += ["## 11 风险、估算与未决问题", ""]
+    parts += ["### 11.1 风险与未决问题", ""]
     parts += [_table(["编号", "问题", "影响", "是否阻断", "候选"],
                      [[row["id"], row["question"], "、".join(row["impact"]),
                        "阻断" if row["blocking"] else "可延后",
                        "；".join(f"{item['draft']}：{item['choice']}"
                                  for item in row["candidates"])]
                       for row in spec.open_items])]
-
-    parts += ["## 8 估算", ""]
+    parts += ["### 11.2 估算", ""]
     parts += [f"- 期望 {spec.effort['expected_total']} 天，"
               f"标准差 {spec.effort['deviation_total']} 天",
               f"- 对外承诺 {spec.effort['commit_days']} 天（期望 + 1σ）", ""]
@@ -166,8 +165,8 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
 
     if spec.escalation:
         question = spec.escalation
-        parts += ["## 9 需人工决策", ""]
-        parts += [f"### {question['id']} {question['question']}", ""]
+        parts += ["### 11.3 需人工决策", ""]
+        parts += [f"#### {question['id']} {question['question']}", ""]
         parts += ["**背景**", ""]
         parts += [f"- {line}" for line in question["background"]]
         parts += [""]
@@ -178,6 +177,86 @@ def render_spec_markdown(spec: Spec, snapshot: Snapshot) -> str:
                   f" ｜ 约束 {'、'.join(question['affected']['constraints']) or '—'}",
                   f"- **不决策的后果**：{question['if_undecided']}",
                   f"- **建议**：{question['recommended']}（仅建议，不代替决定）", ""]
+
+    parts += ["## 12 用户需求清单", ""]
+    parts += [_table(["编号", "用户需求", "优先级", "类型", "来源"],
+                     [[row["id"], row["text"], row.get("priority", "—"),
+                       "非功能" if row["type"] == "constraint" else "功能",
+                       (row.get("source") or {}).get("section", "—")]
+                      for row in snapshot.items if row["type"] in ("requirement", "constraint")]), ""]
+
+    parts += ["## 13 数据结构设计", ""]
+    data_rows = []
+    for module in spec.modules:
+        for interface in module.get("interfaces") or []:
+            data_rows.append([module["id"], interface.get("name", "—"),
+                              interface.get("input", "—"), interface.get("output", "—")])
+    parts += [_table(["模块", "接口/对象", "输入", "输出"], data_rows), ""]
+    parts += ["对象约定：跨模块只传结构化对象；错误统一返回 `{code, message, path}`，"
+              "前端按 `code` 展示可恢复错误，不解析自然语言。", ""]
+
+    parts += ["## 14 API 接口设计", ""]
+    api_rows = []
+    for module in spec.modules:
+        for interface in module.get("interfaces") or []:
+            api_rows.append([interface.get("name", "—"), module["id"],
+                             interface.get("caller", "—"), interface.get("input", "—"),
+                             interface.get("output", "—")])
+    parts += [_table(["接口", "所属模块", "调用方", "入参", "出参"], api_rows), ""]
+    parts += ["接口为内部应用层契约；对外 HTTP 接口以运行目录的 `manifest.json` 与"
+              "编排器契约为准。", ""]
+
+    parts += ["## 15 核心业务流程", ""]
+    by_id = {module["id"]: module for module in spec.modules}
+    for module in spec.modules:
+        deps = module.get("depends_on") or []
+        if deps:
+            path = " → ".join([by_id[dep]["name"] for dep in deps if dep in by_id]
+                              + [module["name"]])
+            parts += [f"- {path}"]
+        else:
+            parts += [f"- {module['name']}（入口模块）"]
+    parts += ["", "以上依赖来自功能间最小依赖推断；没有推断出依赖时保留为空并进入待确认。", ""]
+
+    parts += ["## 16 异常处理", ""]
+    exception_rows = []
+    for decision in spec.decisions:
+        if decision.get("satisfies") != "full":
+            exception_rows.append([decision["id"], decision.get("scope", "—"),
+                                   SATISFIES_LABEL.get(decision["satisfies"], "—"),
+                                   decision.get("choice", "—")])
+    parts += [_table(["决策", "范围", "状态", "当前处理"], exception_rows),
+              "阻断与待确认项见第 11 章；接口错误统一用 code/message/path 返回，"
+              "前端提供重试与返回入口。", ""]
+
+    parts += ["## 17 安全与权限设计", ""]
+    security = [row["text"] for row in snapshot.constraints
+                if any(word in row["text"] for word in ("安全", "权限", "合规", "隐私", "审核"))]
+    if security:
+        parts += [f"- {text}" for text in security]
+    else:
+        parts += ["- 原始输入未声明安全、权限或合规约束；本规格不凭空补充指标，"
+                  "相关项保留为待确认。"]
+    parts += ["- 模型配置只保存在本次会话内存中；API Key 不写入运行产物。", ""]
+
+    parts += ["## 18 测试与验收计划", ""]
+    parts += [_table(["验收编号", "需求", "判据", "验证方式", "状态"],
+                     [[row["id"], row["requirement_id"], row["criterion"], row["verify"],
+                       "待执行" if spec.status != "confirmed" else "待执行（规格已确认）"]
+                      for row in spec.acceptance]), ""]
+    parts += ["执行顺序：接口契约测试 → 核心流程走查 → 异常路径 → 非功能指标；"
+              "任一阻断项未关闭前不进入开发排期。", ""]
+
+    parts += ["## 附录 A 需求追溯矩阵", ""]
+    rows = []
+    for requirement in snapshot.requirements:
+        rid = requirement["id"]
+        decision = decision_by_req.get(rid, {})
+        module = module_by_req.get(rid, {})
+        acceptance = acceptance_by_req.get(rid, {})
+        rows.append([rid, requirement["text"], decision.get("id", "—"),
+                     module.get("id", "—"), acceptance.get("id", "—")])
+    parts += [_table(["需求", "内容", "决策", "模块", "验收"], rows), ""]
 
     parts += ["## 附录 版本信息", ""]
     parts += [_table(["项目", "值"], [

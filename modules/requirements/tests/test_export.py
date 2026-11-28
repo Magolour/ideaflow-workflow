@@ -58,8 +58,10 @@ class ExportTest(unittest.TestCase):
 
     def test_markdown_contains_required_sections(self) -> None:
         markdown = render_spec_markdown(self.spec, self.snapshot)
-        for heading in ("## 2 需求追溯", "## 3 设计决策", "## 4 模块与接口",
-                        "## 5 验收条件", "## 6 明确不做", "## 7 待决问题", "## 8 估算"):
+        for heading in ("## 1 背景与问题定义", "## 4 功能需求与优先级",
+                        "## 5 业务流程与业务规则", "## 7 功能模块及职责",
+                        "## 8 模块接口、输入输出与数据结构",
+                        "## 10 可验证的验收标准", "## 11 风险、估算与未决问题"):
             self.assertIn(heading, markdown)
         self.assertIn("| R-03 |", markdown)
         self.assertIn("不满足", markdown)

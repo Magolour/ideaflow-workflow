@@ -79,7 +79,7 @@ class EscalateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             result = export_spec(self.escalated, self.snapshot, folder)
             markdown = (Path(folder) / result["markdown"]).read_text(encoding="utf-8")
-            self.assertIn("## 9 需人工决策", markdown)
+            self.assertIn("### 11.3 需人工决策", markdown)
             self.assertIn("HUMAN-Q-01", markdown)
             self.assertIn("确认前不能作为开发依据", markdown)
             self.assertTrue(verify_export(folder, self.escalated.version)["ok"])

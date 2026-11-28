@@ -13,6 +13,10 @@ const state = {
   loadedCaseText: "",
   spec: null,
   clarifyAnswers: {},
+  llm: { base_url: "", model: "", api_key: "" },
+  jobLogs: [],
+  jobSource: null,
+  sseLive: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -38,6 +42,10 @@ const els = {
   generate: $("#btnGenerate"),
   clarify: $("#btnClarify"),
   clarifyPanel: $("#clarifyPanel"),
+  clarifyStage: $("#clarifyStage"),
+  clarifyQuestions: $("#clarifyQuestions"),
+  clarifyIdeaText: $("#clarifyIdeaText"),
+  specReview: $("#specReview"),
   generateLabel: $(".btn-generate .btn-label"),
   status: $("#serverStatus"),
   empty: $("#emptyState"),
@@ -83,6 +91,7 @@ const els = {
   specMetrics: $("#specMetrics"),
   specTabs: $("#specTabs"),
   specPaper: $("#specPaper"),
+  specToc: $("#specToc"),
   panelSnapshot: $("#panelSnapshot"),
   panelDiscussion: $("#panelDiscussion"),
   panelDrafts: $("#panelDrafts"),
@@ -91,8 +100,14 @@ const els = {
   countIssues: $("#countIssues"),
   specDlMd: $("#specDlMd"),
   specDlJson: $("#specDlJson"),
+  specDlHtml: $("#specDlHtml"),
   specPrint: $("#specPrint"),
   liveModel: $("#liveModel"),
+  apiConfig: $("#apiConfig"),
+  apiPreset: $("#apiPreset"),
+  apiBase: $("#apiBase"),
+  apiModel: $("#apiModel"),
+  apiKey: $("#apiKey"),
   runWarnings: $("#runWarnings"),
 };
 
@@ -124,7 +139,7 @@ function formatTime(iso) {
 }
 
 function showOnly(panel) {
-  [els.empty, els.runPanel, els.errorPanel, els.resultPanel, els.specResult].forEach((node) => {
+  [els.empty, els.clarifyStage, els.runPanel, els.errorPanel, els.resultPanel, els.specResult].forEach((node) => {
     node.hidden = node !== panel;
   });
 }
@@ -156,6 +171,28 @@ function addConstraint(raw) {
   state.constraints.push(text);
   els.constraintInput.value = "";
   renderChips();
+}
+
+const META_FIELDS = [
+  ["#metaProduct", "产品类型"],
+  ["#metaUsers", "目标用户"],
+  ["#metaTech", "技术限制"],
+  ["#metaDeadline", "开发周期"],
+  ["#metaBudget", "资源预算"],
+];
+
+function structuredConstraints() {
+  return META_FIELDS
+    .map(([selector, label]) => {
+      const node = $(selector);
+      const value = (node?.value || "").trim();
+      return value ? `${label}：${value}` : "";
+    })
+    .filter(Boolean);
+}
+
+function constraintsPayload() {
+  return [...state.constraints, ...structuredConstraints()];
 }
 
 /* ------------------------------ 渲染 ------------------------------ */
@@ -311,6 +348,7 @@ function renderQuestions(data) {
 }
 
 function renderResult(data) {
+  setFlow(3, [1, 2]);
   state.result = data;
   const lines = data.markdown.split("\n");
   const heading = (lines.find((line) => line.startsWith("# ")) || "").replace(/^#\s*/, "");
@@ -341,6 +379,7 @@ function renderResult(data) {
   switchTab(initialTab);
   showOnly(els.resultPanel);
   els.resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function switchTab(name) {
@@ -388,6 +427,38 @@ function showError(error) {
   showOnly(els.errorPanel);
 }
 
+
+const LLM_PRESETS = {
+  "qwen-maas": { base_url: "https://maas.qianwenaiapi.com/compatible-mode/v1", model: "qwen-plus" },
+  dashscope: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  deepseek: { base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  zhipu: { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus" },
+  custom: { base_url: "", model: "" },
+};
+
+function syncLlmFields() {
+  if (!els.apiBase) return;
+  els.apiBase.value = state.llm.base_url || "";
+  els.apiModel.value = state.llm.model || "";
+  els.apiKey.value = "";
+}
+
+function readLlmFields() {
+  state.llm.base_url = (els.apiBase.value || "").trim();
+  state.llm.model = (els.apiModel.value || "").trim();
+  state.llm.api_key = (els.apiKey.value || "").trim();
+}
+
+function llmPayload() {
+  if (!els.liveModel?.checked) return null;
+  readLlmFields();
+  const payload = {};
+  if (state.llm.base_url) payload.base_url = state.llm.base_url;
+  if (state.llm.model) payload.model = state.llm.model;
+  if (state.llm.api_key) payload.api_key = state.llm.api_key;
+  return payload;
+}
+
 async function generate() {
   if (state.busy) return;
   const idea = els.idea.value.trim();
@@ -399,6 +470,8 @@ async function generate() {
   }
   els.ideaError.hidden = true;
   els.idea.classList.remove("invalid");
+  const project = $("#projectName");
+  if (project) project.textContent = idea.length > 24 ? `${idea.slice(0, 24)}…` : idea;
 
   setBusy(true);
   state.result = null;
@@ -406,19 +479,21 @@ async function generate() {
   els.timeline.innerHTML = "";
   els.runTitle.textContent = state.mode === "spec" ? "正在生成设计规格" : "正在生成设计文档";
   showOnly(els.runPanel);
+  setFlow(2, [1]);
   startClock();
 
   const live = Boolean(els.liveModel && els.liveModel.checked);
+  const llm = llmPayload();
   const body = state.mode === "spec"
-    ? { flow: "spec", idea, constraints: state.constraints, case: state.case, live,
+    ? { flow: "spec", idea, constraints: constraintsPayload(), case: state.case, live, llm,
         answers: state.clarifyAnswers }
     : {
       flow: "proposal",
       idea,
-      constraints: state.constraints,
+      constraints: constraintsPayload(),
       max_rounds: Number(els.rounds.value),
       threshold: Number(els.threshold.value) / 100,
-      live,
+      live, llm,
     };
 
   try {
@@ -435,6 +510,7 @@ async function generate() {
       throw failure;
     }
     state.jobId = payload.job_id;
+    watchJobEvents(payload.job_id);
     pollJob();
   } catch (error) {
     showError({
@@ -443,6 +519,37 @@ async function generate() {
       path: error.path || "",
     });
   }
+}
+
+function closeJobEvents() {
+  if (state.jobSource) {
+    state.jobSource.close();
+    state.jobSource = null;
+  }
+  state.sseLive = false;
+}
+
+function watchJobEvents(jobId) {
+  closeJobEvents();
+  state.jobLogs = [];
+  const source = new EventSource(`/api/job/events?id=${encodeURIComponent(jobId)}`);
+  state.jobSource = source;
+  source.onopen = () => { state.sseLive = true; };
+  source.onmessage = (event) => {
+    let data;
+    try { data = JSON.parse(event.data); } catch { return; }
+    if (data.type === "log") {
+      state.jobLogs.push({ at: data.at, text: data.text });
+      renderTimeline(state.jobLogs);
+    } else if (data.type === "state") {
+      closeJobEvents();
+    }
+  };
+  source.onerror = () => {
+    state.sseLive = false;
+    source.close();
+    if (state.jobSource === source) state.jobSource = null;
+  };
 }
 
 async function pollJob() {
@@ -454,7 +561,7 @@ async function pollJob() {
       throw new Error(payload?.error?.message || `服务返回 ${response.status}`);
     }
     const job = payload.job;
-    renderTimeline(job.logs || []);
+    if (!state.sseLive) renderTimeline(job.logs || []);
     if (job.state === "done") {
       // 生成通常不到 1 秒；留一点时间让阶段日志可读，避免界面闪一下就跳走
       const wait = Math.max(0, 520 - (Date.now() - state.startedAt));
@@ -475,6 +582,7 @@ async function pollJob() {
       return;
     }
     if (job.state === "error") {
+      closeJobEvents();
       showError(job.error || { code: "ERROR", message: "生成失败" });
       return;
     }
@@ -488,20 +596,20 @@ async function pollJob() {
 
 const MODE_TEXT = {
   proposal: {
-    eyebrow: "Input",
-    title: "从一个想法开始",
-    sub: "六个角色独立出稿、互相批判，再整合成一份带分歧记录的设计文档。",
-    label: "生成设计文档",
-    emptyTitle: "一句想法，一份可确认的设计文档",
-    emptySub: "输入想法后，系统会走完澄清、发散、批判、整合、签署、收敛六个阶段，输出 11 章文档，并保留未解决的问题与少数意见。",
+    eyebrow: "Design proposal",
+    title: "项目工作流",
+    sub: "先讨论、再比较，最后导出可确认的设计方案。",
+    label: "开始需求分析",
+    emptyTitle: "把一个想法，变成可实现的产品",
+    emptySub: "描述你的想法，IdeaFlow 将协助你完成需求分析和产品设计。",
   },
   spec: {
-    eyebrow: "Specification",
-    title: "从想法到设计规格",
-    sub: "需求快照 → 两组独立方案 → 逐份评审 → 设计规格 → 自审查 → 修订 → 人工问题。",
+    eyebrow: "Design specification",
+    title: "项目工作流",
+    sub: "需求快照 → A/B 方案 → 评审 → 设计规格 → 自审查 → 人工确认。",
     label: "生成设计规格",
-    emptyTitle: "一句想法，一份可追溯的设计规格",
-    emptySub: "先把输入固化成带编号与来源的需求快照，再让两组独立出方案、逐份评审、整合规格，并做覆盖、冲突与验收自审查。",
+    emptyTitle: "把一个想法，变成可实现的产品",
+    emptySub: "描述你的想法，IdeaFlow 将协助你完成需求分析和产品设计。",
   },
 };
 
@@ -513,6 +621,42 @@ const specTabFromUrl = ["snapshot", "discussion", "drafts", "doc", "audit"].incl
   ? query.get("stab")
   : "snapshot";
 
+
+const FLOW_LABELS = { active: "进行中", done: "已完成", pending: "待处理", todo: "待生成" };
+
+function setFlow(active, done = []) {
+  const steps = $$("#flowNav .flow-step");
+  steps.forEach((step) => {
+    const index = Number(step.dataset.step);
+    step.classList.toggle("active", index === active);
+    step.classList.toggle("done", done.includes(index));
+    const badge = step.querySelector(".flow-badge");
+    if (badge) badge.textContent = index === active ? FLOW_LABELS.active
+      : done.includes(index) ? FLOW_LABELS.done : FLOW_LABELS.todo;
+  });
+}
+
+function buildSpecToc(html) {
+  if (!els.specToc) return;
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  const heads = Array.from(holder.querySelectorAll("h2"));
+  els.specToc.innerHTML = heads.map((head, index) => {
+    const id = `spec-sec-${index}`;
+    head.id = id;
+    return `<a href="#${id}" class="${head.tagName === "H3" ? "sub" : ""}" data-toc="${id}">${escapeHtml(head.textContent)}</a>`;
+  }).join("");
+  els.specToc.querySelectorAll("a[data-toc]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      const target = document.getElementById(link.dataset.toc);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  // 把带 id 的标题写回正文
+  els.specPaper.innerHTML = holder.innerHTML;
+}
+
 function setMode(mode) {
   state.mode = mode === "spec" ? "spec" : "proposal";
   const text = MODE_TEXT[state.mode];
@@ -523,7 +667,7 @@ function setMode(mode) {
   els.railTitle.textContent = text.title;
   els.railSub.textContent = text.sub;
   els.generateLabel.textContent = text.label;
-  els.advancedOptions.hidden = state.mode !== "proposal";
+  els.advancedOptions.hidden = false;
   els.caseField.hidden = state.mode !== "spec";
   if (els.clarify) els.clarify.hidden = state.mode !== "spec";
   if (state.mode !== "spec" && els.clarifyPanel) els.clarifyPanel.hidden = true;
@@ -597,12 +741,37 @@ function renderSpecResult(data) {
     els.specBanner.className = "spec-banner";
     els.specBanner.hidden = false;
     els.specBanner.innerHTML = '<div><b>规格仍有阻断</b>。请在「审查与修订」核对问题清单。</div>';
+  } else if (spec.status !== "confirmed") {
+    els.specBanner.className = "spec-banner";
+    els.specBanner.hidden = false;
+    els.specBanner.innerHTML = `<div><b>规格尚未人工确认</b>。确认后升版为 confirmed，并重新导出同版文件。</div>
+      <div class="confirm-box">
+        <input id="confirmActor" placeholder="确认人" value="产品负责人">
+        <input id="confirmReason" placeholder="确认理由" value="审查通过，同意进入开发">
+        <button class="link-btn" id="btnConfirmSpec" type="button">确认规格</button>
+      </div>`;
   } else {
     els.specBanner.hidden = true;
   }
 
   els.specMetrics.innerHTML = specMetricBlock(data);
   els.specPaper.innerHTML = data.html;
+  buildSpecToc(data.html);
+  renderSpecReview(data);
+  setFlow(4, [1, 2, 3]);
+  const specStepBadge = document.querySelector('#flowNav [data-step="4"] .flow-badge');
+  if (specStepBadge) {
+    specStepBadge.classList.remove("warn", "bad");
+    if (spec.status === "blocked") {
+      specStepBadge.textContent = "存在问题";
+      specStepBadge.classList.add("bad");
+    } else if (data.question || spec.status === "awaiting_human") {
+      specStepBadge.textContent = "待确认";
+      specStepBadge.classList.add("warn");
+    } else if (spec.status === "confirmed") {
+      specStepBadge.textContent = "已完成";
+    }
+  }
   els.countDrafts.textContent = data.drafts.length;
   els.countIssues.textContent = latest.counts.total;
 
@@ -618,6 +787,7 @@ function renderSpecResult(data) {
   switchSpecTab(specTabFromUrl);
   showOnly(els.specResult);
   els.specResult.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function specMetricBlock(data) {
@@ -668,6 +838,64 @@ const DISPOSITION_TEXT = {
   pending_evidence: "待证据", human_required: "待人工裁决",
 };
 
+
+async function confirmSpec() {
+  if (!state.spec) return;
+  const actor = ($("#confirmActor")?.value || "").trim();
+  const reason = ($("#confirmReason")?.value || "").trim();
+  if (!actor || !reason) {
+    toast("确认人与理由不能为空");
+    return;
+  }
+  try {
+    const response = await fetch("/api/spec/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ run_id: state.spec.run_id, actor, reason }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error?.message || `服务返回 ${response.status}`);
+    els.specBanner.className = "spec-banner ok";
+    els.specBanner.innerHTML = `<div><b>规格已确认 v${escapeHtml(body.version)}</b>：${escapeHtml(reason)}</div>`;
+    els.specSub.textContent += ` ｜ 已由 ${actor} 确认`;
+    toast(`规格已确认：v${body.version}`);
+  } catch (error) {
+    toast(`确认失败：${error.message}`);
+  }
+}
+
+
+function renderSpecReview(data) {
+  if (!els.specReview) return;
+  const latest = (data.audits || [])[data.audits.length - 1] || {};
+  const counts = latest.counts || {};
+  const issues = latest.issues || [];
+  const headings = Array.from(els.specPaper.querySelectorAll("h2")).length;
+  const requirementCount = (data.snapshot?.items || []).filter((x) => x.type === "requirement").length;
+  const open = (data.spec?.open_items || []).length;
+  const blocking = counts.blocking || 0;
+  els.specReview.innerHTML = `
+    <div class="review-card"><h4>规格完整度</h4>
+      <div class="review-kv"><span>正文章节</span><b>${headings}</b></div>
+      <div class="review-kv"><span>明确需求</span><b>${requirementCount}</b></div>
+      <div class="review-kv"><span>待确认</span><b>${open}</b></div>
+      <div class="review-kv"><span>阻断</span><b>${blocking}</b></div>
+    </div>
+    <div class="review-card"><h4>审查问题</h4>
+      ${issues.length ? issues.slice(0, 8).map((row) => {
+        const target = (row.requirement_ids || [])[0] || "";
+        return `<div class="review-issue">
+        <code>${escapeHtml(row.type || "")}</code><p>${escapeHtml(row.message || "")}</p>
+        ${target ? `<button type="button" class="review-find" data-find="${escapeHtml(target)}">定位 ${escapeHtml(target)}</button>` : ""}
+      </div>`;
+      }).join("") : '<p class="src">没有审查问题</p>'}
+    </div>
+    <div class="review-card"><h4>操作</h4>
+      <div class="review-kv"><span>Markdown</span><a href="/api/download?run_id=${encodeURIComponent(data.run_id)}&artifact=spec-md">下载</a></div>
+      <div class="review-kv"><span>JSON</span><a href="/api/download?run_id=${encodeURIComponent(data.run_id)}&artifact=spec-input">下载</a></div>
+    </div>`;
+}
+
 function renderDiscussionPanel(data) {
   const disc = data.discussion;
   if (!disc) {
@@ -696,13 +924,23 @@ function renderDiscussionPanel(data) {
       <span>立场 ${role.stances}</span></div>
   </article>`).join("");
 
+  const unresolved = (disc.open_questions || []).filter((row) =>
+    !row.resolution || String(row.resolution).startsWith("未知"));
+  const questionRows = (disc.open_questions || []).map((row) => `<tr>
+    <td class="tag-mono">${escapeHtml(row.id)}</td>
+    <td>${escapeHtml(row.text)}</td>
+    <td>${row.blocking ? "阻断" : "可延后"}</td>
+    <td>${escapeHtml(row.owner || "")}</td>
+    <td>${escapeHtml(row.resolution || "未解决")}</td>
+  </tr>`).join("");
+
   const assumptionRows = (disc.assumptions || []).map((row) => `<tr>
     <td class="tag-mono">${escapeHtml(row.id)}</td>
     <td>${escapeHtml(row.text || row.assumption || "")}</td>
     <td class="src">${escapeHtml(row.reason || row.source || "")}</td>
   </tr>`).join("");
 
-  const decisionRows = (disc.decisions || []).map((row) => `<tr>
+  const decisionRows = (disc.decisions || []).map((row) => `<tr data-dec="${escapeHtml(row.id)}" data-claims="${escapeHtml((row.claim_ids || []).join(" "))}" class="disc-link-row">
     <td class="tag-mono">${escapeHtml(row.id)}</td>
     <td>${escapeHtml(row.scope || "")}</td>
     <td>${escapeHtml(row.choice || "")}</td>
@@ -710,7 +948,7 @@ function renderDiscussionPanel(data) {
     <td>${escapeHtml((row.requirement_ids || []).join("、") || "未映射")}</td>
   </tr>`).join("");
 
-  const claimRows = claims.map((claim) => `<tr>
+  const claimRows = claims.map((claim) => `<tr data-claim="${escapeHtml(claim.id)}" class="disc-link-row">
     <td class="tag-mono">${escapeHtml(claim.id)}</td>
     <td>${escapeHtml(roleName(claim.role))}</td>
     <td>${escapeHtml(EVIDENCE_TEXT[claim.evidence] || claim.evidence || "")}</td>
@@ -778,6 +1016,20 @@ function renderDiscussionPanel(data) {
       <span id="discReplayState" class="src"></span>
     </div>
     <div class="disc-timeline" id="discTimeline">${eventRows}</div>
+    <h3 class="disc-h">澄清问题
+      ${unresolved.length ? `<button class="link-btn" id="btnReprompt" type="button">补充答复并重新生成</button>` : ""}
+    </h3>
+    <table class="spec-table"><thead><tr><th>编号</th><th>问题</th><th>类型</th><th>处理人</th><th>结论</th></tr></thead>
+      <tbody>${questionRows || '<tr><td colspan="5">没有澄清问题</td></tr>'}</tbody></table>
+    ${unresolved.length ? `<div class="reprompt" id="repromptBox" hidden>
+      <div class="reprompt-head">补充澄清（未填的仍按假设继续）</div>
+      ${unresolved.map((row) => `<label class="reprompt-row">
+        <span class="tag-mono">${escapeHtml(row.id)}</span>
+        <span>${escapeHtml(row.text)}</span>
+        <input data-qid="${escapeHtml(row.id)}" placeholder="输入答复">
+      </label>`).join("")}
+      <button type="button" id="btnRepromptSubmit">带答复重新生成</button>
+    </div>` : ""}
     <h3 class="disc-h">假设 ASM</h3>
     <table class="spec-table"><thead><tr><th>编号</th><th>假设</th><th>依据/说明</th></tr></thead>
       <tbody>${assumptionRows || '<tr><td colspan="3">没有假设</td></tr>'}</tbody></table>
@@ -806,6 +1058,50 @@ function renderDiscussionPanel(data) {
   };
   roleFilter.addEventListener("change", applyFilter);
   roundFilter.addEventListener("change", applyFilter);
+
+  const reprompt = $("#btnReprompt");
+  if (reprompt) {
+    reprompt.addEventListener("click", () => {
+      const box = $("#repromptBox");
+      if (box) box.hidden = !box.hidden;
+    });
+    const submit = $("#btnRepromptSubmit");
+    if (submit) {
+      submit.addEventListener("click", () => {
+        if (!els.idea.value.trim()) {
+          toast("输入想法后再补充澄清");
+          return;
+        }
+        const answers = {};
+        $$("#repromptBox input[data-qid]").forEach((input) => {
+          const value = input.value.trim();
+          if (value) answers[input.dataset.qid] = value;
+        });
+        if (!Object.keys(answers).length) {
+          toast("没有填写新的答复");
+          return;
+        }
+        state.clarifyAnswers = answers;
+        generate();
+      });
+    }
+  }
+
+  els.panelDiscussion.addEventListener("click", (event) => {
+    const claimRow = event.target.closest("tr[data-claim]");
+    if (!claimRow) return;
+    const claimId = claimRow.dataset.claim;
+    const hits = $$("#panelDiscussion tr[data-dec]").filter((row) =>
+      (row.dataset.claims || "").split(/\s+/).includes(claimId));
+    $$("#panelDiscussion tr.dec-hit").forEach((row) => row.classList.remove("dec-hit"));
+    if (!hits.length) {
+      toast(`${claimId} 没有直接对应的决策，可能被整合进其他方案或列为非目标。`);
+      return;
+    }
+    hits.forEach((row) => row.classList.add("dec-hit"));
+    hits[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    toast(`${claimId} 对应 ${hits.map((row) => row.dataset.dec).join("、")}`);
+  });
 
   let replayIndex = 0;
   let replayTimer = null;
@@ -908,20 +1204,56 @@ function renderDraftsPanel(data) {
     ? `<ul class="rev-changes">${notAdopted}</ul>`
     : '<p class="empty-inline">没有未采纳的差异。</p>';
 
+  const disc = data.discussion || {};
+  const consensus = disc.consensus || {};
+  const unresolved = (disc.open_questions || []).filter((row) =>
+    !row.resolution || String(row.resolution).startsWith("未知"));
+  const participated = (disc.roles || []).filter((row) => row.participated).length;
+  const discussionSummary = `
+    <aside class="design-side">
+      <section class="side-card">
+        <p class="eyebrow">Discussion</p>
+        <h3>讨论摘要</h3>
+        <p class="side-lead">${escapeHtml(consensus.label || consensus.state || "暂无共识结论")}</p>
+        <p class="side-muted">${escapeHtml(consensus.reason || "本次讨论未记录原因。")}</p>
+        <div class="side-kv"><span>参与角色</span><b>${participated}</b></div>
+        <div class="side-kv"><span>讨论轮次</span><b>${disc.round ?? "—"}</b></div>
+        <div class="side-kv"><span>未解决</span><b>${unresolved.length}</b></div>
+        <button type="button" class="btn-ghost side-action" data-goto="discussion">查看完整讨论 →</button>
+      </section>
+      <section class="side-card">
+        <h3>当前分歧</h3>
+        ${(disc.objections || []).length ? (disc.objections || []).slice(0, 4).map((row) => `
+          <div class="side-item"><b>${escapeHtml(row.id)}</b><p>${escapeHtml(row.text || "")}</p></div>`).join("")
+          : '<p class="side-muted">没有未处理的异议。</p>'}
+      </section>
+      <section class="side-card">
+        <h3>最终决策</h3>
+        ${(disc.decisions || []).length ? (disc.decisions || []).slice(0, 4).map((row) => `
+          <div class="side-item"><b>${escapeHtml(row.id)}</b><p>${escapeHtml(row.choice || "")}</p></div>`).join("")
+          : '<p class="side-muted">还没有决策记录。</p>'}
+      </section>
+    </aside>`;
+
   els.panelDrafts.innerHTML = `
-    <div class="subsection"><h3>两组草案</h3>
-      <span>${data.drafts.map((row) => `${row.group} ${row.commit_days} 天`).join(" ｜ ")}</span></div>
-    <div class="ab-grid">${cards}</div>
+    <div class="design-layout">
+      <div class="design-main">
+        <div class="subsection"><h3>两组草案</h3>
+          <span>${data.drafts.map((row) => `${row.group} ${row.commit_days} 天`).join(" ｜ ")}</span></div>
+        <div class="ab-grid">${cards}</div>
 
-    <div class="subsection"><h3>取舍对照</h3>
-      <span>期限 ${data.tradeoffs.project.deadline_days ?? "未给出"} 天</span></div>
-    ${trades}
+        <div class="subsection"><h3>取舍对照</h3>
+          <span>期限 ${data.tradeoffs.project.deadline_days ?? "未给出"} 天</span></div>
+        ${trades}
 
-    <div class="subsection"><h3>评审分歧</h3><span>${disagreements.length} 条</span></div>
-    ${disRows}
+        <div class="subsection"><h3>评审分歧</h3><span>${disagreements.length} 条</span></div>
+        ${disRows}
 
-    <div class="subsection"><h3>未采纳的差异</h3><span>${(data.spec.not_adopted || []).length} 项</span></div>
-    ${notAdoptedBlock}`;
+        <div class="subsection"><h3>未采纳的差异</h3><span>${(data.spec.not_adopted || []).length} 项</span></div>
+        ${notAdoptedBlock}
+      </div>
+      ${discussionSummary}
+    </div>`;
 }
 
 function renderAuditPanel(data) {
@@ -1059,6 +1391,25 @@ async function submitSpecAnswer(event) {
 /* ------------------------------ 事件绑定 ------------------------------ */
 
 
+function clarifyCategory(text) {
+  const value = String(text || "");
+  if (/(用户|人群|场景|谁|角色)/.test(value)) return "用户与场景";
+  if (/(技术|系统|接口|部署|数据|架构|兼容)/.test(value)) return "技术约束";
+  if (/(性能|安全|合规|体验|可用性|响应|并发)/.test(value)) return "非功能需求";
+  if (/(规则|审批|流程|权限|边界|禁止)/.test(value)) return "业务规则";
+  if (/(功能|范围|能力|核心|优先)/.test(value)) return "功能与范围";
+  return "范围与验收";
+}
+
+function clarifyWhy(text) {
+  const category = clarifyCategory(text);
+  if (category === "用户与场景") return "目标用户或使用场景会直接改变功能优先级与验收口径。";
+  if (category === "技术约束") return "技术边界会影响方案选择、成本与可交付范围。";
+  if (category === "非功能需求") return "非功能指标需要可验证的阈值，否则无法验收。";
+  if (category === "业务规则") return "规则决定异常路径与人工审批节点，不能默认假设。";
+  return "不回答会保留为假设，影响需求范围与验收标准。";
+}
+
 async function clarifySpec() {
   const idea = els.idea.value.trim();
   if (!idea) {
@@ -1073,34 +1424,79 @@ async function clarifySpec() {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({
-        idea, constraints: state.constraints,
+        idea, constraints: constraintsPayload(),
         live: Boolean(els.liveModel && els.liveModel.checked),
+        llm: llmPayload(),
       }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error?.message || `服务返回 ${response.status}`);
     const questions = payload.questions || [];
     state.clarifyAnswers = {};
+    showOnly(els.clarifyStage);
+    els.clarifyIdeaText.textContent = idea;
+    setFlow(2, [1]);
+    const updateCounts = () => {
+      const answered = Object.keys(state.clarifyAnswers).length;
+      const answeredNode = $("#clarifyAnswered");
+      const pendingNode = $("#clarifyPending");
+      if (answeredNode) answeredNode.textContent = String(answered);
+      if (pendingNode) pendingNode.textContent = String(Math.max(0, questions.length - answered));
+    };
     if (!questions.length) {
-      els.clarifyPanel.hidden = false;
-      els.clarifyPanel.innerHTML = '<p class="clarify-empty">没有必须由人回答的阻断问题，可以直接生成。</p>';
+      els.clarifyQuestions.innerHTML = '<div class="clarify-empty">没有必须由人回答的阻断问题，可以直接确认。</div>';
+      updateCounts();
       return;
     }
-    els.clarifyPanel.hidden = false;
-    els.clarifyPanel.innerHTML = `<div class="clarify-head"><b>生成前澄清</b>
-      <span>不填也可以生成，未答问题会标记为“按假设继续”。</span></div>
-      ${questions.map((question) => `<label class="clarify-row">
-        <span class="tag-mono">${escapeHtml(question.id)}</span>
-        <span class="clarify-text">${escapeHtml(question.text)}</span>
-        <input data-qid="${escapeHtml(question.id)}" placeholder="你的答复（可留空）">
-      </label>`).join("")}`;
-    els.clarifyPanel.querySelectorAll("input[data-qid]").forEach((input) => {
+    const groups = [];
+    questions.forEach((question) => {
+      const category = clarifyCategory(question.text);
+      let group = groups.find((row) => row.name === category);
+      if (!group) {
+        group = { name: category, rows: [] };
+        groups.push(group);
+      }
+      group.rows.push(question);
+    });
+    els.clarifyQuestions.innerHTML = groups.map((group) => `<section class="clarify-group">
+      <h4>${escapeHtml(group.name)}<span>${group.rows.length}</span></h4>
+      ${group.rows.map((question) => `<div class="clarity-q" data-qid="${escapeHtml(question.id)}">
+        <div class="q-head"><span class="q-id">${escapeHtml(question.id)}</span>
+          <b>${escapeHtml(question.text)}</b></div>
+        <p class="q-why">${escapeHtml(clarifyWhy(question.text))}</p>
+        <input data-qid="${escapeHtml(question.id)}" placeholder="输入你的答复，或留空按假设继续">
+        <div class="q-actions">
+          <button type="button" data-skip="${escapeHtml(question.id)}">跳过</button>
+          <button type="button" data-unknown="${escapeHtml(question.id)}">暂时无法确定</button>
+        </div>
+      </div>`).join("")}
+    </section>`).join("");
+    els.clarifyQuestions.querySelectorAll("input[data-qid]").forEach((input) => {
       input.addEventListener("input", () => {
         const value = input.value.trim();
         if (value) state.clarifyAnswers[input.dataset.qid] = value;
         else delete state.clarifyAnswers[input.dataset.qid];
+        updateCounts();
       });
     });
+    els.clarifyQuestions.querySelectorAll("[data-skip]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const input = els.clarifyQuestions.querySelector(`input[data-qid="${button.dataset.skip}"]`);
+        if (input) input.value = "";
+        delete state.clarifyAnswers[button.dataset.skip];
+        updateCounts();
+        toast("已跳过，生成时保留为待确认假设");
+      });
+    });
+    els.clarifyQuestions.querySelectorAll("[data-unknown]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const input = els.clarifyQuestions.querySelector(`input[data-qid="${button.dataset.unknown}"]`);
+        if (input) input.value = "暂时无法确定，先按假设继续";
+        state.clarifyAnswers[button.dataset.unknown] = "暂时无法确定，先按假设继续";
+        updateCounts();
+      });
+    });
+    updateCounts();
   } catch (error) {
     toast(`澄清失败：${error.message}`);
   } finally {
@@ -1123,6 +1519,150 @@ function bind() {
   });
 
   if (els.clarify) els.clarify.addEventListener("click", clarifySpec);
+
+  const settings = $("#apiSettings");
+  const openSettings = () => {
+    if (!settings) return;
+    els.apiConfig.hidden = false;
+    if (!settings.open) settings.showModal();
+  };
+  if (settings) {
+    if ($("#btnModelSettings")) $("#btnModelSettings").addEventListener("click", openSettings);
+    if ($("#btnOpenSettings")) $("#btnOpenSettings").addEventListener("click", openSettings);
+    if ($("#btnCloseSettings")) $("#btnCloseSettings").addEventListener("click", () => settings.close());
+    settings.addEventListener("click", (event) => {
+      if (event.target === settings) settings.close();
+    });
+  }
+  if ($("#btnNewProject")) {
+    $("#btnNewProject").addEventListener("click", () => {
+      state.result = null;
+      state.spec = null;
+      state.jobId = null;
+      state.clarifyAnswers = {};
+      state.constraints = [];
+      els.idea.value = "";
+      els.ideaCount.textContent = "0 / 1200";
+      renderChips();
+      META_FIELDS.forEach(([selector]) => {
+        const node = $(selector);
+        if (node) node.value = "";
+      });
+      setMode("proposal");
+      setFlow(1);
+      showOnly(els.empty);
+      const project = $("#projectName");
+      if (project) project.textContent = "未命名项目";
+      els.idea.focus();
+    });
+  }
+  if ($("#btnUserSettings")) {
+    $("#btnUserSettings").addEventListener("click", () => {
+      toast("当前为本地工作区；项目与产物保存在运行目录，不依赖云端账号");
+    });
+  }
+  $$("#flowNav .flow-step").forEach((step) => {
+    step.addEventListener("click", () => {
+      const index = Number(step.dataset.step);
+      if (index === 1) {
+        showOnly(els.empty);
+        els.idea.focus();
+        setFlow(1);
+      } else if (index === 2) {
+        setMode("spec");
+        clarifySpec();
+      } else if (index === 3) {
+        if (state.spec) {
+          setMode("spec");
+          showOnly(els.specResult);
+          switchSpecTab("drafts");
+          setFlow(3, [1, 2]);
+        } else if (state.result) {
+          setMode("proposal");
+          showOnly(els.resultPanel);
+          setFlow(3, [1, 2]);
+        } else {
+          showOnly(els.empty);
+          toast("先生成一次设计方案");
+        }
+      } else {
+        setMode("spec");
+        if (state.spec) { showOnly(els.specResult); switchSpecTab("doc"); setFlow(4, [1, 2, 3]); }
+        else { showOnly(els.empty); toast("先生成一次设计规格"); }
+      }
+    });
+  });
+
+  if (els.apiConfig) {
+    const apiSwitch = $(".api-switch");
+    if (apiSwitch) {
+      apiSwitch.addEventListener("click", (event) => {
+        if (!event.target.closest("#btnApiConfig")) return;
+        els.apiConfig.hidden = !els.apiConfig.hidden;
+      });
+    }
+    els.apiPreset.addEventListener("change", () => {
+      const preset = LLM_PRESETS[els.apiPreset.value] || LLM_PRESETS.custom;
+      if (preset.base_url) els.apiBase.value = preset.base_url;
+      if (preset.model) els.apiModel.value = preset.model;
+    });
+    $("#apiSave").addEventListener("click", () => {
+      readLlmFields();
+      localStorage.setItem("if5.llm.base", state.llm.base_url);
+      localStorage.setItem("if5.llm.model", state.llm.model);
+      if (els.liveModel.checked) {
+        toast(`已选择 ${state.llm.model || "服务端默认模型"}`);
+      } else {
+        toast("已保存；勾选“使用真实 API”后生效");
+      }
+      $("#apiSettings")?.close();
+    });
+    $("#apiTest")?.addEventListener("click", async () => {
+      const button = $("#apiTest");
+      readLlmFields();
+      const config = {};
+      if (state.llm.base_url) config.base_url = state.llm.base_url;
+      if (state.llm.model) config.model = state.llm.model;
+      if (state.llm.api_key) config.api_key = state.llm.api_key;
+      button.disabled = true;
+      button.textContent = "测试中…";
+      try {
+        const response = await fetch("/api/llm/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify({ llm: config }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body?.error?.message || `服务返回 ${response.status}`);
+        toast(`连接成功：${body.model || "模型"}，返回 ${body.questions} 个澄清问题`);
+      } catch (error) {
+        toast(`连接失败：${error.message}`);
+      } finally {
+        button.disabled = false;
+        button.textContent = "测试连接";
+      }
+    });
+    $("#apiClear").addEventListener("click", () => {
+      state.llm = { base_url: "", model: "", api_key: "" };
+      els.apiKey.value = "";
+      els.apiBase.value = "";
+      els.apiModel.value = "";
+      localStorage.removeItem("if5.llm.base");
+      localStorage.removeItem("if5.llm.model");
+      toast("已清除本地模型配置");
+    });
+    els.liveModel.addEventListener("change", () => {
+      if (els.liveModel.checked && !els.apiKey.value) {
+        toast("真实 API 已开启：填写 Key，或留空使用服务端环境变量");
+      }
+    });
+  }
+
+  if (els.clarifyStage) {
+    $("#btnClarifyBack").addEventListener("click", () => { showOnly(els.empty); setFlow(1); });
+    $("#btnClarifySkip").addEventListener("click", () => { state.clarifyAnswers = {}; generate(); });
+    $("#btnClarifyGenerate").addEventListener("click", () => { generate(); });
+  }
 
   els.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1176,12 +1716,52 @@ function bind() {
   els.specResult.addEventListener("click", (event) => {
     const link = event.target.closest("[data-goto]");
     if (link) switchSpecTab(link.dataset.goto);
+    if (event.target.closest("#btnConfirmSpec")) confirmSpec();
   });
 
   els.specPrint.addEventListener("click", () => {
     switchSpecTab("doc");
     setTimeout(() => window.print(), 60);
   });
+
+  if (els.specReview) {
+    els.specReview.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-find]");
+      if (!button || !els.specPaper) return;
+      const needle = button.dataset.find;
+      const nodes = Array.from(els.specPaper.querySelectorAll("*"))
+        .filter((node) => node.children.length === 0 && node.textContent.includes(needle));
+      if (!nodes.length) {
+        toast(`正文中暂未找到 ${needle}`);
+        return;
+      }
+      nodes[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      nodes[0].classList.add("issue-highlight");
+      setTimeout(() => nodes[0].classList.remove("issue-highlight"), 1800);
+    });
+  }
+
+  if (els.specDlHtml) {
+    els.specDlHtml.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (!state.spec) return;
+      const title = state.spec.title || "IdeaFlow 设计规格";
+      const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">`
+        + `<title>${escapeHtml(title)}</title><style>`
+        + `body{max-width:860px;margin:48px auto;padding:0 24px;font:15px/1.75 Inter,"PingFang SC","Microsoft YaHei",sans-serif;color:#20242C}`
+        + `h1{font-size:30px;line-height:1.25}h2{margin-top:36px;border-bottom:1px solid #E6E8EC;padding-bottom:8px;font-size:22px}`
+        + `h3{margin-top:24px;font-size:17px}table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}`
+        + `th,td{border:1px solid #E6E8EC;padding:7px 9px;text-align:left;vertical-align:top}th{background:#F7F8FA}`
+        + `code{background:#F1F3F7;border-radius:4px;padding:1px 4px}blockquote{border-left:3px solid #4F6EF7;margin:0;padding-left:14px;color:#737B88}`
+        + `</style></head><body>${state.spec.html || ""}</body></html>`;
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${String(title).replace(/[\\/:*?"<>|]+/g, "-")}.html`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    });
+  }
 
   els.rounds.addEventListener("input", () => { els.roundsOut.textContent = els.rounds.value; });
   els.threshold.addEventListener("input", () => { els.thresholdOut.textContent = `${els.threshold.value}%`; });
@@ -1245,6 +1825,10 @@ const presetIdea = query.get("idea");
 const presetCase = query.get("case");
 const autoRun = query.get("auto") === "1";
 
+state.llm.base_url = localStorage.getItem("if5.llm.base") || "";
+state.llm.model = localStorage.getItem("if5.llm.model") || "";
+syncLlmFields();
+
 setMode(query.get("mode") === "spec" ? "spec" : "proposal");
 if (query.get("live") === "1") els.liveModel.checked = true;
 bind();
@@ -1255,6 +1839,15 @@ if (presetIdea) {
   els.idea.value = presetIdea.slice(0, 1200);
   els.ideaCount.textContent = `${els.idea.value.length} / 1200`;
   query.getAll("constraint").forEach(addConstraint);
+}
+
+if (query.get("settings") === "1") {
+  setTimeout(() => $("#btnOpenSettings")?.click(), 0);
+}
+
+if (query.get("clarify") === "1") {
+  setMode("spec");
+  setTimeout(() => clarifySpec(), 0);
 }
 
 /* 演示链接：/?mode=spec&case=campus-books-tight&auto=1 直接出规格 */

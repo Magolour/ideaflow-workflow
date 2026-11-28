@@ -25,6 +25,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from .agents import LLMAgent
+from .confirm import confirm_spec
 from .contracts import (CONSENSUS_LABEL, DIVERGENCE_LABEL, SEVERITY_LABEL,
                         STANCE_LABEL, ContractError)
 from .pipeline import clarify_questions, run
@@ -75,6 +76,7 @@ class Job:
     flow: str = "proposal"
     case: str | None = None
     live: bool = False
+    llm: dict[str, str] | None = None
     state: str = "queued"
     logs: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, str] | None = None
@@ -166,7 +168,7 @@ class JobStore:
         agent = None
         if job.live:
             try:
-                agent = LLMAgent()
+                agent = self._agent(job)
             except ContractError as error:
                 self._fail(job, error.code, error.message, error.path)
                 return
@@ -197,7 +199,7 @@ class JobStore:
         agent = None
         if job.live:
             try:
-                agent = LLMAgent()
+                agent = self._agent(job)
             except ContractError as error:
                 self._fail(job, error.code, error.message, error.path)
                 return
@@ -218,6 +220,15 @@ class JobStore:
         job.finished_at = time.time()
         job.result = result.payload
         job.state = "done"
+
+    @staticmethod
+    def _agent(job: Job) -> "LLMAgent":
+        config = job.llm or {}
+        return LLMAgent(
+            base_url=config.get("base_url") or None,
+            api_key=config.get("api_key") or None,
+            model=config.get("model") or None,
+        )
 
     def _fail(self, job: Job, code: str, message: str, path: str) -> None:
         job.log(f"失败：{code} {message}", self)
@@ -309,6 +320,30 @@ def _clean_text(value: Any, *, field: str, limit: int) -> str:
     return text
 
 
+
+def _llm_options(payload: dict[str, Any]) -> dict[str, str]:
+    """只接受调用方显式提供的三项配置；不落盘、不回显。"""
+    raw = payload.get("llm")
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise ApiError(400, "INVALID_FIELD", "llm 必须是对象")
+    allowed = ("base_url", "api_key", "model")
+    options: dict[str, str] = {}
+    for key in allowed:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise ApiError(400, "INVALID_FIELD", f"llm.{key} 必须是字符串")
+        value = value.strip()
+        if len(value) > 500:
+            raise ApiError(400, "INVALID_FIELD", f"llm.{key} 过长")
+        if value:
+            options[key] = value
+    return options
+
+
 def _parse_generate(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ApiError(400, "INVALID_BODY", "请求体必须是 JSON 对象")
@@ -372,7 +407,7 @@ def _parse_generate(payload: Any) -> dict[str, Any]:
 
     return {"idea": idea or case or "", "constraints": constraints, "answers": answers,
             "max_rounds": max_rounds, "threshold": round(threshold, 2),
-            "flow": flow, "case": case, "live": live}
+            "flow": flow, "case": case, "live": live, "llm": _llm_options(payload)}
 
 
 # ---------------------------------------------------------------- HTTP 层
@@ -497,6 +532,8 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                     self._handle_case(parse_qs(route.query))
                 elif route.path == "/api/job":
                     self._handle_job(parse_qs(route.query))
+                elif route.path == "/api/job/events":
+                    self._handle_job_events(parse_qs(route.query))
                 elif route.path == "/api/runs":
                     self._send_json(HTTPStatus.OK, {"runs": scan_runs(base)})
                 elif route.path == "/api/run":
@@ -516,7 +553,8 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
         def do_POST(self) -> None:  # noqa: N802
             route = urlparse(self.path)
             try:
-                if route.path not in ("/api/generate", "/api/spec/answer", "/api/clarify"):
+                if route.path not in ("/api/generate", "/api/spec/answer", "/api/clarify",
+                                      "/api/spec/confirm", "/api/llm/test"):
                     raise ApiError(404, "NOT_FOUND", f"找不到 {route.path}")
                 payload = self._read_json()
                 if route.path == "/api/spec/answer":
@@ -524,6 +562,12 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                     return
                 if route.path == "/api/clarify":
                     self._handle_clarify(payload)
+                    return
+                if route.path == "/api/llm/test":
+                    self._handle_llm_test(payload)
+                    return
+                if route.path == "/api/spec/confirm":
+                    self._handle_spec_confirm(payload)
                     return
                 options = _parse_generate(payload)
                 job = store.create(**options)
@@ -534,6 +578,37 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
                 self._send_error(error)
 
         # ---------- 处理函数 ----------
+
+        def _handle_spec_confirm(self, payload: Any) -> None:
+            if not isinstance(payload, dict):
+                raise ApiError(400, "INVALID_BODY", "请求体必须是对象")
+            run_id = str(payload.get("run_id") or "").strip()
+            directory = store.run_dir(run_id)
+            if directory is None:
+                raise ApiError(404, "UNKNOWN_RUN", "找不到该次运行")
+            try:
+                result = confirm_spec(directory, actor=str(payload.get("actor") or ""),
+                                      reason=str(payload.get("reason") or ""))
+            except ContractError as error:
+                status = {"UNKNOWN_RUN": 404, "AUDIT_BLOCKED": 409,
+                          "UNRESOLVED_QUESTION": 409}.get(error.code, 400)
+                raise ApiError(status, error.code, error.message) from error
+            self._send_json(HTTPStatus.OK, result)
+
+        def _handle_llm_test(self, payload: Any) -> None:
+            if not isinstance(payload, dict):
+                raise ApiError(400, "INVALID_BODY", "请求体必须是对象")
+            try:
+                agent = LLMAgent(**_llm_options(payload))
+                rows = clarify_questions("连接测试：一个最小需求", [], agent=agent)
+            except ContractError as error:
+                raise ApiError(422, error.code, error.message) from error
+            except Exception as error:  # noqa: BLE001 - 网络错误统一回给设置页
+                raise ApiError(502, "LLM_UNREACHABLE", str(error)) from None
+            self._send_json(HTTPStatus.OK, {
+                "ok": True, "model": agent.model, "questions": len(rows),
+                "message": "连接成功，模型返回了可校验的澄清结果",
+            })
 
         def _handle_clarify(self, payload: Any) -> None:
             if not isinstance(payload, dict):
@@ -547,7 +622,7 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
             agent = None
             if payload.get("live"):
                 try:
-                    agent = LLMAgent()
+                    agent = LLMAgent(**_llm_options(payload))
                 except ContractError as error:
                     raise ApiError(400, error.code, error.message) from error
             try:
@@ -589,6 +664,35 @@ def make_server(host: str, port: int, runs_dir: str | Path, *,
             title = next((line.strip().lstrip("#").strip()
                           for line in raw.splitlines() if line.strip()), name)
             self._send_json(HTTPStatus.OK, {"name": name, "title": title, "text": text})
+
+        def _handle_job_events(self, query: dict[str, list[str]]) -> None:
+            job_id = (query.get("id") or [""])[0]
+            job = store.get(job_id)
+            if job is None:
+                raise ApiError(404, "UNKNOWN_JOB", "任务不存在或已过期")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            sent = 0
+            try:
+                while True:
+                    logs = job.view(include_result=False)["logs"]
+                    for row in logs[sent:]:
+                        body = json.dumps({"type": "log", **row}, ensure_ascii=False)
+                        self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+                    sent = len(logs)
+                    if job.state in ("done", "error"):
+                        body = json.dumps({"type": "state", "state": job.state,
+                                           "error": job.error}, ensure_ascii=False)
+                        self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        return
+                    self.wfile.flush()
+                    time.sleep(0.4)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def _handle_job(self, query: dict[str, list[str]]) -> None:
             job_id = (query.get("id") or [""])[0]

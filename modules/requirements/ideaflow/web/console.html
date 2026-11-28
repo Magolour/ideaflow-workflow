@@ -89,11 +89,51 @@
   .pill{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;background:var(--chip);color:var(--muted)}
   .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
 </style>
+<style>
+  /* 与主工作台统一的浅色控制台主题 */
+  :root{
+    color-scheme: light;
+    --bg:#F7F8FA; --panel:#FFFFFF; --panel2:#F7F8FA; --line:#E6E8EC;
+    --line-soft:#EFF1F5;
+    --text:#20242C; --muted:#737B88; --accent:#4F6EF7; --ok:#16A36A;
+    --warn:#E6A23C; --bad:#DC5252; --chip:#F1F3F7;
+  }
+  body{background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:16px 28px}
+  h1{font-size:18px;letter-spacing:-.02em}
+  .sub{color:var(--muted)}
+  .sub a{color:var(--accent);text-decoration:none}
+  .sub a:hover{text-decoration:underline}
+  .app{max-width:1560px;padding:20px 28px 60px}
+  aside.side{background:#fff;border-color:var(--line);border-radius:12px}
+  .run{background:#fff;border-color:var(--line);border-radius:9px}
+  .run:hover{border-color:#C9D3F5}.run.active{background:#EEF2FF;border-color:var(--accent)}
+  button,.file-btn{background:#fff;color:var(--text);border-color:var(--line);border-radius:8px}
+  button:hover,.file-btn:hover{border-color:var(--accent);color:var(--accent)}
+  button.active{background:#EEF2FF;border-color:var(--accent);color:var(--accent)}
+  .drop{background:#fff;border-color:#D9DFEA}
+  .drop.over{background:#F5F8FF;border-color:var(--accent)}
+  .tabs .tab{background:#fff;color:var(--muted)}
+  .tabs .tab.active{background:#EEF2FF;border-color:var(--accent);color:var(--accent)}
+  .metric,.card,.consensus,.detail,.graph-wrap,.timeline{background:#fff;border-color:var(--line);border-radius:11px}
+  table{background:#fff;border-color:var(--line)}
+  th{background:#F7F8FA;color:var(--muted)}
+  .claim{background:#F7F8FA;border-color:var(--line)}
+  .claim:hover{border-color:#C9D3F5}.claim.selected{background:#EEF2FF;border-color:var(--accent)}
+  .obj{background:#FFF8E8;border-left-color:var(--warn)}
+  .obj.blocking{background:#FDF0F0;border-left-color:var(--bad)}
+  .toolbar input,.toolbar select,.newrun textarea{background:#fff;color:var(--text);border-color:var(--line);border-radius:8px}
+  .empty{border-color:var(--line);color:var(--muted)}
+  .node rect{fill:#fff;stroke:#C9D3F5}.node text{fill:#20242C}.node .sub{fill:#737B88}
+  .edge{stroke:#B9C4D8}.edge.hi{stroke:var(--accent)}
+  .event{border-bottom-color:var(--line-soft)}.event .actor{color:var(--accent)}
+  .chip{background:var(--chip);color:#596273}.chip.must{background:#FDECEC;color:#C33A3A}
+</style>
 </head>
 <body>
 <header>
-  <h1>IdeaFlow · 需求控制台</h1>
-  <div class="sub">拖入一次运行的 blackboard.json / features.json / spec.json / events.jsonl，按讨论、追溯、规格、时间线查看。</div>
+  <h1>IdeaFlow · 运行历史</h1>
+  <div class="sub"><a href="/">← 返回工作台</a> · 拖入一次运行的 blackboard.json / features.json / spec.json / events.jsonl，按讨论、追溯、规格、时间线查看。</div>
 </header>
 <div class="app">
 <aside class="side">
@@ -411,6 +451,7 @@ async function refreshRuns(){
       <div class="meta">${esc(r.flow)} ｜ ${esc(r.status)} ｜ 功能 ${r.features} ｜ 模块 ${r.modules}</div>
     </div>`).join("");
     holder.querySelectorAll(".run").forEach(node=>node.addEventListener("click",()=>openRun(node.dataset.id)));
+    if(!state.board) openRun(runs[0].id);
   }catch(err){holder.innerHTML=`<div class="empty">读取失败：${esc(err.message)}</div>`}
 }
 
