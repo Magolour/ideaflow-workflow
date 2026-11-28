@@ -147,7 +147,8 @@
             }
           },
           "estimate_days": {
-            "type": "number"
+            "type": ["number", "null"],
+            "description": "无法从草案得到真实估算时为 null，并在 open_items 说明"
           },
           "deliverable": {
             "type": "string"
